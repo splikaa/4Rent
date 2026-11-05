@@ -140,24 +140,34 @@ export async function recognizeSubMeterReading(
   imageDataUrl: string,
   onProgress?: (pct: number) => void
 ): Promise<OcrScanResult> {
-  const result = await Tesseract.recognize(imageDataUrl, 'eng', {
-    logger: (m) => {
-      if (m.status === 'recognizing text' && onProgress) {
-        onProgress(Math.round((m.progress || 0) * 100));
-      }
-    },
-  });
+  try {
+    const result = await Tesseract.recognize(imageDataUrl, 'eng', {
+      logger: (m) => {
+        if (m.status === 'recognizing text' && onProgress) {
+          onProgress(Math.round((m.progress || 0) * 100));
+        }
+      },
+    });
 
-  const rawText = result.data.text || '';
-  const confidence = Math.round(result.data.confidence || 0);
-  const reading = extractMeterDigitsFromOcrText(rawText);
+    const rawText = result.data.text || '';
+    const confidence = Math.round(result.data.confidence || 0);
+    const reading = extractMeterDigitsFromOcrText(rawText);
 
-  return {
-    reading,
-    rawText: rawText.trim(),
-    confidence: reading !== null ? Math.max(confidence, 88) : confidence,
-    processedImageDataUrl: imageDataUrl,
-  };
+    return {
+      reading,
+      rawText: rawText.trim(),
+      confidence: reading !== null ? Math.max(confidence, 88) : confidence,
+      processedImageDataUrl: imageDataUrl,
+    };
+  } catch (err) {
+    console.warn('Tesseract OCR engine encountered an issue:', err);
+    return {
+      reading: null,
+      rawText: '',
+      confidence: 0,
+      processedImageDataUrl: imageDataUrl,
+    };
+  }
 }
 
 /**

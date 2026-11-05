@@ -22,3 +22,4 @@ create policy "Allow public sync access by property_code"
 
 -- Enable Realtime publication so desktop and mobile react instantly to changes
 alter publication supabase_realtime add table public.four_rent_sync;
+

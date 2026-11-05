@@ -67,3 +67,22 @@ export async function loadSnapshotFromIndexedDb(): Promise<AppDatabaseSnapshot |
   }
 }
 
+/**
+ * Completely clears the stored persistent database snapshot from IndexedDB.
+ */
+export async function clearSnapshotFromIndexedDb(): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.delete(PRIMARY_KEY);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+  } catch {
+    // Ignore IndexedDB delete error
+  }
+}
+

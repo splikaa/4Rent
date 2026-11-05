@@ -89,7 +89,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   // OCR & Camera state
   const [scanTab, setScanTab] = useState<'upload' | 'camera' | 'simulate'>(
-    'simulate'
+    'upload'
   );
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
@@ -149,6 +149,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const startCamera = async () => {
     setOcrStatusMsg(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setOcrStatusMsg(
+        'Camera access is not available in this browser context (requires HTTPS or localhost). Please use Photo Upload.'
+      );
+      setScanTab('upload');
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -164,9 +171,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       }
     } catch {
       setOcrStatusMsg(
-        'Camera permission denied or no camera found. Use Photo Upload or Simulated Sub-Meter OCR instead.'
+        'Camera permission was denied or device camera is busy. Please use Photo Upload instead.'
       );
-      setScanTab('simulate');
+      setScanTab('upload');
     }
   };
 

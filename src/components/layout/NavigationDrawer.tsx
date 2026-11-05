@@ -19,7 +19,6 @@ interface NavigationDrawerProps {
   onCloseMobile: () => void;
   onSelectTab: (tab: NavigationTab) => void;
   onLockApp: () => void;
-  onLoadSampleData?: () => void;
   hasRooms: boolean;
 }
 
@@ -29,8 +28,6 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
   onCloseMobile,
   onSelectTab,
   onLockApp,
-  onLoadSampleData,
-  hasRooms,
 }) => {
   const navItems: {
     id: NavigationTab;
@@ -132,33 +129,11 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
           </span>
           <span>Exit App</span>
         </button>
-
-        {!hasRooms && onLoadSampleData && (
-          <div className="pt-4 px-2">
-            <div className="rounded-2xl bg-amber-500/10 border border-amber-500/25 p-3.5">
-              <p className="text-xs text-amber-200/90 font-medium leading-relaxed">
-                Want to explore 4Rent with sample apartments, dual sub-meter
-                proofs & bookings?
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  onLoadSampleData();
-                  onCloseMobile();
-                }}
-                className="mt-2.5 w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Load Demo Rooms & Bills
-              </button>
-            </div>
-          </div>
-        )}
       </nav>
 
       {/* Version & Developer Footer */}
       <div className="py-4 px-3 text-center text-xs font-medium text-slate-400 border-t border-[#1E2636] space-y-0.5">
-        <div className="font-bold text-amber-400">4Rent v1.2.0</div>
+        <div className="font-bold text-amber-400">4Rent v1.3.0</div>
         <div className="text-[11px] text-slate-500">Developed by splikaa</div>
       </div>
     </div>

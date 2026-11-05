@@ -71,8 +71,13 @@ export function subscribeToRealtimeSync(
     });
 
     channel.on('broadcast', { event: 'db_update' }, (payload) => {
-      if (payload?.payload?.snapshot) {
-        onRemoteSnapshot(payload.payload.snapshot as AppDatabaseSnapshot);
+      try {
+        const snap = payload?.payload?.snapshot;
+        if (snap && typeof snap === 'object' && Array.isArray(snap.rooms)) {
+          onRemoteSnapshot(snap as AppDatabaseSnapshot);
+        }
+      } catch (err) {
+        console.warn('Realtime sync payload parsing error:', err);
       }
     });
 
@@ -123,9 +128,9 @@ export async function pushSnapshotToCloud(
     // Non-blocking for offline or websocket transition
   }
 
-  // 2. Persist to Postgres database table `public.four_rent_sync`
+  // 2. Persist to Postgres database table `public.four_rent_sync` with timeout
   try {
-    const { error } = await client.from('four_rent_sync').upsert(
+    const upsertPromise = client.from('four_rent_sync').upsert(
       {
         property_code: propCode,
         snapshot: payloadSnapshot,
@@ -133,6 +138,21 @@ export async function pushSnapshotToCloud(
       },
       { onConflict: 'property_code' }
     );
+
+    const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) =>
+      setTimeout(
+        () =>
+          resolve({
+            error: { message: 'Cloud sync timed out after 8s.' },
+          }),
+        8000
+      )
+    );
+
+    const { error } = (await Promise.race([
+      upsertPromise,
+      timeoutPromise,
+    ])) as any;
 
     if (error) {
       return {
@@ -173,11 +193,30 @@ export async function pullSnapshotFromCloud(
   }
 
   try {
-    const { data, error } = await client
+    const selectPromise = client
       .from('four_rent_sync')
       .select('snapshot, updated_at')
       .eq('property_code', config.propertyCode || '4RENT-MAIN')
       .maybeSingle();
+
+    const timeoutPromise = new Promise<{
+      data: null;
+      error: { message: string };
+    }>((resolve) =>
+      setTimeout(
+        () =>
+          resolve({
+            data: null,
+            error: { message: 'Cloud pull timed out after 8s.' },
+          }),
+        8000
+      )
+    );
+
+    const { data, error } = (await Promise.race([
+      selectPromise,
+      timeoutPromise,
+    ])) as any;
 
     if (error) {
       return { ok: false, message: `Supabase Error: ${error.message}` };

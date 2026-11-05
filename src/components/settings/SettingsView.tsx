@@ -37,7 +37,6 @@ interface SettingsViewProps {
   onBack: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
   onReloadAllData: () => void;
-  onLoadSampleData: () => void;
   onResetAllData: () => void;
   onOpenSecuritySetup: () => void;
   onInstallDesktopApp?: () => void;
@@ -48,7 +47,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onBack,
   onUpdateSettings,
   onReloadAllData,
-  onLoadSampleData,
   onResetAllData,
   onOpenSecuritySetup,
   onInstallDesktopApp,
@@ -537,13 +535,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* 4. Local Offline Backup, Demo Data & Reset */}
+        {/* 4. Local Offline Backup & Reset */}
         <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 sm:p-6 space-y-4">
           <div className="flex items-center gap-2.5 pb-3 border-b border-[#20293A]">
             <Database className="w-5 h-5 text-emerald-400" />
             <div>
               <h2 className="text-base font-bold text-white">
-                Database Backup, Demo Data & Reset
+                Database Backup & Reset
               </h2>
               <p className="text-xs text-slate-400">
                 Export or restore your entire 4Rent database as a portable JSON
@@ -581,20 +579,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <button
               type="button"
-              onClick={onLoadSampleData}
-              className="px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>Load Demo Apartment Data</span>
-            </button>
-
-            <button
-              type="button"
               onClick={onResetAllData}
               className="px-4 py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer ml-auto"
             >
               <Trash2 className="w-4 h-4" />
-              <span>Reset to Empty State</span>
+              <span>Reset Database to Empty</span>
             </button>
           </div>
         </div>

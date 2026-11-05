@@ -9,7 +9,6 @@ import {
   TenantHistoryEntry,
 } from './types/rental';
 import {
-  createSampleDemoData,
   DEFAULT_SETTINGS,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
@@ -24,7 +23,10 @@ import {
   saveSettings,
   saveTenantHistory,
 } from './services/storageService';
-import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
+import {
+  clearSnapshotFromIndexedDb,
+  loadSnapshotFromIndexedDb,
+} from './services/idbDatabase';
 import {
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
@@ -724,21 +726,12 @@ export function App() {
     triggerOptionalCloudSync();
   };
 
-  const handleLoadSampleData = () => {
-    const demo = createSampleDemoData(settings.defaultElectricRate);
-    setRooms(demo.rooms);
-    setBills(demo.bills);
-    setInquiries(demo.inquiries);
-    setTenantHistory(demo.history);
-    triggerOptionalCloudSync();
-  };
-
   const handleResetAllData = () => {
     setRooms([]);
     setBills([]);
     setInquiries([]);
     setTenantHistory([]);
-    setSettings({
+    const resetSettings: AppSettings = {
       ...DEFAULT_SETTINGS,
       security: {
         isSetupComplete: true,
@@ -747,7 +740,30 @@ export function App() {
         pinCode: settings.security.pinCode || '1234',
       },
       remindersPromptShown: true,
-    });
+    };
+    setSettings(resetSettings);
+    saveRooms([]);
+    saveBills([]);
+    saveInquiries([]);
+    saveTenantHistory([]);
+    saveSettings(resetSettings);
+    clearSnapshotFromIndexedDb();
+
+    if (
+      resetSettings.cloudSync.enabled &&
+      resetSettings.cloudSync.supabaseUrl &&
+      resetSettings.cloudSync.supabaseAnonKey
+    ) {
+      pushSnapshotToCloud(resetSettings.cloudSync, {
+        version: '1.3.0',
+        exportedAt: new Date().toISOString(),
+        rooms: [],
+        bills: [],
+        inquiries: [],
+        tenantHistory: [],
+        settings: resetSettings,
+      });
+    }
     setActiveTab('dashboard');
   };
 
@@ -840,7 +856,6 @@ export function App() {
         onCloseMobile={() => setIsDrawerOpen(false)}
         onSelectTab={(tab) => setActiveTab(tab)}
         onLockApp={() => setIsLocked(true)}
-        onLoadSampleData={handleLoadSampleData}
         hasRooms={rooms.filter((r) => !r.isArchived).length > 0}
       />
 
@@ -863,7 +878,6 @@ export function App() {
               setAdvanceModalRoomId(room.id)
             }
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
-            onLoadSampleData={handleLoadSampleData}
           />
         )}
 
@@ -946,7 +960,6 @@ export function App() {
             onBack={() => setActiveTab('dashboard')}
             onUpdateSettings={handleUpdateSettings}
             onReloadAllData={handleReloadAllData}
-            onLoadSampleData={handleLoadSampleData}
             onResetAllData={handleResetAllData}
             onOpenSecuritySetup={() => setShowSecuritySetup(true)}
             onInstallDesktopApp={handleInstallDesktopApp}

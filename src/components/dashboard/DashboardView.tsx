@@ -40,7 +40,6 @@ interface DashboardViewProps {
   onSelectBillForReceipt: (bill: BillRecord) => void;
   onOpenAdvanceBalanceModal: (room: Room) => void;
   onSelectRoomDetails: (room: Room) => void;
-  onLoadSampleData: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -55,7 +54,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectBillForReceipt,
   onOpenAdvanceBalanceModal,
   onSelectRoomDetails,
-  onLoadSampleData,
 }) => {
   const [now, setNow] = useState(new Date());
 
@@ -324,22 +322,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Create a room using the buttons below to get started
           </p>
 
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+          <div className="mt-7 flex items-center justify-center">
             <button
               type="button"
               onClick={onOpenAddRoom}
-              className="px-5 py-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer"
+              className="px-6 py-3.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
               <span>Create First Room</span>
-            </button>
-            <button
-              type="button"
-              onClick={onLoadSampleData}
-              className="px-5 py-3 rounded-2xl bg-[#182030] hover:bg-[#222D42] border border-[#2B3852] text-slate-200 font-semibold text-sm flex items-center gap-2 transition cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Load Demo Apartment</span>
             </button>
           </div>
         </div>

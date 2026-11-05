@@ -93,7 +93,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const handleCopySummary = async () => {
     const summary = formatMessengerBillSummary(bill, settings.apartmentName);
-    await navigator.clipboard.writeText(summary);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(summary);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = summary;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
     setCopiedText(true);
     setShareFeedback(
       'Formatted bill summary copied! Ready to paste into Messenger.'
