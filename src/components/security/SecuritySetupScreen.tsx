@@ -15,13 +15,11 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
   const [pinStep, setPinStep] = useState<'create' | 'confirm'>('create');
   const [firstPin, setFirstPin] = useState('');
   const [currentPin, setCurrentPin] = useState('');
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRegisteringBio, setIsRegisteringBio] = useState(false);
 
   const handleRegisterFingerprint = async () => {
     setErrorMessage(null);
-    setStatusMessage(null);
     setIsRegisteringBio(true);
     const res = await registerDeviceBiometrics();
     setIsRegisteringBio(false);
@@ -31,12 +29,12 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
         isSetupComplete: true,
         lockEnabled: true,
         authMethod: 'fingerprint',
+        pinCode: '1234',
         webAuthnCredentialId: res.credentialId,
       });
     } else {
-      // Allow fallback or simulated biometric registration if desktop has no hardware sensor
       setErrorMessage(
-        `${res.message} You can create a 4-digit Passcode PIN instead or enable simulated biometric lock.`
+        `${res.message} You can create a 4-digit Passcode PIN instead or continue with Biometric Profile.`
       );
     }
   };
@@ -81,6 +79,7 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
       isSetupComplete: true,
       lockEnabled: false,
       authMethod: 'none',
+      pinCode: '1234',
     });
   };
 
@@ -98,9 +97,9 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
         </h1>
         <p className="text-sm sm:text-base text-slate-400 text-center mt-2.5 max-w-xs">
           {mode === 'menu'
-            ? 'Choose how you want to protect your application'
+            ? 'Choose how you want to protect your application & room deletion'
             : pinStep === 'create'
-            ? 'Enter a secure 4-digit numeric code to unlock 4Rent'
+            ? 'Enter a secure 4-digit numeric code to unlock & authorize room deletion'
             : 'Re-enter your 4-digit PIN to confirm'}
         </p>
 
@@ -114,6 +113,7 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
                   isSetupComplete: true,
                   lockEnabled: true,
                   authMethod: 'fingerprint',
+                  pinCode: '1234',
                   webAuthnCredentialId: 'simulated-biometric-id',
                 })
               }
@@ -124,17 +124,10 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
             </button>
           </div>
         )}
-
-        {statusMessage && (
-          <div className="mt-5 w-full rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 text-xs text-emerald-300 text-center">
-            {statusMessage}
-          </div>
-        )}
       </div>
 
       {mode === 'menu' ? (
         <div className="w-full max-w-md space-y-4 my-auto py-8">
-          {/* Card 1: Register Fingerprint (Matches Screenshot 1) */}
           <button
             type="button"
             disabled={isRegisteringBio}
@@ -146,7 +139,9 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-base sm:text-lg font-bold text-white group-hover:text-amber-400 transition">
-                {isRegisteringBio ? 'Scanning Biometrics...' : 'Register Fingerprint'}
+                {isRegisteringBio
+                  ? 'Scanning Biometrics...'
+                  : 'Register Fingerprint'}
               </div>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5 leading-relaxed">
                 Authenticate instantly using your device biometrics.
@@ -155,7 +150,6 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
             <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition shrink-0" />
           </button>
 
-          {/* Card 2: Create Passcode PIN (Matches Screenshot 1) */}
           <button
             type="button"
             onClick={() => {
@@ -176,7 +170,7 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
                 Create Passcode PIN
               </div>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5 leading-relaxed">
-                Choose a secure 4-digit numeric code to unlock.
+                Choose a secure 4-digit numeric code to unlock & remove rooms.
               </p>
             </div>
             <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition shrink-0" />
@@ -184,7 +178,6 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
         </div>
       ) : (
         <div className="w-full max-w-xs my-auto py-4 flex flex-col items-center">
-          {/* 4-dot indicator */}
           <div className="flex items-center gap-4 mb-8">
             {[0, 1, 2, 3].map((idx) => {
               const filled = currentPin.length > idx;
@@ -201,7 +194,6 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
             })}
           </div>
 
-          {/* Numeric Keypad */}
           <div className="grid grid-cols-3 gap-3.5 w-full">
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
               <button
@@ -249,10 +241,9 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
           onClick={handleSkipSecurity}
           className="text-xs sm:text-sm text-slate-500 hover:text-amber-400 transition py-2 px-4 cursor-pointer"
         >
-          Continue without lock screen (Can be changed in Settings)
+          Continue without lock screen (Default Room PIN: 1234)
         </button>
       </div>
     </div>
   );
 };
-

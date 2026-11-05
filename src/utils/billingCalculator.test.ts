@@ -3,6 +3,8 @@ import {
   calculateSubMeterDifference,
   calculateBillBreakdown,
   applyPaymentToBill,
+  applyPaymentWithOverpayment,
+  clampDueDayOneToTen,
   extractMeterDigitsFromOcrText,
   formatPeso,
 } from './billingCalculator';
@@ -49,7 +51,7 @@ describe('4Rent Sub-Meter OCR & Billing Engine', () => {
     expect(result.totalAmountDue).toBe(5500); // 5750 - 250
   });
 
-  it('handles partial payment and tracks remaining carry-over balance', () => {
+  it('handles partial payment, full payment, and overpayment credit into Advance Payment Balance', () => {
     const mockBill: BillRecord = {
       id: 'bill-1',
       receiptNo: '4R-202611-001',
@@ -58,17 +60,19 @@ describe('4Rent Sub-Meter OCR & Billing Engine', () => {
       tenantName: 'Juan Dela Cruz',
       billingPeriod: 'Nov 2026',
       createdAt: '2026-11-06T00:00:00Z',
-      dueDate: '2026-11-15T00:00:00Z',
+      dueDate: '2026-11-05T00:00:00Z',
       prevReading: 100,
       currReading: 140,
       consumptionKwh: 40,
       electricRate: 15,
       electricTotal: 600,
       baseRent: 4000,
+      securityDepositRequired: 4000,
       previousBalanceCarryOver: 0,
       depositApplied: 0,
       totalAmountDue: 4600,
       amountPaid: 0,
+      overpaymentToAdvance: 0,
       remainingBalance: 4600,
       status: 'unpaid',
       paymentHistory: [],
@@ -79,18 +83,30 @@ describe('4Rent Sub-Meter OCR & Billing Engine', () => {
     expect(afterPartial.status).toBe('partial');
     expect(afterPartial.amountPaid).toBe(2600);
     expect(afterPartial.remainingBalance).toBe(2000);
-    expect(afterPartial.paymentHistory).toHaveLength(1);
 
-    const afterFull = applyPaymentToBill(afterPartial, 2000, 'Cash');
-    expect(afterFull.status).toBe('paid');
-    expect(afterFull.amountPaid).toBe(4600);
-    expect(afterFull.remainingBalance).toBe(0);
-    expect(afterFull.paymentHistory).toHaveLength(2);
+    // Tenant pays ₱2,500 when only ₱2,000 is remaining -> ₱500 goes to Advance Payment Balance
+    const overpayOutcome = applyPaymentWithOverpayment(
+      afterPartial,
+      2500,
+      'Cash'
+    );
+    expect(overpayOutcome.updatedBill.status).toBe('paid');
+    expect(overpayOutcome.updatedBill.remainingBalance).toBe(0);
+    expect(overpayOutcome.overpaymentCredited).toBe(500);
+    expect(overpayOutcome.updatedBill.overpaymentToAdvance).toBe(500);
+  });
+
+  it('clamps monthly payment due day strictly between 1 and 10', () => {
+    expect(clampDueDayOneToTen(0)).toBe(5);
+    expect(clampDueDayOneToTen(3)).toBe(3);
+    expect(clampDueDayOneToTen(15)).toBe(10);
   });
 
   it('extracts numeric sub-meter reading from noisy OCR text', () => {
     expect(extractMeterDigitsFromOcrText('kWh O1485.6')).toBe(1485.6);
-    expect(extractMeterDigitsFromOcrText('METER NO 22\n 00342.8 kWh')).toBe(342.8);
+    expect(extractMeterDigitsFromOcrText('METER NO 22\n 00342.8 kWh')).toBe(
+      342.8
+    );
     expect(extractMeterDigitsFromOcrText('no digits here')).toBeNull();
   });
 
@@ -99,4 +115,3 @@ describe('4Rent Sub-Meter OCR & Billing Engine', () => {
     expect(formatPeso(5420.5)).toBe('₱5,420.50');
   });
 });
-

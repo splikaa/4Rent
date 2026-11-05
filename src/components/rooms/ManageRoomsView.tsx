@@ -1,42 +1,64 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
+  Archive,
   ArrowLeft,
+  Calendar,
   Camera,
   Edit3,
   History,
   Home,
+  Lock,
   MessageCircle,
   Phone,
+  ReceiptText,
   ShieldCheck,
   Trash2,
   UserMinus,
-  Zap,
+  Wallet,
 } from 'lucide-react';
-import { Room, TenantHistoryEntry } from '../../types/rental';
+import { BillRecord, Room } from '../../types/rental';
 import { formatPeso } from '../../utils/billingCalculator';
 
 interface ManageRoomsViewProps {
   rooms: Room[];
-  tenantHistory: TenantHistoryEntry[];
+  bills: BillRecord[];
+  globalElectricRate: number;
   onBack: () => void;
   onOpenAddRoom: () => void;
   onOpenEditRoom: (room: Room) => void;
-  onDeleteRoom: (roomId: string) => void;
-  onMoveOutTenant: (room: Room) => void;
+  onRequestDeleteRoomWithPin: (room: Room) => void;
+  onArchiveRoom: (roomId: string) => void;
+  onMoveOutTenant: (room: Room, reason: string) => void;
   onOpenScanMeter: (room: Room) => void;
+  onOpenRoomReceipt: (bill: BillRecord) => void;
+  onOpenAdvanceBalanceModal: (room: Room) => void;
+  onOpenArchiveCenter: () => void;
 }
 
 export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
   rooms,
-  tenantHistory,
+  bills,
+  globalElectricRate,
   onBack,
   onOpenAddRoom,
   onOpenEditRoom,
-  onDeleteRoom,
+  onRequestDeleteRoomWithPin,
+  onArchiveRoom,
   onMoveOutTenant,
   onOpenScanMeter,
+  onOpenRoomReceipt,
+  onOpenAdvanceBalanceModal,
+  onOpenArchiveCenter,
 }) => {
-  const [subTab, setSubTab] = useState<'rooms' | 'history'>('rooms');
+  const activeRooms = rooms.filter((r) => !r.isArchived);
+
+  const getRoomActiveReceipt = (room: Room): BillRecord | undefined => {
+    if (room.activeReceiptId) {
+      const match = bills.find((b) => b.id === room.activeReceiptId);
+      if (match) return match;
+    }
+    return bills.find((b) => b.roomId === room.id && !b.isArchived);
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0E14] pb-28">
@@ -55,89 +77,18 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
           Manage Rooms
         </h1>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setSubTab((prev) => (prev === 'rooms' ? 'history' : 'rooms'))
-            }
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition cursor-pointer ${
-              subTab === 'history'
-                ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold'
-                : 'bg-[#1B2230] text-slate-300 border-[#283246] hover:text-white'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {subTab === 'history' ? 'Back to Rooms' : 'Lease History'}
-            </span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onOpenArchiveCenter}
+          className="px-3 py-1.5 rounded-xl bg-[#1B2230] hover:bg-[#232D40] border border-[#283246] text-xs font-semibold text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+        >
+          <History className="w-3.5 h-3.5 text-amber-400" />
+          <span className="hidden sm:inline">Previous Tenants & Archive</span>
+        </button>
       </header>
 
       <div className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 flex flex-col">
-        {subTab === 'history' ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-white">
-                  Tenant Contract & Move-Out History
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Archived tenant leases and final sub-meter readings
-                </p>
-              </div>
-              <span className="text-xs font-mono-num text-slate-400">
-                {tenantHistory.length} records
-              </span>
-            </div>
-
-            {tenantHistory.length === 0 ? (
-              <div className="rounded-3xl bg-[#141A25] border border-[#222C3F] p-12 text-center">
-                <History className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-                <p className="text-base font-bold text-white">
-                  No archived tenant history yet
-                </p>
-                <p className="text-xs text-slate-400 mt-1">
-                  When a tenant moves out of a room, their contract dates and
-                  final kWh reading are logged here.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {tenantHistory.map((h) => (
-                  <div
-                    key={h.id}
-                    className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-amber-400">
-                        {h.roomName}
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono-num">
-                        {h.moveInDate} → {h.moveOutDate}
-                      </span>
-                    </div>
-                    <div className="text-base font-bold text-white">
-                      {h.tenantName}
-                    </div>
-                    <div className="text-xs text-slate-400">
-                      Phone: {h.phone || 'N/A'} • Final Sub-Meter:{' '}
-                      <strong className="text-slate-200 font-mono-num">
-                        {h.finalMeterReading.toFixed(1)} kWh
-                      </strong>
-                    </div>
-                    {h.notes && (
-                      <p className="text-xs text-slate-400 italic pt-1">
-                        “{h.notes}”
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : rooms.length === 0 ? (
+        {activeRooms.length === 0 ? (
           /* Exact Empty State from Screenshot 4 */
           <div className="flex-1 flex flex-col items-center justify-center text-center py-20 select-none">
             <button
@@ -159,8 +110,10 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {rooms.map((room) => {
+            {activeRooms.map((room) => {
               const isOccupied = room.status === 'occupied';
+              const activeReceipt = getRoomActiveReceipt(room);
+
               return (
                 <div
                   key={room.id}
@@ -173,7 +126,10 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           {room.name}
                         </h2>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {room.floorOrUnit || 'Standard Apartment Unit'}
+                          {room.floorOrUnit || 'Standard Apartment Unit'} • Rate:{' '}
+                          <strong className="text-amber-400 font-mono-num">
+                            {formatPeso(globalElectricRate)}/kWh
+                          </strong>
                         </p>
                       </div>
                       <span
@@ -197,9 +153,12 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           {formatPeso(room.monthlyRent)}
                         </span>
                       </div>
-                      <div className="rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5">
+                      <div
+                        className="rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5"
+                        title="Sub-Meter kWh continues even when tenant changes"
+                      >
                         <span className="text-[10px] uppercase text-slate-400 block">
-                          Sub-Meter
+                          Sub-Meter (Cont.)
                         </span>
                         <span className="text-sm font-bold text-amber-400 font-mono-num">
                           {room.lastMeterReading.toFixed(1)} kWh
@@ -207,37 +166,70 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                       </div>
                       <div className="rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5">
                         <span className="text-[10px] uppercase text-slate-400 block">
-                          Deposit Held
+                          Req. Deposit
                         </span>
                         <span className="text-sm font-bold text-emerald-400 font-mono-num">
                           {formatPeso(room.securityDeposit)}
                         </span>
                       </div>
-                      <div className="rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5">
-                        <span className="text-[10px] uppercase text-slate-400 block">
-                          Unpaid Due
+                      <button
+                        type="button"
+                        onClick={() => onOpenAdvanceBalanceModal(room)}
+                        className="rounded-xl bg-[#0F141D] hover:bg-[#172234] border border-emerald-500/30 p-2.5 text-left transition cursor-pointer"
+                        title="Click to Withdraw or Manage Tenant Advance Balance"
+                      >
+                        <span className="text-[10px] uppercase text-emerald-400 font-bold flex items-center justify-between">
+                          <span>Advance Bal.</span>
+                          <Wallet className="w-3 h-3" />
                         </span>
-                        <span
-                          className={`text-sm font-bold font-mono-num ${
-                            room.unpaidBalance > 0
-                              ? 'text-red-400'
-                              : 'text-slate-400'
-                          }`}
-                        >
-                          {formatPeso(room.unpaidBalance)}
+                        <span className="text-sm font-extrabold text-emerald-400 font-mono-num block">
+                          {formatPeso(room.advanceRent || 0)}
                         </span>
+                      </button>
+                    </div>
+
+                    {/* 1 Room = 1 Active Official Receipt Quick Bar */}
+                    <div className="mt-3 rounded-xl bg-[#101622] border border-[#222F46] px-3.5 py-2.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <ReceiptText className="w-4 h-4 text-amber-400 shrink-0" />
+                        {activeReceipt ? (
+                          <div className="text-xs truncate">
+                            <span className="font-bold text-white">
+                              Room Receipt #{activeReceipt.receiptNo}
+                            </span>
+                            <span className="text-slate-400 ml-1.5">
+                              ({activeReceipt.billingPeriod} •{' '}
+                              {formatPeso(activeReceipt.totalAmountDue)})
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            No active receipt generated yet for {room.name}
+                          </span>
+                        )}
                       </div>
+                      {activeReceipt && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenRoomReceipt(activeReceipt)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-bold text-xs shrink-0 transition cursor-pointer"
+                        >
+                          Open Receipt →
+                        </button>
+                      )}
                     </div>
 
                     {/* Tenant Information */}
                     {isOccupied && room.tenant ? (
-                      <div className="mt-4 rounded-xl bg-[#101520] border border-[#1E2738] p-3.5 space-y-1.5 text-xs">
+                      <div className="mt-3 rounded-xl bg-[#101520] border border-[#1E2738] p-3.5 space-y-1.5 text-xs">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-white text-sm">
                             {room.tenant.fullName}
                           </span>
-                          <span className="text-amber-400 font-semibold">
-                            Due every day {room.tenant.dueDayOfMonth}
+                          <span className="text-amber-400 font-semibold flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            Pay Window: 1st–10th (Day {room.tenant.dueDayOfMonth}
+                            )
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-3 text-slate-400">
@@ -265,23 +257,38 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-4 rounded-xl bg-[#101520] border border-dashed border-[#243044] p-3.5 text-xs text-slate-400 text-center">
-                        Room is currently vacant. Edit room to assign a new
-                        tenant.
+                      <div className="mt-3 rounded-xl bg-[#101520] border border-dashed border-[#243044] p-3 text-xs text-slate-400 text-center">
+                        Room is currently vacant. Sub-Meter continues at{' '}
+                        <strong className="text-amber-400 font-mono-num">
+                          {room.lastMeterReading.toFixed(1)} kWh
+                        </strong>
+                        .
                       </div>
                     )}
                   </div>
 
                   {/* Actions */}
                   <div className="mt-4 pt-3.5 border-t border-[#20293A] flex flex-wrap items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onOpenScanMeter(room)}
-                      className="px-4 py-2 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/10"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Scan Sub-Meter / Bill</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onOpenScanMeter(room)}
+                        className="px-3.5 py-2 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/10"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Scan Meter & Bill</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenAdvanceBalanceModal(room)}
+                        className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                        title="Withdraw or Manage Advance Balance"
+                      >
+                        <Wallet className="w-3.5 h-3.5" />
+                        <span>Advance</span>
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-1.5">
                       <button
@@ -295,20 +302,34 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                       {isOccupied && (
                         <button
                           type="button"
-                          onClick={() => onMoveOutTenant(room)}
+                          onClick={() =>
+                            onMoveOutTenant(
+                              room,
+                              'Stopped Paying Rent / Vacated (Moved to History)'
+                            )
+                          }
                           className="p-2 rounded-xl bg-[#1D2535] hover:bg-amber-500/20 text-amber-400 transition cursor-pointer"
-                          title="Archive Tenant Move-Out"
+                          title="Tenant Vacated / Stopped Paying Rent -> Move to Previous Tenant History"
                         >
                           <UserMinus className="w-4 h-4" />
                         </button>
                       )}
                       <button
                         type="button"
-                        onClick={() => onDeleteRoom(room.id)}
-                        className="p-2 rounded-xl bg-[#1D2535] hover:bg-red-500/20 text-red-400 transition cursor-pointer"
-                        title="Delete Room"
+                        onClick={() => onArchiveRoom(room.id)}
+                        className="p-2 rounded-xl bg-[#1D2535] hover:bg-blue-500/20 text-blue-400 transition cursor-pointer"
+                        title="Archive Room"
+                      >
+                        <Archive className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRequestDeleteRoomWithPin(room)}
+                        className="p-2 rounded-xl bg-[#1D2535] hover:bg-red-500/20 text-red-400 transition cursor-pointer flex items-center gap-0.5"
+                        title="Remove Room (Requires 4-Digit Security PIN)"
                       >
                         <Trash2 className="w-4 h-4" />
+                        <Lock className="w-2.5 h-2.5" />
                       </button>
                     </div>
                   </div>
@@ -336,4 +357,3 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
     </div>
   );
 };
-

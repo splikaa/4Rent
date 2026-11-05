@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Archive,
   BarChart3,
   BellRing,
   Building2,
   Calendar,
+  CalendarCheck,
   Camera,
   DoorOpen,
   FileSpreadsheet,
@@ -12,33 +14,46 @@ import {
   Plus,
   ReceiptText,
   Settings,
+  ShieldCheck,
   Sparkles,
   TrendingUp,
   User,
+  Wallet,
   Zap,
 } from 'lucide-react';
-import { BillRecord, NavigationTab, Room } from '../../types/rental';
+import {
+  BillRecord,
+  NavigationTab,
+  Room,
+  RoomInquiryBooking,
+} from '../../types/rental';
 import { formatPeso } from '../../utils/billingCalculator';
 
 interface DashboardViewProps {
   rooms: Room[];
   bills: BillRecord[];
+  inquiries: RoomInquiryBooking[];
+  globalElectricRate: number;
   onOpenDrawer: () => void;
   onNavigate: (tab: NavigationTab) => void;
   onOpenAddRoom: () => void;
   onOpenScanMeter: (room: Room) => void;
   onSelectBillForReceipt: (bill: BillRecord) => void;
+  onOpenAdvanceBalanceModal: (room: Room) => void;
   onLoadSampleData: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   rooms,
   bills,
+  inquiries,
+  globalElectricRate,
   onOpenDrawer,
   onNavigate,
   onOpenAddRoom,
   onOpenScanMeter,
   onSelectBillForReceipt,
+  onOpenAdvanceBalanceModal,
   onLoadSampleData,
 }) => {
   const [now, setNow] = useState(new Date());
@@ -62,15 +77,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     hour12: true,
   })}`;
 
-  const totalRooms = rooms.length;
-  const occupiedRooms = rooms.filter((r) => r.status === 'occupied').length;
-  const vacantRooms = rooms.filter((r) => r.status === 'vacant').length;
+  const activeRooms = rooms.filter((r) => !r.isArchived);
+  const activeBills = bills.filter((b) => !b.isArchived);
+
+  const totalRooms = activeRooms.length;
+  const occupiedRooms = activeRooms.filter(
+    (r) => r.status === 'occupied'
+  ).length;
+  const vacantRooms = activeRooms.filter((r) => r.status === 'vacant').length;
 
   const totalRevenuePaid = bills.reduce(
     (sum, b) => sum + (Number(b.amountPaid) || 0),
     0
   );
-  const totalUnpaidDue = bills.reduce(
+  const totalUnpaidDue = activeBills.reduce(
     (sum, b) => sum + (Number(b.remainingBalance) || 0),
     0
   );
@@ -79,13 +99,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     0
   );
 
-  // Rooms with unpaid balances or upcoming due dates
-  const roomsWithDueBalance = rooms.filter((r) => r.unpaidBalance > 0);
+  const roomsWithDueBalance = activeRooms.filter((r) => r.unpaidBalance > 0);
+  const pendingBookings = inquiries.filter(
+    (i) => i.status === 'booked' || i.status === 'inquiry'
+  );
+
+  const getRoomActiveReceipt = (room: Room): BillRecord | undefined => {
+    if (room.activeReceiptId) {
+      const match = bills.find((b) => b.id === room.activeReceiptId);
+      if (match) return match;
+    }
+    return activeBills.find((b) => b.roomId === room.id);
+  };
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-5 pb-24">
       {/* Top Header (Matches Screenshot 3) */}
-      <header className="flex items-start justify-between gap-4 mb-7">
+      <header className="flex items-start justify-between gap-4 mb-6">
         <div className="flex items-start gap-3.5">
           <button
             type="button"
@@ -103,18 +133,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mt-0.5">
               Dashboard
             </h1>
-            <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1.5">
-              <Calendar className="w-3.5 h-3.5 text-slate-500" />
-              <span>{formattedDateTime}</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-1.5">
+              <span className="inline-flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                {formattedDateTime}
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-bold font-mono-num">
+                Global Rate: {formatPeso(globalElectricRate)}/kWh
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 font-semibold">
+                Pay Schedule: Every 1st–10th
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          {rooms.length > 0 && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onNavigate('inquiries')}
+            className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-[#161C28] hover:bg-[#1E2636] border border-[#252F42] text-slate-200 font-bold text-xs transition cursor-pointer"
+          >
+            <CalendarCheck className="w-4 h-4 text-amber-400" />
+            <span>Inquiries & Bookings ({pendingBookings.length})</span>
+          </button>
+          {activeRooms.length > 0 && (
             <button
               type="button"
-              onClick={() => onOpenScanMeter(rooms[0])}
+              onClick={() => onOpenScanMeter(activeRooms[0])}
               className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition cursor-pointer"
             >
               <Camera className="w-4 h-4" />
@@ -135,9 +181,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* 3 Primary KPI Summary Cards (Matches Screenshot 3) */}
       <section
         aria-label="Room occupancy summary"
-        className="grid grid-cols-3 gap-3 sm:gap-5 mb-8"
+        className="grid grid-cols-3 gap-3 sm:gap-5 mb-7"
       >
-        {/* Total Card */}
         <button
           type="button"
           onClick={() => onNavigate('rooms')}
@@ -154,7 +199,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </button>
 
-        {/* Occupied Card */}
         <button
           type="button"
           onClick={() => onNavigate('rooms')}
@@ -171,7 +215,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </button>
 
-        {/* Vacant Card */}
         <button
           type="button"
           onClick={() => onNavigate('rooms')}
@@ -189,23 +232,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </button>
       </section>
 
-      {/* Due Balance Reminder Banner (when unpaid balances exist) */}
+      {/* Due Balance Reminder Banner */}
       {roomsWithDueBalance.length > 0 && (
-        <section className="mb-7 rounded-2xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent border border-amber-500/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <section className="mb-6 rounded-2xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent border border-amber-500/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start sm:items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
               <BellRing className="w-5 h-5 text-amber-400" />
             </div>
             <div>
               <h2 className="text-sm font-bold text-amber-300">
-                Active Balance Reminders ({roomsWithDueBalance.length}{' '}
+                1st–10th Monthly Payment Reminder ({roomsWithDueBalance.length}{' '}
                 {roomsWithDueBalance.length === 1 ? 'room' : 'rooms'})
               </h2>
               <p className="text-xs text-slate-300 mt-0.5">
                 {roomsWithDueBalance
                   .map((r) => `${r.name} (${formatPeso(r.unpaidBalance)})`)
                   .join(' • ')}{' '}
-                currently have unpaid carried-over balances.
+                have unpaid balances due between the 1st and 10th of the month.
               </p>
             </div>
           </div>
@@ -219,12 +262,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </section>
       )}
 
-      {/* Your Rooms Section Header (Matches Screenshot 3) */}
-      <div className="flex items-center justify-between mb-4">
+      {/* Your Rooms Section Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
           Your Rooms
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onOpenAddRoom}
@@ -232,6 +275,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Room</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('inquiries')}
+            className="px-3.5 py-1.5 rounded-full bg-[#161C28] hover:bg-[#1F2839] border border-[#28334A] text-xs font-semibold text-blue-300 hover:text-white transition cursor-pointer"
+          >
+            Inquiries & Book ({pendingBookings.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('archive')}
+            className="px-3.5 py-1.5 rounded-full bg-[#161C28] hover:bg-[#1F2839] border border-[#28334A] text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-1 transition cursor-pointer"
+          >
+            <Archive className="w-3 h-3" />
+            <span>Archive</span>
           </button>
           <button
             type="button"
@@ -244,7 +302,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Empty State (Matches Screenshot 3) OR Active Rooms Grid */}
-      {rooms.length === 0 ? (
+      {activeRooms.length === 0 ? (
         <div className="rounded-3xl bg-[#121722]/70 border border-[#1E2636] px-6 py-14 flex flex-col items-center text-center my-4">
           <div className="w-20 h-20 rounded-[24px] bg-[#241E14] border border-amber-500/20 flex items-center justify-center mb-5 shadow-inner">
             <div className="relative">
@@ -280,10 +338,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       ) : (
         <>
-          {/* Rooms Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
-            {rooms.map((room) => {
+            {activeRooms.map((room) => {
               const isOccupied = room.status === 'occupied';
+              const activeReceipt = getRoomActiveReceipt(room);
+
               return (
                 <div
                   key={room.id}
@@ -316,29 +375,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">Tenant</span>
                         <span className="font-semibold text-slate-200">
-                          {room.tenant?.fullName || '— No Tenant Assigned —'}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">Monthly Rent</span>
-                        <span className="font-bold text-white font-mono-num">
-                          {formatPeso(room.monthlyRent)}
+                          {room.tenant?.fullName || '— Vacant (Ready to Book) —'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">
-                          Last Sub-Meter Reading
+                          Rent / Req. Deposit
+                        </span>
+                        <span className="font-bold text-white font-mono-num">
+                          {formatPeso(room.monthlyRent)} /{' '}
+                          <span className="text-emerald-400">
+                            {formatPeso(room.securityDeposit)}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">
+                          Continuous Sub-Meter
                         </span>
                         <span className="font-bold text-amber-400 font-mono-num">
                           {room.lastMeterReading.toFixed(1)} kWh (@{' '}
-                          {formatPeso(room.electricRatePerKwh)}/kWh)
+                          {formatPeso(globalElectricRate)}/kWh)
                         </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">
+                          Withdrawable Advance
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onOpenAdvanceBalanceModal(room)}
+                          className="font-bold text-emerald-400 hover:underline font-mono-num inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Wallet className="w-3 h-3" />
+                          {formatPeso(room.advanceRent || 0)}
+                        </button>
                       </div>
                       {room.unpaidBalance > 0 && (
                         <div className="flex items-center justify-between text-red-400 pt-1">
-                          <span className="font-medium">
-                            Unpaid Carry-Over
-                          </span>
+                          <span className="font-medium">Unpaid Due</span>
                           <span className="font-extrabold font-mono-num">
                             {formatPeso(room.unpaidBalance)}
                           </span>
@@ -347,31 +422,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="mt-5 pt-3 border-t border-[#20293A] flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onOpenScanMeter(room)}
-                      className="flex-1 py-2.5 px-3 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>OCR Sub-Meter & Bill</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('rooms')}
-                      className="py-2.5 px-3 rounded-xl bg-[#1E2636] hover:bg-[#273146] text-slate-200 font-semibold text-xs transition cursor-pointer"
-                    >
-                      Details
-                    </button>
+                  {/* 1 Room = 1 Receipt Direct Access + Scan Button */}
+                  <div className="mt-4 pt-3 border-t border-[#20293A] flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onOpenScanMeter(room)}
+                        className="flex-1 py-2.5 px-3 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>OCR Sub-Meter & Bill</span>
+                      </button>
+
+                      {activeReceipt ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelectBillForReceipt(activeReceipt)}
+                          className="py-2.5 px-3 rounded-xl bg-[#1E2636] hover:bg-[#273146] text-amber-400 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                          title="Open this room's official receipt"
+                        >
+                          <ReceiptText className="w-3.5 h-3.5" />
+                          <span>Receipt</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onNavigate('rooms')}
+                          className="py-2.5 px-3 rounded-xl bg-[#1E2636] hover:bg-[#273146] text-slate-200 font-semibold text-xs transition cursor-pointer"
+                        >
+                          Manage
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Revenue & Sub-Meter Consumption Analytics Section */}
+          {/* Analytics Section */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Revenue Card */}
             <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2.5">
@@ -383,7 +473,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       Revenue & Collection Overview
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Paid revenue vs. unpaid carry-over balances
+                      1 Room = 1 Active Receipt • 2 Sub-Meter Proofs Included
                     </p>
                   </div>
                 </div>
@@ -415,44 +505,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* Collection Progress Bar */}
-              <div>
-                <div className="flex justify-between text-xs text-slate-400 mb-1.5">
-                  <span>Collection Efficiency</span>
-                  <span className="font-mono-num font-bold text-slate-200">
-                    {totalRevenuePaid + totalUnpaidDue > 0
-                      ? `${Math.round(
-                          (totalRevenuePaid /
-                            (totalRevenuePaid + totalUnpaidDue)) *
-                            100
-                        )}%`
-                      : '100%'}
-                  </span>
-                </div>
-                <div className="w-full h-3 rounded-full bg-[#0E131C] overflow-hidden flex">
-                  <div
-                    className="bg-emerald-500 h-full transition-all duration-500"
-                    style={{
-                      width: `${
-                        totalRevenuePaid + totalUnpaidDue > 0
-                          ? (totalRevenuePaid /
-                              (totalRevenuePaid + totalUnpaidDue)) *
-                            100
-                          : 100
-                      }%`,
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Recent Receipts Quick List */}
-              {bills.length > 0 && (
-                <div className="mt-5 pt-4 border-t border-[#20293A]">
-                  <div className="text-xs font-semibold text-slate-400 mb-2.5">
-                    Recent Official Receipts (Tap to Print / Share to Messenger)
+              {activeBills.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-[#20293A]">
+                  <div className="text-xs font-semibold text-slate-400 mb-2">
+                    Active Room Receipts (Tap to Print / Share Dual Sub-Meter
+                    Proof)
                   </div>
                   <div className="space-y-2">
-                    {bills.slice(0, 3).map((b) => (
+                    {activeBills.slice(0, 4).map((b) => (
                       <button
                         key={b.id}
                         type="button"
@@ -466,7 +526,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               {b.roomName} • {b.tenantName}
                             </span>
                             <span className="block text-[11px] text-slate-400">
-                              {b.receiptNo} • Δ {b.consumptionKwh.toFixed(1)} kWh
+                              {b.prevReading.toFixed(1)} →{' '}
+                              {b.currReading.toFixed(1)} kWh (Δ{' '}
+                              {b.consumptionKwh.toFixed(1)} kWh)
                             </span>
                           </div>
                         </div>
@@ -493,7 +555,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               )}
             </div>
 
-            {/* Electric Sub-Meter kWh Analytics Card */}
             <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
@@ -503,10 +564,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-white">
-                        Sub-Meter Electric Consumption (kWh)
+                        Continuous Sub-Meter Readings (kWh)
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Total billed usage: {totalKwhBilled.toFixed(1)} kWh
+                        Total billed usage: {totalKwhBilled.toFixed(1)} kWh @{' '}
+                        {formatPeso(globalElectricRate)}/kWh
                       </p>
                     </div>
                   </div>
@@ -514,14 +576,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
 
                 <div className="space-y-3.5 mt-3">
-                  {rooms.map((r) => {
+                  {activeRooms.map((r) => {
                     const roomBills = bills.filter((b) => b.roomId === r.id);
                     const roomKwh = roomBills.reduce(
                       (s, b) => s + b.consumptionKwh,
                       0
                     );
                     const maxKwh = Math.max(100, totalKwhBilled);
-                    const pct = Math.min(100, Math.round((roomKwh / maxKwh) * 100));
+                    const pct = Math.min(
+                      100,
+                      Math.round((roomKwh / maxKwh) * 100)
+                    );
 
                     return (
                       <div key={r.id} className="space-y-1">
@@ -529,7 +594,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <span className="font-semibold text-slate-200">
                             {r.name}{' '}
                             <span className="text-slate-500 font-normal">
-                              (Meter: {r.lastMeterReading.toFixed(1)} kWh)
+                              (Current Meter: {r.lastMeterReading.toFixed(1)}{' '}
+                              kWh)
                             </span>
                           </span>
                           <span className="font-mono-num font-bold text-amber-400">
@@ -550,12 +616,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               <div className="mt-6 pt-4 border-t border-[#20293A] flex items-center justify-between text-xs text-slate-400">
                 <span className="flex items-center gap-1.5">
-                  <FileSpreadsheet className="w-4 h-4 text-amber-400" />
-                  Formula: (Current kWh − Previous kWh) × Rate
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  Deposit Required • Overpayments → Advance Balance
                 </span>
                 <button
                   type="button"
-                  onClick={() => onOpenScanMeter(rooms[0])}
+                  onClick={() => onOpenScanMeter(activeRooms[0])}
                   className="font-bold text-amber-400 hover:underline cursor-pointer"
                 >
                   Open OCR Reader →
@@ -568,4 +634,3 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     </div>
   );
 };
-

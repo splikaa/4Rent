@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import {
   Check,
@@ -7,10 +7,10 @@ import {
   ExternalLink,
   Loader2,
   MessageCircle,
-  Printer,
-  Share2,
-  Sun,
   Moon,
+  Printer,
+  ShieldCheck,
+  Sun,
   X,
   Zap,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import {
   formatMessengerBillSummary,
   formatPeso,
 } from '../../utils/billingCalculator';
+import { generateSimulatedSubMeterDataUrl } from '../../services/ocrService';
 
 interface ReceiptModalProps {
   bill: BillRecord | null;
@@ -38,6 +39,23 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [copiedText, setCopiedText] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
+  // Ensure both Sub-Meter #1 (Previous) and Sub-Meter #2 (Current) always have clear visual proof images
+  const prevMeterProofImg = useMemo(() => {
+    if (!bill) return '';
+    return (
+      bill.prevMeterPhotoDataUrl ||
+      generateSimulatedSubMeterDataUrl(bill.prevReading)
+    );
+  }, [bill?.prevMeterPhotoDataUrl, bill?.prevReading]);
+
+  const currMeterProofImg = useMemo(() => {
+    if (!bill) return '';
+    return (
+      bill.meterPhotoDataUrl ||
+      generateSimulatedSubMeterDataUrl(bill.currReading)
+    );
+  }, [bill?.meterPhotoDataUrl, bill?.currReading]);
+
   if (!bill) return null;
 
   const generateReceiptPngDataUrl = async (): Promise<string | null> => {
@@ -47,7 +65,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       const dataUrl = await toPng(receiptRef.current, {
         cacheBust: true,
         pixelRatio: 2.5,
-        backgroundColor: receiptTheme === 'dark' ? '#0F141E' : '#FFFFFF',
+        backgroundColor: receiptTheme === 'dark' ? '#0D121B' : '#FFFFFF',
       });
       return dataUrl;
     } catch {
@@ -61,7 +79,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setShareFeedback(null);
     const dataUrl = await generateReceiptPngDataUrl();
     if (!dataUrl) {
-      setShareFeedback('Could not generate image. Use Print Receipt instead.');
+      setShareFeedback('Could not generate image. Use Print / PDF instead.');
       return;
     }
     const link = document.createElement('a');
@@ -70,7 +88,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }.png`;
     link.href = dataUrl;
     link.click();
-    setShareFeedback('Receipt PNG downloaded to your device!');
+    setShareFeedback('Official Receipt PNG downloaded!');
   };
 
   const handleCopySummary = async () => {
@@ -82,7 +100,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     await navigator.clipboard.writeText(summary);
     setCopiedText(true);
     setShareFeedback(
-      'Bill summary copied! You can paste it directly into Messenger.'
+      'Formatted bill summary copied! Ready to paste into Messenger.'
     );
     setTimeout(() => setCopiedText(false), 3000);
   };
@@ -95,14 +113,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       settings.paymentInstructions
     );
 
-    // 1. Always copy the formatted text summary so user can paste immediately
     try {
       await navigator.clipboard.writeText(summary);
     } catch {
-      // ignore clipboard error if restricted
+      // ignore clipboard restriction
     }
 
-    // 2. Try native Web Share API with PNG file (works on Android/iOS mobile browsers to share directly to Messenger app)
     const dataUrl = await generateReceiptPngDataUrl();
     if (dataUrl && navigator.share) {
       try {
@@ -114,7 +130,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           await navigator.share({
-            title: `${settings.apartmentName} — ${bill.roomName} Bill`,
+            title: `${settings.apartmentName} — ${bill.roomName} Official Receipt`,
             text: summary,
             files: [file],
           });
@@ -126,7 +142,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       }
     }
 
-    // 3. Desktop / Fallback: Download the PNG receipt & open Messenger thread (m.me/<username> or messenger.com)
     if (dataUrl) {
       const link = document.createElement('a');
       link.download = `4Rent-Receipt-${bill.receiptNo}.png`;
@@ -140,23 +155,19 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
     window.open(messengerTarget, '_blank', 'noopener,noreferrer');
     setShareFeedback(
-      'Receipt PNG downloaded & Bill Summary copied to clipboard! Paste (Ctrl+V) and attach the image in Messenger.'
+      'Receipt PNG downloaded & Bill Summary copied! Paste (Ctrl+V / Cmd+V) and attach the image in Messenger.'
     );
-  };
-
-  const handlePrintReceipt = () => {
-    window.print();
   };
 
   const isDark = receiptTheme === 'dark';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-3 sm:p-5 overflow-y-auto">
-      <div className="w-full max-w-2xl rounded-3xl bg-[#141A25] border border-[#263147] shadow-2xl overflow-hidden my-6">
-        {/* Top Action Header (hidden when printing) */}
-        <div className="no-print flex flex-wrap items-center justify-between gap-2 px-5 py-4 bg-[#192130] border-b border-[#263147]">
-          <div className="flex items-center gap-2.5">
-            <span className="text-base font-extrabold text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
+      <div className="w-full max-w-xl rounded-3xl bg-[#131924] border border-[#263147] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[95vh]">
+        {/* Top Action Header */}
+        <div className="no-print flex items-center justify-between gap-2 px-4 sm:px-5 py-3 bg-[#18202F] border-b border-[#263147] shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm sm:text-base font-extrabold text-white">
               Official Printable Receipt
             </span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-mono-num font-bold">
@@ -170,8 +181,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               onClick={() =>
                 setReceiptTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
               }
-              className="px-3 py-1.5 rounded-xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
-              title="Switch receipt style between Dark Digital Card and White Paper Print"
+              className="px-2.5 py-1.5 rounded-xl bg-[#0F141E] hover:bg-[#1E2738] border border-[#28334A] text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
             >
               {isDark ? (
                 <>
@@ -189,15 +199,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="w-9 h-9 rounded-xl bg-[#10151F] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+              className="w-8 h-8 rounded-xl bg-[#0F141E] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {shareFeedback && (
-          <div className="no-print mx-5 mt-4 px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 flex items-center justify-between">
+          <div className="no-print mx-4 mt-2.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 flex items-center justify-between shrink-0">
             <span>{shareFeedback}</span>
             <button
               type="button"
@@ -209,42 +219,42 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         )}
 
-        {/* Receipt Canvas Container */}
-        <div className="p-4 sm:p-6 max-h-[72vh] overflow-y-auto flex justify-center">
+        {/* Scrollable Receipt Body — Organized & Perfectly Proportioned */}
+        <div className="p-3 sm:p-5 overflow-y-auto flex-1 flex justify-center">
           <div
             id="printable-receipt-area"
             ref={receiptRef}
-            className={`w-full max-w-md rounded-2xl p-6 border shadow-xl transition ${
+            className={`w-full rounded-2xl p-4 sm:p-5 border shadow-xl transition my-auto ${
               isDark
-                ? 'bg-[#0F141E] text-slate-100 border-[#26324A]'
+                ? 'bg-[#0D121B] text-slate-100 border-[#253148]'
                 : 'bg-white text-slate-900 border-slate-300'
             }`}
           >
-            {/* Receipt Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-dashed border-amber-500/40">
-              <div className="flex items-center gap-3">
+            {/* 1. Brand & Status Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-dashed border-amber-500/40">
+              <div className="flex items-center gap-2.5">
                 <BrandLogo size="sm" />
                 <div>
                   <h2
-                    className={`text-lg font-black tracking-tight ${
+                    className={`text-base sm:text-lg font-black tracking-tight leading-tight ${
                       isDark ? 'text-white' : 'text-slate-900'
                     }`}
                   >
                     {settings.apartmentName}
                   </h2>
                   <p
-                    className={`text-xs ${
+                    className={`text-[11px] font-semibold ${
                       isDark ? 'text-amber-400' : 'text-amber-700'
-                    } font-semibold`}
+                    }`}
                   >
-                    Official Rental & Sub-Meter Statement
+                    Official Room & Dual Sub-Meter Statement
                   </p>
                 </div>
               </div>
 
               <div className="text-right">
                 <span
-                  className={`inline-block px-2.5 py-1 rounded-md text-xs font-extrabold uppercase tracking-wider ${
+                  className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-extrabold uppercase tracking-wider ${
                     bill.status === 'paid'
                       ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/40'
                       : bill.status === 'partial'
@@ -255,17 +265,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   {bill.status}
                 </span>
                 <div
-                  className={`text-[11px] font-mono-num mt-1 ${
+                  className={`text-[10px] font-mono-num mt-0.5 ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
                   }`}
                 >
-                  #{bill.receiptNo}
+                  Receipt #{bill.receiptNo}
                 </div>
               </div>
             </div>
 
-            {/* Tenant & Room Metadata */}
-            <div className="grid grid-cols-2 gap-2 py-3.5 text-xs border-b border-dashed border-slate-500/30">
+            {/* 2. Room, Tenant & 1st–10th Payment Schedule Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-2.5 text-xs border-b border-dashed border-slate-500/30">
               <div>
                 <span
                   className={`block text-[10px] uppercase ${
@@ -274,11 +284,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 >
                   Apartment Unit
                 </span>
-                <strong className="text-sm font-extrabold">
+                <strong className="text-xs sm:text-sm font-extrabold">
                   {bill.roomName}
                 </strong>
               </div>
-              <div className="text-right">
+              <div>
                 <span
                   className={`block text-[10px] uppercase ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
@@ -286,7 +296,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 >
                   Tenant Name
                 </span>
-                <strong className="text-sm font-bold">{bill.tenantName}</strong>
+                <strong className="text-xs sm:text-sm font-bold truncate block">
+                  {bill.tenantName}
+                </strong>
               </div>
               <div>
                 <span
@@ -298,15 +310,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </span>
                 <span className="font-semibold">{bill.billingPeriod}</span>
               </div>
-              <div className="text-right">
+              <div className=" sm:text-right">
                 <span
                   className={`block text-[10px] uppercase ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
                   }`}
                 >
-                  Due Date
+                  Due Date (1st–10th)
                 </span>
-                <span className="font-semibold font-mono-num">
+                <span className="font-bold font-mono-num text-amber-500">
                   {new Date(bill.dueDate).toLocaleDateString('en-PH', {
                     month: 'short',
                     day: 'numeric',
@@ -316,85 +328,112 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             </div>
 
-            {/* Electric Sub-Meter OCR Computation Box */}
+            {/* 3. DUAL SUB-METER VERIFICATION PROOF (2 Sub-Meters Side-by-Side) */}
             <div
-              className={`my-4 rounded-xl p-3.5 border ${
+              className={`my-3 rounded-xl p-3 border ${
                 isDark
-                  ? 'bg-[#161D2B] border-amber-500/30'
-                  : 'bg-amber-50/70 border-amber-300'
+                  ? 'bg-[#141C2B] border-amber-500/35'
+                  : 'bg-amber-50/75 border-amber-300'
               }`}
             >
               <div className="flex items-center justify-between mb-2">
                 <span
-                  className={`text-xs font-extrabold uppercase tracking-wider flex items-center gap-1 ${
+                  className={`text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1 ${
                     isDark ? 'text-amber-400' : 'text-amber-800'
                   }`}
                 >
                   <Zap className="w-3.5 h-3.5" />
-                  Electric Sub-Meter Computation
+                  Dual Electric Sub-Meter Proof & Difference
                 </span>
                 <span className="text-[11px] font-mono-num font-bold">
-                  {formatPeso(bill.electricRate)} / kWh
+                  Rate: {formatPeso(bill.electricRate)} / kWh
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center py-2 rounded-lg bg-black/15">
-                <div>
-                  <span className="text-[10px] uppercase opacity-75 block">
-                    Previous
-                  </span>
-                  <span className="text-xs font-bold font-mono-num">
-                    {bill.prevReading.toFixed(1)} kWh
-                  </span>
+              {/* 2 Sub-Meter Boxes Side-by-Side */}
+              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                {/* Sub-Meter #1: Previous Reading Proof */}
+                <div
+                  className={`rounded-lg p-2 border ${
+                    isDark
+                      ? 'bg-[#0C111A] border-[#25324B]'
+                      : 'bg-white border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[10px] mb-1">
+                    <span className="font-bold uppercase opacity-75">
+                      1. Previous Meter
+                    </span>
+                    <span className="font-mono-num font-extrabold text-xs">
+                      {bill.prevReading.toFixed(1)} kWh
+                    </span>
+                  </div>
+                  {prevMeterProofImg && (
+                    <img
+                      src={prevMeterProofImg}
+                      alt="Previous Sub-Meter Proof"
+                      className="w-full h-12 object-contain rounded bg-white border border-slate-400/30"
+                    />
+                  )}
                 </div>
-                <div>
-                  <span className="text-[10px] uppercase opacity-75 block">
-                    Current
-                  </span>
-                  <span className="text-xs font-bold font-mono-num">
-                    {bill.currReading.toFixed(1)} kWh
-                  </span>
+
+                {/* Sub-Meter #2: Current Reading Proof */}
+                <div
+                  className={`rounded-lg p-2 border ${
+                    isDark
+                      ? 'bg-[#0C111A] border-amber-500/50'
+                      : 'bg-white border-amber-500'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[10px] mb-1">
+                    <span
+                      className={`font-bold uppercase ${
+                        isDark ? 'text-amber-400' : 'text-amber-700'
+                      }`}
+                    >
+                      2. Current Meter
+                    </span>
+                    <span
+                      className={`font-mono-num font-extrabold text-xs ${
+                        isDark ? 'text-amber-400' : 'text-amber-700'
+                      }`}
+                    >
+                      {bill.currReading.toFixed(1)} kWh
+                    </span>
+                  </div>
+                  {currMeterProofImg && (
+                    <img
+                      src={currMeterProofImg}
+                      alt="Current Sub-Meter Proof"
+                      className="w-full h-12 object-contain rounded bg-white border border-amber-500/40"
+                    />
+                  )}
                 </div>
-                <div>
-                  <span className="text-[10px] uppercase opacity-75 block">
-                    Difference (Δ)
-                  </span>
-                  <span
-                    className={`text-xs font-extrabold font-mono-num ${
-                      isDark ? 'text-amber-400' : 'text-amber-700'
-                    }`}
-                  >
+              </div>
+
+              {/* Difference & Total Computation Bar */}
+              <div className="pt-2 border-t border-slate-500/25 flex flex-wrap items-center justify-between gap-1 text-xs">
+                <span className="font-medium">
+                  Difference:{' '}
+                  <strong className="font-mono-num">
+                    {bill.currReading.toFixed(1)} −{' '}
+                    {bill.prevReading.toFixed(1)} ={' '}
                     {bill.consumptionKwh.toFixed(1)} kWh
-                  </span>
-                </div>
-              </div>
-
-              {bill.meterPhotoDataUrl && (
-                <div className="mt-2.5 flex items-center gap-2.5 pt-2 border-t border-slate-500/20">
-                  <img
-                    src={bill.meterPhotoDataUrl}
-                    alt="OCR Sub-Meter Snapshot"
-                    className="h-10 rounded border border-amber-500/40 bg-white px-1.5 object-contain"
-                  />
-                  <span className="text-[10px] opacity-80">
-                    Verified OCR Sub-Meter Reading Snapshot
-                  </span>
-                </div>
-              )}
-
-              <div className="mt-2.5 pt-2 border-t border-slate-500/20 flex items-center justify-between text-xs font-bold">
-                <span>
-                  Sub-Total ({bill.consumptionKwh.toFixed(1)} kWh ×{' '}
-                  {formatPeso(bill.electricRate)})
+                  </strong>{' '}
+                  × {formatPeso(bill.electricRate)}
                 </span>
-                <span className="font-mono-num text-sm font-extrabold">
-                  {formatPeso(bill.electricTotal)}
+                <span
+                  className={`font-mono-num text-sm font-black ${
+                    isDark ? 'text-amber-400' : 'text-amber-800'
+                  }`}
+                >
+                  = {formatPeso(bill.electricTotal)}
                 </span>
               </div>
             </div>
 
-            {/* Itemized Charges */}
-            <div className="space-y-2 text-xs pb-3.5 border-b border-dashed border-slate-500/30">
+            {/* 4. Itemized Financial Summary */}
+            <div className="space-y-1.5 text-xs pb-2.5 border-b border-dashed border-slate-500/30">
               <div className="flex justify-between">
                 <span>Monthly Apartment Base Rent</span>
                 <span className="font-mono-num font-bold">
@@ -402,11 +441,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Electric Sub-Meter Charge</span>
+                <span>
+                  Electric Sub-Meter Bill ({bill.consumptionKwh.toFixed(1)} kWh)
+                </span>
                 <span className="font-mono-num font-bold">
                   {formatPeso(bill.electricTotal)}
                 </span>
               </div>
+              {bill.securityDepositRequired > 0 && (
+                <div className="flex justify-between opacity-80">
+                  <span className="inline-flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                    Required Room Security Deposit (On File)
+                  </span>
+                  <span className="font-mono-num font-semibold">
+                    {formatPeso(bill.securityDepositRequired)}
+                  </span>
+                </div>
+              )}
               {bill.previousBalanceCarryOver > 0 && (
                 <div className="flex justify-between text-red-400 font-semibold">
                   <span>Previous Unpaid Balance (Carry-Over)</span>
@@ -417,7 +469,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               )}
               {bill.depositApplied > 0 && (
                 <div className="flex justify-between text-emerald-400 font-semibold">
-                  <span>Less Security Deposit / Credit Applied</span>
+                  <span>Less Advance / Deposit Credit Applied</span>
                   <span className="font-mono-num">
                     −{formatPeso(bill.depositApplied)}
                   </span>
@@ -425,14 +477,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               )}
             </div>
 
-            {/* Grand Total & Payment Summary */}
-            <div className="py-3.5 space-y-1.5 border-b border-dashed border-slate-500/30">
+            {/* 5. Grand Total, Amount Paid & Advance Overpayment Credit */}
+            <div className="py-2.5 space-y-1 border-b border-dashed border-slate-500/30">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-extrabold uppercase">
+                <span className="text-xs sm:text-sm font-extrabold uppercase">
                   Total Amount Due
                 </span>
                 <span
-                  className={`text-xl font-black font-mono-num ${
+                  className={`text-lg sm:text-xl font-black font-mono-num ${
                     isDark ? 'text-amber-400' : 'text-slate-900'
                   }`}
                 >
@@ -459,31 +511,43 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   {formatPeso(bill.remainingBalance)}
                 </span>
               </div>
+
+              {bill.overpaymentToAdvance > 0 && (
+                <div className="flex justify-between text-xs font-bold text-emerald-400 pt-0.5">
+                  <span>Excess Credited to Withdrawable Advance Balance</span>
+                  <span className="font-mono-num">
+                    +{formatPeso(bill.overpaymentToAdvance)}
+                  </span>
+                </div>
+              )}
             </div>
 
-            {/* Payment Instructions Footer */}
-            <div className="pt-3 text-[11px] space-y-1 opacity-85">
+            {/* 6. Footer & Payment Schedule Notice */}
+            <div className="pt-2.5 text-[10px] space-y-1 opacity-85">
+              <div className="font-semibold text-amber-500">
+                Payment Policy: Tenants are required to pay between the 1st and
+                10th of every month.
+              </div>
               {settings.paymentInstructions && (
-                <p className="whitespace-pre-line leading-relaxed">
+                <p className="whitespace-pre-line leading-snug">
                   {settings.paymentInstructions}
                 </p>
               )}
-              <div className="pt-2 flex items-center justify-between text-[10px] opacity-70 font-mono-num">
-                <span>Generated by 4Rent v1.0.0</span>
+              <div className="pt-1 flex items-center justify-between text-[9px] opacity-70 font-mono-num">
+                <span>4Rent Official Receipt • 1 Room = 1 Active Receipt</span>
                 <span>{new Date(bill.createdAt).toLocaleString('en-PH')}</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Bottom Export, Print & Messenger Integration Bar (hidden when printing) */}
-        <div className="no-print px-5 py-4 bg-[#192130] border-t border-[#263147] flex flex-wrap items-center justify-between gap-2.5">
-          {/* Messenger Primary Button */}
+        {/* Bottom Export, Print & Messenger Integration Bar */}
+        <div className="no-print px-4 sm:px-5 py-3 bg-[#18202F] border-t border-[#263147] flex flex-wrap items-center justify-between gap-2 shrink-0">
           <button
             type="button"
             onClick={handleShareToMessenger}
             disabled={isExporting}
-            className="flex-1 min-w-[200px] py-3 px-4 rounded-2xl bg-[#0084FF] hover:bg-[#1890FF] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition cursor-pointer"
+            className="flex-1 min-w-[180px] py-2.5 px-4 rounded-xl bg-[#0084FF] hover:bg-[#1890FF] text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition cursor-pointer"
           >
             {isExporting ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -494,31 +558,30 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <ExternalLink className="w-3.5 h-3.5 opacity-80" />
           </button>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={handleDownloadPng}
               disabled={isExporting}
-              className="py-3 px-4 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              className="py-2.5 px-3.5 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5" />
               <span>Download PNG</span>
             </button>
 
             <button
               type="button"
               onClick={handleCopySummary}
-              className="py-3 px-3.5 rounded-2xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-slate-200 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-              title="Copy formatted Messenger text summary"
+              className="py-2.5 px-3 rounded-xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-slate-200 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
             >
               {copiedText ? (
                 <>
-                  <Check className="w-4 h-4 text-emerald-400" />
-                  <span className="text-emerald-400">Copied!</span>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-400">Copied</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-4 h-4" />
+                  <Copy className="w-3.5 h-3.5" />
                   <span>Copy Text</span>
                 </>
               )}
@@ -526,10 +589,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
             <button
               type="button"
-              onClick={handlePrintReceipt}
-              className="py-3 px-4 rounded-2xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              onClick={() => window.print()}
+              className="py-2.5 px-3 rounded-xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
             >
-              <Printer className="w-4 h-4 text-amber-400" />
+              <Printer className="w-3.5 h-3.5 text-amber-400" />
               <span>Print / PDF</span>
             </button>
           </div>
@@ -538,4 +601,3 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     </div>
   );
 };
-

@@ -1,5 +1,7 @@
 import React from 'react';
 import {
+  Archive,
+  CalendarCheck,
   DoorOpen,
   LayoutGrid,
   LogOut,
@@ -46,9 +48,19 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
       icon: <DoorOpen className="w-5 h-5" />,
     },
     {
+      id: 'inquiries',
+      label: 'Inquiries & Bookings',
+      icon: <CalendarCheck className="w-5 h-5" />,
+    },
+    {
       id: 'payments',
       label: 'Payment History',
       icon: <ReceiptText className="w-5 h-5" />,
+    },
+    {
+      id: 'archive',
+      label: 'Archive & History',
+      icon: <Archive className="w-5 h-5" />,
     },
     {
       id: 'settings',
@@ -65,7 +77,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
   const drawerContent = (
     <div className="flex flex-col h-full w-full bg-[#141923] text-slate-100 select-none border-r border-[#222B3C]">
       {/* Warm Orange/Amber Header Gradient (Matches Screenshot 2) */}
-      <div className="relative bg-gradient-to-br from-[#F59E0B] via-[#EA8C06] to-[#D97706] px-6 pt-10 pb-7 shadow-md">
+      <div className="relative bg-gradient-to-br from-[#F59E0B] via-[#EA8C06] to-[#D97706] px-6 pt-9 pb-6 shadow-md">
         <button
           type="button"
           onClick={onCloseMobile}
@@ -75,7 +87,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        <BrandLogo size="md" className="mb-4 shadow-xl" />
+        <BrandLogo size="md" className="mb-3.5 shadow-xl" />
         <div className="text-2xl font-extrabold text-white tracking-tight">
           4Rent
         </div>
@@ -85,7 +97,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
       </div>
 
       {/* Menu Links */}
-      <nav className="flex-1 px-3 py-5 space-y-1.5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
           return (
@@ -93,17 +105,13 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
               key={item.id}
               type="button"
               onClick={() => handleNavClick(item.id)}
-              className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-[15px] font-semibold transition cursor-pointer ${
+              className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[15px] font-semibold transition cursor-pointer ${
                 isActive
                   ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                   : 'text-slate-200 hover:bg-[#1D2535] hover:text-white'
               }`}
             >
-              <span
-                className={
-                  isActive ? 'text-amber-400' : 'text-slate-400'
-                }
-              >
+              <span className={isActive ? 'text-amber-400' : 'text-slate-400'}>
                 {item.icon}
               </span>
               <span>{item.label}</span>
@@ -117,7 +125,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
             onCloseMobile();
             onLockApp();
           }}
-          className="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-[15px] font-semibold text-slate-200 hover:bg-red-500/10 hover:text-red-400 transition cursor-pointer mt-2"
+          className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[15px] font-semibold text-slate-200 hover:bg-red-500/10 hover:text-red-400 transition cursor-pointer mt-2"
         >
           <span className="text-slate-400">
             <LogOut className="w-5 h-5" />
@@ -126,11 +134,11 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
         </button>
 
         {!hasRooms && onLoadSampleData && (
-          <div className="pt-6 px-2">
+          <div className="pt-4 px-2">
             <div className="rounded-2xl bg-amber-500/10 border border-amber-500/25 p-3.5">
               <p className="text-xs text-amber-200/90 font-medium leading-relaxed">
-                Want to explore 4Rent with sample apartments, sub-meter readings &
-                receipts?
+                Want to explore 4Rent with sample apartments, dual sub-meter
+                proofs & bookings?
               </p>
               <button
                 type="button"
@@ -148,9 +156,9 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
         )}
       </nav>
 
-      {/* Version Footer (Matches Screenshot 2) */}
-      <div className="py-5 text-center text-xs font-medium text-slate-500 border-t border-[#1E2636]">
-        v1.0.0
+      {/* Version Footer */}
+      <div className="py-4 text-center text-xs font-medium text-slate-500 border-t border-[#1E2636]">
+        v1.1.0 • Cross-OS PWA
       </div>
     </div>
   );
@@ -178,4 +186,3 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
     </>
   );
 };
-

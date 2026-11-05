@@ -4,7 +4,6 @@ export interface SubMeterCalculationInput {
   prevReading: number;
   currReading: number;
   electricRate: number;
-  meterMaxDigits?: number; // Default 99999.9 rollover support if needed
 }
 
 export interface SubMeterCalculationResult {
@@ -34,9 +33,41 @@ export interface FullBillResult {
   totalAmountDue: number;
 }
 
+export interface ApplyPaymentOutcome {
+  updatedBill: BillRecord;
+  overpaymentCredited: number;
+}
+
+/**
+ * Clamps any due day of the month to the mandatory 1st–10th payment window.
+ */
+export function clampDueDayOneToTen(day: number): number {
+  const parsed = Math.round(Number(day) || 5);
+  return Math.min(10, Math.max(1, parsed));
+}
+
+/**
+ * Computes the next due date falling strictly within Day 1 to Day 10 of the billing month.
+ */
+export function getNextDueDateInOneToTenWindow(preferredDay = 5): string {
+  const safeDay = clampDueDayOneToTen(preferredDay);
+  const now = new Date();
+  let year = now.getFullYear();
+  let month = now.getMonth();
+
+  if (now.getDate() > 10) {
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  const target = new Date(year, month, safeDay, 12, 0, 0);
+  return target.toISOString().slice(0, 10);
+}
+
 /**
  * Calculates the sub-meter kWh difference and total electric cost.
- * Handles decimal readings (e.g. 1245.6 - 1190.2 = 55.4 kWh).
  */
 export function calculateSubMeterDifference(
   input: SubMeterCalculationInput
@@ -69,7 +100,7 @@ export function calculateSubMeterDifference(
 
 /**
  * Calculates the full apartment bill breakdown:
- * Total Due = Base Rent + (Curr - Prev) * Rate + Previous Unpaid Balance - Deposit Applied
+ * Total Due = Base Rent + (Curr - Prev) * Global Rate + Previous Unpaid Balance - Advance/Deposit Applied
  */
 export function calculateBillBreakdown(input: FullBillInput): FullBillResult {
   const subMeter = calculateSubMeterDifference({
@@ -106,25 +137,43 @@ export function calculateBillBreakdown(input: FullBillInput): FullBillResult {
 }
 
 /**
- * Applies a full or partial payment to a bill record and computes the remaining carry-over balance.
+ * Applies a payment to a bill record.
+ * If the tenant pays MORE than the remaining balance due, the excess is automatically
+ * calculated as `overpaymentToAdvance` so it goes into the room's withdrawable Advance Payment Balance.
  */
-export function applyPaymentToBill(
+export function applyPaymentWithOverpayment(
   bill: BillRecord,
   paymentAmount: number,
   method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
   referenceNo?: string,
   note?: string
-): BillRecord {
+): ApplyPaymentOutcome {
   const validPayment = Math.max(0, Math.round(Number(paymentAmount) * 100) / 100);
   const nowIso = new Date().toISOString();
+
+  const currentRemaining = Math.max(
+    0,
+    Math.round((bill.totalAmountDue - (bill.amountPaid || 0)) * 100) / 100
+  );
+
+  const overpaymentCredited =
+    validPayment > currentRemaining
+      ? Math.round((validPayment - currentRemaining) * 100) / 100
+      : 0;
 
   const newTx: PaymentTransaction = {
     id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     amount: validPayment,
+    overpaymentCredited: overpaymentCredited > 0 ? overpaymentCredited : undefined,
     method,
     paidAt: nowIso,
     referenceNo,
-    note,
+    note:
+      overpaymentCredited > 0
+        ? `${note ? note + ' • ' : ''}Excess ₱${overpaymentCredited.toFixed(
+            2
+          )} credited to Advance Payment Balance`
+        : note,
   };
 
   const newAmountPaid =
@@ -133,6 +182,9 @@ export function applyPaymentToBill(
     0,
     Math.round((bill.totalAmountDue - newAmountPaid) * 100) / 100
   );
+  const totalOverpayment =
+    Math.round(((bill.overpaymentToAdvance || 0) + overpaymentCredited) * 100) /
+    100;
 
   let status: 'paid' | 'partial' | 'unpaid' = 'unpaid';
   if (remainingBalance <= 0.009) {
@@ -141,9 +193,10 @@ export function applyPaymentToBill(
     status = 'partial';
   }
 
-  return {
+  const updatedBill: BillRecord = {
     ...bill,
     amountPaid: newAmountPaid,
+    overpaymentToAdvance: totalOverpayment,
     remainingBalance,
     status,
     paymentMethod: method,
@@ -151,11 +204,34 @@ export function applyPaymentToBill(
     paymentHistory: [...(bill.paymentHistory || []), newTx],
     updatedAt: nowIso,
   };
+
+  return {
+    updatedBill,
+    overpaymentCredited,
+  };
+}
+
+/**
+ * Backwards-compatible wrapper for applyPaymentToBill.
+ */
+export function applyPaymentToBill(
+  bill: BillRecord,
+  paymentAmount: number,
+  method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
+  referenceNo?: string,
+  note?: string
+): BillRecord {
+  return applyPaymentWithOverpayment(
+    bill,
+    paymentAmount,
+    method,
+    referenceNo,
+    note
+  ).updatedBill;
 }
 
 /**
  * Extracts the most plausible numeric electric sub-meter reading from raw OCR text.
- * Handles common OCR digit substitutions (O -> 0, I/l -> 1, S -> 5, B -> 8).
  */
 export function extractMeterDigitsFromOcrText(rawText: string): number | null {
   if (!rawText || !rawText.trim() || !/\d/.test(rawText)) return null;
@@ -168,12 +244,12 @@ export function extractMeterDigitsFromOcrText(rawText: string): number | null {
     .replace(/[Bb](?=\d)|(?<=\d)[Bb]/g, '8')
     .replace(/,/g, '.');
 
-  // Match sequences of digits with optional single decimal part (e.g., "01482.5" or "1482")
   const matches = normalized.match(/\d{1,7}(?:\.\d{1,2})?/g);
   if (!matches || matches.length === 0) return null;
 
-  // Prefer the longest digit sequence (typical 4-6 digit sub-meter drum/LCD)
-  const sorted = [...matches].sort((a, b) => b.replace('.', '').length - a.replace('.', '').length);
+  const sorted = [...matches].sort(
+    (a, b) => b.replace('.', '').length - a.replace('.', '').length
+  );
   const parsed = parseFloat(sorted[0]);
   if (Number.isNaN(parsed) || parsed < 0) return null;
 
@@ -212,17 +288,19 @@ export function formatMessengerBillSummary(
     `Room: *${bill.roomName}*`,
     `Tenant: ${bill.tenantName}`,
     `Billing Period: ${bill.billingPeriod}`,
-    `Due Date: ${new Date(bill.dueDate).toLocaleDateString('en-PH', {
+    `Payment Schedule: Every 1st – 10th of the Month (Due: ${new Date(
+      bill.dueDate
+    ).toLocaleDateString('en-PH', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
-    })}`,
+    })})`,
     `────────────────────`,
-    `⚡ *ELECTRIC SUB-METER READING*`,
-    `• Current Reading: ${bill.currReading.toFixed(1)} kWh`,
-    `• Previous Reading: ${bill.prevReading.toFixed(1)} kWh`,
-    `• Consumption (Δ): *${bill.consumptionKwh.toFixed(1)} kWh*`,
-    `• Electric Rate: ${formatPeso(bill.electricRate)} / kWh`,
+    `⚡ *DUAL ELECTRIC SUB-METER PROOF*`,
+    `• Sub-Meter #1 (Previous): ${bill.prevReading.toFixed(1)} kWh`,
+    `• Sub-Meter #2 (Current): ${bill.currReading.toFixed(1)} kWh`,
+    `• Consumption Difference (Δ): *${bill.consumptionKwh.toFixed(1)} kWh*`,
+    `• Electric Rate (Settings): ${formatPeso(bill.electricRate)} / kWh`,
     `• Electric Sub-Total: *${formatPeso(bill.electricTotal)}*`,
     `────────────────────`,
     `📋 *BILLING BREAKDOWN*`,
@@ -236,7 +314,9 @@ export function formatMessengerBillSummary(
     );
   }
   if (bill.depositApplied > 0) {
-    lines.push(`• Less Deposit/Credit Applied: -${formatPeso(bill.depositApplied)}`);
+    lines.push(
+      `• Less Advance / Deposit Applied: -${formatPeso(bill.depositApplied)}`
+    );
   }
 
   lines.push(
@@ -248,14 +328,24 @@ export function formatMessengerBillSummary(
     lines.push(`• Amount Paid: ${formatPeso(bill.amountPaid)}`);
     lines.push(`• Remaining Balance: *${formatPeso(bill.remainingBalance)}*`);
   }
+  if (bill.overpaymentToAdvance > 0) {
+    lines.push(
+      `• Credited to Advance Balance (Withdrawable): +${formatPeso(
+        bill.overpaymentToAdvance
+      )}`
+    );
+  }
 
   lines.push(`• Status: ${statusLabel}`);
 
   if (paymentInstructions && bill.status !== 'paid') {
-    lines.push(`────────────────────`, `💳 *Payment Channels:*`, paymentInstructions);
+    lines.push(
+      `────────────────────`,
+      `💳 *Payment Channels:*`,
+      paymentInstructions
+    );
   }
 
   lines.push(`\nGenerated via 4Rent Property Management System`);
   return lines.join('\n');
 }
-

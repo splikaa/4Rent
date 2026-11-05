@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Archive,
   ArrowLeft,
   Camera,
   CheckCircle2,
@@ -7,7 +8,6 @@ import {
   MessageCircle,
   Printer,
   ReceiptText,
-  Trash2,
   X,
   Zap,
 } from 'lucide-react';
@@ -24,8 +24,9 @@ interface AllPaymentsViewProps {
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
     referenceNo?: string
   ) => void;
-  onDeleteBill: (billId: string) => void;
+  onArchiveBill: (billId: string) => void;
   onOpenNewBillScanner: () => void;
+  onOpenArchiveCenter: () => void;
 }
 
 export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
@@ -33,8 +34,9 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   onBack,
   onSelectBillForReceipt,
   onRecordPayment,
-  onDeleteBill,
+  onArchiveBill,
   onOpenNewBillScanner,
+  onOpenArchiveCenter,
 }) => {
   const [filter, setFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [payingBill, setPayingBill] = useState<BillRecord | null>(null);
@@ -44,7 +46,10 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   >('GCash');
   const [payRef, setPayRef] = useState('');
 
-  const filteredBills = bills.filter((b) => {
+  // Active receipts (1 per room)
+  const activeBills = bills.filter((b) => !b.isArchived);
+
+  const filteredBills = activeBills.filter((b) => {
     if (filter === 'paid') return b.status === 'paid';
     if (filter === 'unpaid')
       return b.status === 'unpaid' || b.status === 'partial';
@@ -55,7 +60,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     (sum, b) => sum + (Number(b.amountPaid) || 0),
     0
   );
-  const totalUnpaidDue = bills.reduce(
+  const totalUnpaidDue = activeBills.reduce(
     (sum, b) => sum + (Number(b.remainingBalance) || 0),
     0
   );
@@ -76,6 +81,12 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     setPayingBill(null);
   };
 
+  const enteredPayNum = parseFloat(payAmount) || 0;
+  const excessOverpayment =
+    payingBill && enteredPayNum > payingBill.remainingBalance
+      ? Math.round((enteredPayNum - payingBill.remainingBalance) * 100) / 100
+      : 0;
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0E14] pb-24">
       {/* Top Bar (Matches Screenshot 5) */}
@@ -93,14 +104,24 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
           All Payments
         </h1>
 
-        <button
-          type="button"
-          onClick={onOpenNewBillScanner}
-          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-        >
-          <Camera className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Generate Bill</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenArchiveCenter}
+            className="px-3 py-1.5 rounded-xl bg-[#1B2230] hover:bg-[#232D40] border border-[#283246] text-xs font-semibold text-slate-300 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Archive className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Archived Receipts</span>
+          </button>
+          <button
+            type="button"
+            onClick={onOpenNewBillScanner}
+            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Generate Bill</span>
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 pt-5 flex flex-col">
@@ -163,7 +184,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
           </div>
         </div>
 
-        {/* Empty State (Matches Screenshot 5) OR Payment Records List */}
+        {/* Empty State (Matches Screenshot 5) OR Active Room Receipts List */}
         {filteredBills.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-20 select-none">
             <div className="w-20 h-20 rounded-[24px] bg-[#1A2232] border border-[#28334A] flex items-center justify-center mb-5">
@@ -191,8 +212,8 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         <span className="text-lg font-extrabold text-white">
                           {bill.roomName}
                         </span>
-                        <span className="text-xs font-mono-num px-2.5 py-0.5 rounded-md bg-[#0E131C] text-slate-400 border border-[#222C3F]">
-                          {bill.receiptNo}
+                        <span className="text-xs font-mono-num px-2.5 py-0.5 rounded-md bg-[#0E131C] text-amber-400 border border-[#222C3F]">
+                          Room Receipt #{bill.receiptNo}
                         </span>
                         <span
                           className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
@@ -203,11 +224,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                               : 'bg-red-500/15 text-red-400 border border-red-500/30'
                           }`}
                         >
-                          {isPaid
-                            ? 'Paid'
-                            : isPartial
-                            ? 'Partial'
-                            : 'Unpaid'}
+                          {isPaid ? 'Paid' : isPartial ? 'Partial' : 'Unpaid'}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">
@@ -215,8 +232,9 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         <strong className="text-slate-200">
                           {bill.tenantName}
                         </strong>{' '}
-                        • Period: {bill.billingPeriod} • Due:{' '}
-                        {new Date(bill.dueDate).toLocaleDateString('en-PH')}
+                        • Period: {bill.billingPeriod} • Pay Window: Every
+                        1st–10th (Due:{' '}
+                        {new Date(bill.dueDate).toLocaleDateString('en-PH')})
                       </p>
                     </div>
 
@@ -236,14 +254,20 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                           Paid in Full ({bill.paymentMethod || 'Cash'})
                         </div>
                       )}
+                      {bill.overpaymentToAdvance > 0 && (
+                        <div className="text-[11px] font-bold text-emerald-300 font-mono-num">
+                          +{formatPeso(bill.overpaymentToAdvance)} Credited to
+                          Advance Balance
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Sub-Meter & Breakdown Row */}
+                  {/* Dual Sub-Meter & Breakdown Row */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-3.5 text-xs">
                     <div className="rounded-xl bg-[#0F141D] p-2.5 border border-[#1E2738]">
                       <span className="text-slate-400 block text-[11px]">
-                        Sub-Meter Reading
+                        2 Sub-Meters (Prev → Curr)
                       </span>
                       <span className="font-mono-num font-bold text-slate-200">
                         {bill.prevReading.toFixed(1)} →{' '}
@@ -289,19 +313,21 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         className="px-4 py-2 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
                       >
                         <Printer className="w-3.5 h-3.5" />
-                        <span>Printable Receipt & Messenger Share</span>
+                        <span>Official Receipt (2 Sub-Meter Proofs)</span>
                       </button>
 
-                      {bill.remainingBalance > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => openPaymentDialog(bill)}
-                          className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-                        >
-                          <CreditCard className="w-3.5 h-3.5" />
-                          <span>Record Payment</span>
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => openPaymentDialog(bill)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        <span>
+                          {bill.remainingBalance > 0
+                            ? 'Record Payment / Overpayment'
+                            : 'Add Extra Advance Payment'}
+                        </span>
+                      </button>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -315,11 +341,11 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onDeleteBill(bill.id)}
-                        className="p-2 rounded-xl bg-[#1D2535] hover:bg-red-500/20 text-red-400 transition cursor-pointer"
-                        title="Delete Bill Record"
+                        onClick={() => onArchiveBill(bill.id)}
+                        className="p-2 rounded-xl bg-[#1D2535] hover:bg-amber-500/20 text-amber-400 transition cursor-pointer"
+                        title="Archive Receipt"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Archive className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -330,9 +356,9 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
         )}
       </div>
 
-      {/* Record Full or Partial Payment Modal */}
+      {/* Record Payment / Overpayment Modal */}
       {payingBill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
           <div className="w-full max-w-md rounded-3xl bg-[#161C28] border border-[#28334A] p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-white">
@@ -356,7 +382,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Remaining Balance Due:</span>
+                  <span className="text-slate-400">Remaining Bill Due:</span>
                   <span className="font-bold text-amber-400 font-mono-num">
                     {formatPeso(payingBill.remainingBalance)}
                   </span>
@@ -365,7 +391,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Payment Amount Received (₱) *
+                  Amount Paid by Tenant (₱) *
                 </label>
                 <input
                   type="number"
@@ -375,10 +401,19 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                   onChange={(e) => setPayAmount(e.target.value)}
                   className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-base font-bold text-emerald-400 font-mono-num"
                 />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Enter a lower amount to record a partial payment; the
-                  remaining balance will automatically carry over.
-                </p>
+                {excessOverpayment > 0 ? (
+                  <p className="text-xs font-bold text-emerald-400 mt-1.5">
+                    +{formatPeso(excessOverpayment)} excess payment will be
+                    credited to {payingBill.roomName}’s Withdrawable Advance
+                    Payment Balance!
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    If tenant pays less than the due amount, the balance carries
+                    over. If tenant pays more, the excess goes to their
+                    withdrawable Advance Balance.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -442,4 +477,3 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     </div>
   );
 };
-
