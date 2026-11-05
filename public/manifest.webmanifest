@@ -1,0 +1,19 @@
+{
+  "name": "4Rent — Rooms & Sub-Meter Management",
+  "short_name": "4Rent",
+  "description": "Desktop and Mobile Apartment Rental Management System with OCR Sub-Meter Reader, Printable Receipts, and Messenger Integration",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B0E14",
+  "theme_color": "#F59E0B",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

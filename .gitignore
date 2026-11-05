@@ -1,0 +1,24 @@
+# Dependencies & Build Output
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Environment Variables
+.env
+.env.*
+
+# Editor & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Workspace Agent Skill Directories (excluded from 4Rent application repo)
+.agents/
+awesome-agent-skills/
+hermes-agent/
+omniroute/
+transformers/
+ui-ux-pro-max-skill/
