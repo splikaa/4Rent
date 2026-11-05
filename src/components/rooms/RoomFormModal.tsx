@@ -142,14 +142,17 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       return;
     }
 
-    const baseAdvance = Math.max(0, parseFloat(advanceRent) || 0);
+    const baseAdvance =
+      status === 'occupied' ? Math.max(0, parseFloat(advanceRent) || 0) : 0;
     const totalAdvance =
-      Math.round((baseAdvance + excessDepositToAdvance) * 100) / 100;
+      status === 'occupied'
+        ? Math.round((baseAdvance + excessDepositToAdvance) * 100) / 100
+        : 0;
 
     const nowIso = new Date().toISOString();
     const prevAdvanceHistory = initialRoom?.advanceHistory || [];
     const updatedAdvanceHistory =
-      excessDepositToAdvance > 0
+      status === 'occupied' && excessDepositToAdvance > 0
         ? [
             {
               id: `adv-${Date.now()}`,
@@ -166,7 +169,9 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             },
             ...prevAdvanceHistory,
           ]
-        : prevAdvanceHistory;
+        : status === 'occupied'
+        ? prevAdvanceHistory
+        : [];
 
     const roomPayload: Omit<Room, 'id' | 'updatedAt'> = {
       name: name.trim(),
@@ -176,11 +181,13 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       lastMeterPhotoDataUrl: initialRoom?.lastMeterPhotoDataUrl,
       lastReadingDate: initialRoom?.lastReadingDate || nowIso,
       status,
-      unpaidBalance: Math.max(0, parseFloat(unpaidBalance) || 0),
+      unpaidBalance:
+        status === 'occupied' ? Math.max(0, parseFloat(unpaidBalance) || 0) : 0,
       securityDeposit: reqDepNum,
       advanceRent: totalAdvance,
       advanceHistory: updatedAdvanceHistory,
-      activeReceiptId: initialRoom?.activeReceiptId,
+      activeReceiptId:
+        status === 'occupied' ? initialRoom?.activeReceiptId : undefined,
       isArchived: initialRoom?.isArchived,
       tenant:
         status === 'occupied' && tenantName.trim()
@@ -370,9 +377,15 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
           <div className="pt-3 border-t border-[#222C3F]">
             <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 mb-3">
               <Shield className="w-3.5 h-3.5" />
-              Required Security Deposit & Withdrawable Advance Balance
+              {status === 'occupied'
+                ? 'Required Security Deposit & Withdrawable Advance Balance'
+                : 'Required Security Deposit for Room'}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 items-start">
+            <div
+              className={`grid grid-cols-1 ${
+                status === 'occupied' ? 'sm:grid-cols-3' : 'sm:grid-cols-1'
+              } gap-3.5 items-start`}
+            >
               <div className="flex flex-col">
                 <label className="block text-xs font-bold text-emerald-400 mb-1.5 whitespace-nowrap">
                   Required Deposit (₱) *
@@ -388,36 +401,43 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 />
               </div>
 
-              <div className="flex flex-col">
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
-                  Deposit Paid (₱)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={amountDepositPaidByTenant}
-                  onChange={(e) => setAmountDepositPaidByTenant(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
-                />
-                {excessDepositToAdvance > 0 && (
-                  <span className="text-[10px] text-emerald-400 font-semibold block mt-1">
-                    +{formatPeso(excessDepositToAdvance)} credited to Advance!
-                  </span>
-                )}
-              </div>
+              {status === 'occupied' && (
+                <>
+                  <div className="flex flex-col">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
+                      Deposit Paid (₱)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={amountDepositPaidByTenant}
+                      onChange={(e) =>
+                        setAmountDepositPaidByTenant(e.target.value)
+                      }
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                    />
+                    {excessDepositToAdvance > 0 && (
+                      <span className="text-[10px] text-emerald-400 font-semibold block mt-1">
+                        +{formatPeso(excessDepositToAdvance)} credited to
+                        Advance!
+                      </span>
+                    )}
+                  </div>
 
-              <div className="flex flex-col">
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
-                  Advance Balance (₱)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={advanceRent}
-                  onChange={(e) => setAdvanceRent(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
-                />
-              </div>
+                  <div className="flex flex-col">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
+                      Advance Balance (₱)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={advanceRent}
+                      onChange={(e) => setAdvanceRent(e.target.value)}
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

@@ -17,6 +17,7 @@ import {
   Clock,
   ArrowDownLeft,
   ArrowUpRight,
+  MessageCircle,
 } from 'lucide-react';
 import {
   Room,
@@ -57,6 +58,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 }) => {
   if (!room) return null;
 
+  const isOccupied = room.status === 'occupied';
+  const safeDeposit =
+    room.securityDeposit > 0 ? room.securityDeposit : room.monthlyRent;
+  const safeAdvance = isOccupied ? Math.max(0, room.advanceRent || 0) : 0;
+
   const safeDueDay = clampDueDayOneToTen(room.tenant?.dueDayOfMonth || 5);
   const nextDueIso = getNextDueDateInOneToTenWindow(
     safeDueDay,
@@ -68,32 +74,34 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
     year: 'numeric',
   });
 
-  const advanceHistory = room.advanceHistory || [];
+  const advanceHistory = isOccupied ? room.advanceHistory || [] : [];
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div className="w-full max-w-2xl bg-[#111622] border border-[#1E2638] rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1E2638] bg-[#131926] shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F59E0B]/15 border border-[#F59E0B]/30 flex items-center justify-center text-[#F59E0B]">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-[#F59E0B]/15 border border-[#F59E0B]/30 flex items-center justify-center text-[#F59E0B] shrink-0">
               <DoorOpen className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h3 className="text-lg font-bold text-white leading-tight">{room.name}</h3>
+                <h3 className="text-lg font-extrabold text-white leading-tight">
+                  {room.name}
+                </h3>
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                    room.status === 'occupied'
+                    isOccupied
                       ? 'bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/30'
                       : 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30'
                   }`}
                 >
-                  {room.status}
+                  {isOccupied ? 'Occupied' : 'Vacant'}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Room Details, Continuous Sub-Meter & Previous Transactions
+                Room Overview • Continuous Sub-Meter • Official Receipt & History
               </p>
             </div>
           </div>
@@ -105,7 +113,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 onClose();
                 onEditRoom(room);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1A2234] hover:bg-slate-800 text-xs font-semibold text-slate-200 border border-[#242F46] cursor-pointer transition-colors"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1A2234] hover:bg-slate-800 text-xs font-bold text-slate-200 border border-[#242F46] cursor-pointer transition-colors"
             >
               <Edit2 className="w-3.5 h-3.5 text-[#F59E0B]" />
               Edit Room
@@ -113,7 +121,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="w-9 h-9 rounded-xl bg-[#1A2234] hover:bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
+              className="w-9 h-9 rounded-xl bg-[#1A2234] hover:bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -122,133 +130,182 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 
         {/* Scrollable Content */}
         <div className="p-6 overflow-y-auto space-y-5">
-          {/* Top Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-xl p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+          {/* Top Metrics Grid — 4 columns when Occupied, 3 columns when Vacant (No Advance Balance on Vacant Rooms) */}
+          <div
+            className={`grid grid-cols-1 ${
+              isOccupied ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+            } gap-3`}
+          >
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                 Monthly Rent
               </p>
-              <p className="text-sm font-bold text-white font-mono-num mt-1">
+              <p className="text-base font-extrabold text-white font-mono-num mt-1.5">
                 {formatPeso(room.monthlyRent)}
               </p>
             </div>
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-xl p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                 Continuous Meter
               </p>
-              <p className="text-sm font-bold text-[#F59E0B] font-mono-num mt-1 flex items-center gap-1">
-                <Zap className="w-3.5 h-3.5" />
-                {room.lastMeterReading.toFixed(1)} kWh
+              <p className="text-base font-extrabold text-[#F59E0B] font-mono-num mt-1.5 flex items-center gap-1">
+                <Zap className="w-3.5 h-3.5 shrink-0" />
+                <span>{room.lastMeterReading.toFixed(1)} kWh</span>
               </p>
             </div>
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-xl p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-                Security Deposit
+
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                {isOccupied ? 'Security Deposit' : 'Required Deposit'}
               </p>
-              <p className="text-sm font-bold text-[#10B981] font-mono-num mt-1 flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                {formatPeso(room.securityDeposit)}
-              </p>
-            </div>
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-xl p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-                Advance Balance
-              </p>
-              <p className="text-sm font-bold text-[#10B981] font-mono-num mt-1 flex items-center gap-1">
-                <Wallet className="w-3.5 h-3.5" />
-                {formatPeso(room.advanceRent || 0)}
+              <p className="text-base font-extrabold text-[#10B981] font-mono-num mt-1.5 flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>{formatPeso(safeDeposit)}</span>
               </p>
             </div>
+
+            {isOccupied && (
+              <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                  Advance Balance
+                </p>
+                <p className="text-base font-extrabold text-[#10B981] font-mono-num mt-1.5 flex items-center gap-1">
+                  <Wallet className="w-3.5 h-3.5 shrink-0" />
+                  <span>{formatPeso(safeAdvance)}</span>
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* Current Tenant & Auto Next-Month Due Date */}
-          <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[#3B82F6] mb-1.5 flex items-center gap-1.5">
+          {/* Current Tenant & Auto Next-Month Due Date — Symmetrical 12-Column Grid */}
+          <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 sm:p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-stretch">
+              {/* Left 7 Columns: Tenant Details */}
+              <div className="sm:col-span-7 flex flex-col justify-center">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#3B82F6] mb-2 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5" />
-                  Current Tenant & Payment Schedule
+                  Current Tenant & Billing Rate
                 </p>
-                {room.status === 'occupied' && room.tenant ? (
-                  <div className="space-y-1">
-                    <p className="text-base font-bold text-white">{room.tenant.fullName}</p>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                      <span className="flex items-center gap-1 font-mono-num">
-                        <Phone className="w-3.5 h-3.5 text-slate-500" />
+
+                {isOccupied && room.tenant ? (
+                  <div className="space-y-2">
+                    <p className="text-lg font-extrabold text-white leading-snug">
+                      {room.tenant.fullName}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-300">
+                      <span className="inline-flex items-center gap-1.5 font-mono-num">
+                        <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         {room.tenant.phone
                           ? formatPhoneNumber(room.tenant.phone)
                           : 'No mobile number'}
                       </span>
-                      <span>•</span>
-                      <span>Move-In: {room.tenant.moveInDate}</span>
-                      <span>•</span>
-                      <span className="text-[#F59E0B] font-semibold">
-                        Global Rate: ₱{globalElectricRate.toFixed(2)}/kWh
+                      <span className="inline-flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        Move-In: {room.tenant.moveInDate}
+                      </span>
+                      {room.tenant.messengerUsername && (
+                        <span className="inline-flex items-center gap-1.5 text-blue-400">
+                          <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                          m.me/{room.tenant.messengerUsername}
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1.5 text-[#F59E0B] font-bold font-mono-num">
+                        <Zap className="w-3.5 h-3.5 shrink-0" />
+                        Rate: {formatPeso(globalElectricRate)}/kWh
                       </span>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm font-semibold text-[#10B981]">
-                    Available for Booking • Ready for Tenant Move-In
-                  </p>
+                  <div className="rounded-xl bg-[#111622] border border-[#10B981]/30 px-3.5 py-3">
+                    <p className="text-sm font-bold text-[#10B981]">
+                      Vacant • Available for Inquiry & Booking
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      No active tenant or advance balance. Continuous sub-meter
+                      stands at{' '}
+                      <strong className="text-[#F59E0B] font-mono-num">
+                        {room.lastMeterReading.toFixed(1)} kWh
+                      </strong>{' '}
+                      (@ {formatPeso(globalElectricRate)}/kWh).
+                    </p>
+                  </div>
                 )}
               </div>
 
-              <div className="bg-[#111622] border border-[#F59E0B]/30 rounded-xl px-3.5 py-2.5 text-right">
-                <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-end gap-1">
-                  <Calendar className="w-3 h-3 text-[#F59E0B]" />
-                  Auto Next-Month Due (Day 1 to 10)
+              {/* Right 5 Columns: Auto Next-Month Due Box */}
+              <div className="sm:col-span-5 bg-[#111622] border border-[#F59E0B]/30 rounded-2xl p-3.5 flex flex-col justify-center sm:text-right">
+                <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold flex items-center sm:justify-end gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-[#F59E0B] shrink-0" />
+                  <span>Auto Next-Month Due</span>
                 </p>
-                <p className="text-sm font-bold text-[#F59E0B] mt-0.5">
-                  {formattedDueDate}
+                <p className="text-base font-extrabold text-[#F59E0B] mt-1">
+                  {isOccupied ? formattedDueDate : 'Day 1 to 10 Window'}
                 </p>
-                <p className="text-[10px] text-slate-500">
-                  Day {safeDueDay} of Next Month
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {isOccupied
+                    ? `Scheduled Day ${safeDueDay} (1st–10th Window)`
+                    : 'Auto-schedules upon tenant move-in'}
                 </p>
               </div>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-[#1E2638] flex flex-wrap items-center gap-2">
+            {/* Aligned Equal-Width Action Buttons Row */}
+            <div
+              className={`mt-4 pt-4 border-t border-[#1E2638] grid grid-cols-1 ${
+                isOccupied && activeBill
+                  ? 'sm:grid-cols-3'
+                  : isOccupied || activeBill
+                  ? 'sm:grid-cols-2'
+                  : 'sm:grid-cols-1'
+              } gap-2.5`}
+            >
               <button
                 type="button"
                 onClick={() => {
                   onClose();
                   onOpenScannerForRoom(room);
                 }}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#F59E0B] hover:bg-[#D97706] text-slate-950 font-bold text-xs cursor-pointer transition-colors"
+                className="w-full flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#D97706] text-slate-950 font-extrabold text-xs cursor-pointer transition-colors"
               >
-                <Camera className="w-3.5 h-3.5" />
-                Scan Dual Sub-Meter / Update Receipt
+                <Camera className="w-3.5 h-3.5 shrink-0" />
+                <span>Scan Sub-Meter / Bill</span>
               </button>
+
               {activeBill && (
                 <button
                   type="button"
                   onClick={() => onOpenReceipt(activeBill)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1A2234] hover:bg-slate-800 text-white font-semibold text-xs border border-[#242F46] cursor-pointer transition-colors"
+                  className="w-full flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#1A2234] hover:bg-slate-800 text-white font-bold text-xs border border-[#242F46] cursor-pointer transition-colors"
                 >
-                  <Receipt className="w-3.5 h-3.5 text-[#F59E0B]" />
-                  View Official Receipt (#{activeBill.receiptNo})
+                  <Receipt className="w-3.5 h-3.5 text-[#F59E0B] shrink-0" />
+                  <span>Receipt (#{activeBill.receiptNo})</span>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => onOpenAdvanceModal(room)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#10B981]/15 hover:bg-[#10B981]/25 text-[#10B981] font-semibold text-xs border border-[#10B981]/30 cursor-pointer transition-colors"
-              >
-                <Wallet className="w-3.5 h-3.5" />
-                Add / Withdraw Advance
-              </button>
+
+              {isOccupied && (
+                <button
+                  type="button"
+                  onClick={() => onOpenAdvanceModal(room)}
+                  className="w-full flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#10B981]/15 hover:bg-[#10B981]/25 text-[#10B981] font-bold text-xs border border-[#10B981]/30 cursor-pointer transition-colors"
+                >
+                  <Wallet className="w-3.5 h-3.5 shrink-0" />
+                  <span>Add / Withdraw Advance</span>
+                </button>
+              )}
             </div>
           </div>
 
           {/* Previous Transactions / Billing History for This Room */}
-          <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-3">
+          <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3.5">
               <p className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
                 <Receipt className="w-4 h-4 text-[#F59E0B]" />
                 Room Receipts & Previous Transactions ({roomBills.length})
               </p>
-              <span className="text-[11px] text-slate-500">Click any transaction to open receipt</span>
+              <span className="text-[11px] text-slate-400">
+                Click any transaction to open receipt
+              </span>
             </div>
 
             {roomBills.length === 0 ? (
@@ -256,8 +313,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 No billing transactions generated for {room.name} yet.
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {roomBills.map((bill) => {
+                  const isCurrentActiveReceipt =
+                    activeBill && bill.id === activeBill.id;
+
                   const statusBadge =
                     bill.status === 'paid'
                       ? {
@@ -282,11 +342,13 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     <div
                       key={bill.id}
                       onClick={() => onOpenReceipt(bill)}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-[#111622] hover:bg-[#161D2C] border border-[#1E2638] hover:border-[#F59E0B]/40 cursor-pointer transition-all"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-[#111622] hover:bg-[#161D2C] border border-[#1E2638] hover:border-[#F59E0B]/40 cursor-pointer transition-all"
                     >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white">{bill.billingPeriod}</span>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-extrabold text-white">
+                            {bill.billingPeriod}
+                          </span>
                           <span className="text-[11px] font-mono-num text-slate-400">
                             #{bill.receiptNo}
                           </span>
@@ -296,26 +358,35 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                             <StatusIcon className="w-3 h-3" />
                             {statusBadge.label}
                           </span>
-                          {!bill.isArchived && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F59E0B]/15 text-[#F59E0B]">
+                          {isCurrentActiveReceipt ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
                               Active Receipt
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400">
+                              Previous Transaction
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-1">
-                          Tenant: <span className="text-slate-200 font-medium">{bill.tenantName}</span> • Meter:{' '}
-                          <span className="font-mono-num text-[#F59E0B]">
-                            {bill.prevReading.toFixed(1)} → {bill.currReading.toFixed(1)} kWh (
+                        <p className="text-[11px] text-slate-400 mt-1.5">
+                          Tenant:{' '}
+                          <span className="text-slate-200 font-semibold">
+                            {bill.tenantName}
+                          </span>{' '}
+                          • Meter:{' '}
+                          <span className="font-mono-num text-[#F59E0B] font-semibold">
+                            {bill.prevReading.toFixed(1)} →{' '}
+                            {bill.currReading.toFixed(1)} kWh (
                             {bill.consumptionKwh.toFixed(1)} kWh)
                           </span>
                         </p>
                       </div>
 
-                      <div className="text-left sm:text-right font-mono-num">
-                        <p className="text-sm font-bold text-white">
+                      <div className="text-left sm:text-right font-mono-num shrink-0">
+                        <p className="text-sm font-extrabold text-white">
                           {formatPeso(bill.totalAmountDue)}
                         </p>
-                        <p className="text-[11px] text-[#10B981]">
+                        <p className="text-[11px] text-[#10B981] font-semibold">
                           Paid: {formatPeso(bill.amountPaid)}
                         </p>
                       </div>
@@ -326,9 +397,9 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             )}
           </div>
 
-          {/* Advance Payment Ledger for This Room */}
-          {advanceHistory.length > 0 && (
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4">
+          {/* Advance Payment Ledger for This Room (Only when Occupied & has history) */}
+          {isOccupied && advanceHistory.length > 0 && (
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 sm:p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-[#10B981] flex items-center gap-1.5 mb-3">
                 <Wallet className="w-4 h-4" />
                 Advance Payment & Withdrawal Ledger ({advanceHistory.length})
@@ -336,7 +407,8 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                 {advanceHistory.map((tx) => {
                   const isCredit =
-                    tx.type === 'overpayment_credit' || tx.type === 'manual_deposit';
+                    tx.type === 'overpayment_credit' ||
+                    tx.type === 'manual_deposit';
                   return (
                     <div
                       key={tx.id}
@@ -357,11 +429,14 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               : 'Advance Credit'}
                           </p>
                           <p className="text-[11px] text-slate-400">
-                            {new Date(tx.createdAt).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })}
+                            {new Date(tx.createdAt).toLocaleDateString(
+                              'en-US',
+                              {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              }
+                            )}
                           </p>
                         </div>
                       </div>
@@ -384,7 +459,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 
           {/* Previous Tenants History for This Room */}
           {previousTenants.length > 0 && (
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4">
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 sm:p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5 mb-3">
                 <History className="w-4 h-4 text-[#F59E0B]" />
                 Previous Tenants in {room.name} ({previousTenants.length})
@@ -398,7 +473,8 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     <div>
                       <p className="font-bold text-white">{pt.tenantName}</p>
                       <p className="text-[11px] text-slate-400">
-                        Stayed: {pt.moveInDate} to {pt.moveOutDate} • Exit Meter:{' '}
+                        Stayed: {pt.moveInDate} to {pt.moveOutDate} • Exit
+                        Meter:{' '}
                         <span className="font-mono-num text-[#F59E0B]">
                           {pt.finalMeterReading.toFixed(1)} kWh
                         </span>

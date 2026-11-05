@@ -59,6 +59,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
   const activeRooms = rooms.filter((r) => !r.isArchived);
 
   const getRoomActiveReceipt = (room: Room): BillRecord | undefined => {
+    if (room.status === 'vacant') return undefined;
     if (room.activeReceiptId) {
       const match = bills.find((b) => b.id === room.activeReceiptId);
       if (match) return match;
@@ -167,7 +168,11 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                     </div>
 
                     {/* Financial & Sub-Meter Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-4">
+                    <div
+                      className={`grid grid-cols-1 ${
+                        isOccupied ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+                      } gap-2.5 mt-4`}
+                    >
                       <div className="rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5">
                         <span className="text-[10px] uppercase text-slate-400 block">
                           Monthly Rent
@@ -192,26 +197,32 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           Req. Deposit
                         </span>
                         <span className="text-sm font-bold text-emerald-400 font-mono-num">
-                          {formatPeso(room.securityDeposit)}
+                          {formatPeso(
+                            room.securityDeposit > 0
+                              ? room.securityDeposit
+                              : room.monthlyRent
+                          )}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenAdvanceBalanceModal(room);
-                        }}
-                        className="rounded-xl bg-[#0F141D] hover:bg-[#172234] border border-emerald-500/30 p-2.5 text-left transition cursor-pointer"
-                        title="Click to Withdraw or Manage Tenant Advance Balance"
-                      >
-                        <span className="text-[10px] uppercase text-emerald-400 font-bold flex items-center justify-between">
-                          <span>Advance Bal.</span>
-                          <Wallet className="w-3 h-3" />
-                        </span>
-                        <span className="text-sm font-extrabold text-emerald-400 font-mono-num block">
-                          {formatPeso(room.advanceRent || 0)}
-                        </span>
-                      </button>
+                      {isOccupied && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenAdvanceBalanceModal(room);
+                          }}
+                          className="rounded-xl bg-[#0F141D] hover:bg-[#172234] border border-emerald-500/30 p-2.5 text-left transition cursor-pointer"
+                          title="Click to Withdraw or Manage Tenant Advance Balance"
+                        >
+                          <span className="text-[10px] uppercase text-emerald-400 font-bold flex items-center justify-between">
+                            <span>Advance Bal.</span>
+                            <Wallet className="w-3 h-3" />
+                          </span>
+                          <span className="text-sm font-extrabold text-emerald-400 font-mono-num block">
+                            {formatPeso(room.advanceRent || 0)}
+                          </span>
+                        </button>
+                      )}
                     </div>
 
                     {/* 1 Room = 1 Active Official Receipt Quick Bar */}
@@ -311,15 +322,17 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                         <span>Scan Meter & Bill</span>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => onOpenAdvanceBalanceModal(room)}
-                        className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
-                        title="Withdraw or Manage Advance Balance"
-                      >
-                        <Wallet className="w-3.5 h-3.5" />
-                        <span>Advance</span>
-                      </button>
+                      {isOccupied && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenAdvanceBalanceModal(room)}
+                          className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                          title="Withdraw or Manage Advance Balance"
+                        >
+                          <Wallet className="w-3.5 h-3.5" />
+                          <span>Advance</span>
+                        </button>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-1.5">

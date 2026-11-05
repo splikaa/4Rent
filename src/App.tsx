@@ -28,6 +28,7 @@ import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
+  subscribeToRealtimeSync,
 } from './services/supabaseSync';
 import {
   applyPaymentWithOverpayment,
@@ -127,6 +128,34 @@ export function App() {
       mounted = false;
     };
   }, []);
+
+  // Live Instant Realtime sync across Desktop & Mobile devices
+  useEffect(() => {
+    if (
+      settings.cloudSync.enabled &&
+      settings.cloudSync.supabaseUrl &&
+      settings.cloudSync.supabaseAnonKey
+    ) {
+      const unsubscribe = subscribeToRealtimeSync(
+        settings.cloudSync,
+        (remoteSnap) => {
+          importDatabaseSnapshot(remoteSnap);
+          setRooms(loadRooms());
+          setBills(loadBills());
+          setInquiries(loadInquiries());
+          setTenantHistory(loadTenantHistory());
+        }
+      );
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, [
+    settings.cloudSync.enabled,
+    settings.cloudSync.supabaseUrl,
+    settings.cloudSync.supabaseAnonKey,
+    settings.cloudSync.propertyCode,
+  ]);
 
   // Automatic Desktop <-> Mobile Cloud Sync when window gains focus
   useEffect(() => {

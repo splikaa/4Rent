@@ -106,6 +106,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
 
   const getRoomActiveReceipt = (room: Room): BillRecord | undefined => {
+    if (room.status === 'vacant') return undefined;
     if (room.activeReceiptId) {
       const match = bills.find((b) => b.id === room.activeReceiptId);
       if (match) return match;
@@ -348,6 +349,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {activeRooms.map((room) => {
               const isOccupied = room.status === 'occupied';
               const activeReceipt = getRoomActiveReceipt(room);
+              const safeDeposit =
+                room.securityDeposit > 0
+                  ? room.securityDeposit
+                  : room.monthlyRent;
+              const safeAdvance = isOccupied
+                ? Math.max(0, room.advanceRent || 0)
+                : 0;
 
               return (
                 <div
@@ -371,64 +379,87 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="mt-4 pt-3.5 border-t border-[#20293A] space-y-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">Tenant</span>
-                        {room.tenant?.fullName ? (
-                          <span className="font-semibold text-slate-200">
-                            {room.tenant.fullName}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-semibold text-[11px]">
-                            Available for Booking
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">
-                          Rent / Req. Deposit
+                    {/* Tenant Bar */}
+                    <div className="mt-3.5 rounded-xl bg-[#0F141D] border border-[#1E2738] px-3 py-2 flex items-center justify-between gap-2 text-xs">
+                      <span className="text-slate-400 font-medium">Tenant</span>
+                      {isOccupied && room.tenant?.fullName ? (
+                        <span className="font-bold text-slate-100 truncate">
+                          {room.tenant.fullName}
                         </span>
-                        <span className="font-bold text-white font-mono-num">
-                          {formatPeso(room.monthlyRent)} /{' '}
-                          <span className="text-emerald-400">
-                            {formatPeso(room.securityDeposit)}
-                          </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 font-bold text-[11px]">
+                          Available for Booking
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Clean 2x2 Metric Grid (No overlapping text & No Advance Balance when Vacant) */}
+                    <div className="mt-2.5 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5">
+                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
+                          Monthly Rent
+                        </span>
+                        <span className="text-sm font-extrabold text-white font-mono-num mt-0.5 block">
+                          {formatPeso(room.monthlyRent)}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">
+
+                      <div className="rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5">
+                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
+                          Req. Deposit
+                        </span>
+                        <span className="text-sm font-extrabold text-emerald-400 font-mono-num mt-0.5 block">
+                          {formatPeso(safeDeposit)}
+                        </span>
+                      </div>
+
+                      <div
+                        className={`rounded-xl bg-[#0F141D] border border-[#1E2738] p-2.5 ${
+                          isOccupied ? '' : 'col-span-2'
+                        }`}
+                      >
+                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
                           Continuous Sub-Meter
                         </span>
-                        <span className="font-bold text-amber-400 font-mono-num">
-                          {room.lastMeterReading.toFixed(1)} kWh (@{' '}
-                          {formatPeso(globalElectricRate)}/kWh)
-                        </span>
+                        <div className="flex items-center justify-between gap-1 mt-0.5">
+                          <span className="text-sm font-extrabold text-amber-400 font-mono-num">
+                            {room.lastMeterReading.toFixed(1)} kWh
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono-num">
+                            @{formatPeso(globalElectricRate)}/kWh
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400">
-                          Withdrawable Advance
-                        </span>
+
+                      {isOccupied && (
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             onOpenAdvanceBalanceModal(room);
                           }}
-                          className="font-bold text-emerald-400 hover:underline font-mono-num inline-flex items-center gap-1 cursor-pointer"
+                          className="rounded-xl bg-[#0F141D] hover:bg-[#172234] border border-emerald-500/30 p-2.5 text-left transition cursor-pointer"
+                          title="Manage or withdraw tenant advance balance"
                         >
-                          <Wallet className="w-3 h-3" />
-                          {formatPeso(room.advanceRent || 0)}
-                        </button>
-                      </div>
-                      {room.unpaidBalance > 0 && (
-                        <div className="flex items-center justify-between text-red-400 pt-1">
-                          <span className="font-medium">Unpaid Due</span>
-                          <span className="font-extrabold font-mono-num">
-                            {formatPeso(room.unpaidBalance)}
+                          <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold flex items-center justify-between">
+                            <span>Advance Bal.</span>
+                            <Wallet className="w-3 h-3" />
                           </span>
-                        </div>
+                          <span className="text-sm font-extrabold text-emerald-400 font-mono-num mt-0.5 block">
+                            {formatPeso(safeAdvance)}
+                          </span>
+                        </button>
                       )}
                     </div>
+
+                    {isOccupied && room.unpaidBalance > 0 && (
+                      <div className="mt-2 rounded-xl bg-red-500/10 border border-red-500/30 px-3 py-1.5 flex items-center justify-between text-xs text-red-400">
+                        <span className="font-semibold">Unpaid Balance Due</span>
+                        <span className="font-extrabold font-mono-num">
+                          {formatPeso(room.unpaidBalance)}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* 1 Room = 1 Receipt Direct Access + Scan Button */}
@@ -446,7 +477,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span>OCR Sub-Meter & Bill</span>
                       </button>
 
-                      {activeReceipt ? (
+                      {isOccupied && activeReceipt ? (
                         <button
                           type="button"
                           onClick={() => onSelectBillForReceipt(activeReceipt)}
