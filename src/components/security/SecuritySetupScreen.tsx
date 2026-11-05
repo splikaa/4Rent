@@ -3,6 +3,7 @@ import { ChevronRight, Delete, Fingerprint, ShieldCheck, X } from 'lucide-react'
 import { BrandLogo } from '../BrandLogo';
 import { registerDeviceBiometrics } from '../../services/ocrService';
 import { SecurityConfig } from '../../types/rental';
+import { isMobileDevice } from '../../utils/billingCalculator';
 
 interface SecuritySetupScreenProps {
   onComplete: (config: SecurityConfig) => void;
@@ -11,7 +12,8 @@ interface SecuritySetupScreenProps {
 export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
   onComplete,
 }) => {
-  const [mode, setMode] = useState<'menu' | 'pin'>('menu');
+  const isMobile = isMobileDevice();
+  const [mode, setMode] = useState<'menu' | 'pin'>(() => (isMobile ? 'menu' : 'pin'));
   const [pinStep, setPinStep] = useState<'create' | 'confirm'>('create');
   const [firstPin, setFirstPin] = useState('');
   const [currentPin, setCurrentPin] = useState('');
@@ -99,34 +101,36 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
           {mode === 'menu'
             ? 'Choose how you want to protect your application & room deletion'
             : pinStep === 'create'
-            ? 'Enter a secure 4-digit numeric code to unlock & authorize room deletion'
+            ? 'Enter a secure 4-digit numeric PIN to unlock & authorize room deletion'
             : 'Re-enter your 4-digit PIN to confirm'}
         </p>
 
         {errorMessage && (
           <div className="mt-5 w-full rounded-xl bg-amber-500/10 border border-amber-500/30 p-3.5 text-xs text-amber-300 text-center">
             <p>{errorMessage}</p>
-            <button
-              type="button"
-              onClick={() =>
-                onComplete({
-                  isSetupComplete: true,
-                  lockEnabled: true,
-                  authMethod: 'fingerprint',
-                  pinCode: '1234',
-                  webAuthnCredentialId: 'simulated-biometric-id',
-                })
-              }
-              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-semibold text-xs hover:bg-amber-400 transition cursor-pointer"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              Continue with Biometric Profile
-            </button>
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() =>
+                  onComplete({
+                    isSetupComplete: true,
+                    lockEnabled: true,
+                    authMethod: 'fingerprint',
+                    pinCode: '1234',
+                    webAuthnCredentialId: 'simulated-biometric-id',
+                  })
+                }
+                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-semibold text-xs hover:bg-amber-400 transition cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Continue with Biometric Profile
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {mode === 'menu' ? (
+      {mode === 'menu' && isMobile ? (
         <div className="w-full max-w-md space-y-4 my-auto py-8">
           <button
             type="button"
@@ -144,7 +148,7 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
                   : 'Register Fingerprint'}
               </div>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5 leading-relaxed">
-                Authenticate instantly using your device biometrics.
+                Authenticate instantly using your mobile biometrics.
               </p>
             </div>
             <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition shrink-0" />
@@ -205,17 +209,27 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
                 {digit}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => {
-                setMode('menu');
-                setCurrentPin('');
-              }}
-              className="h-16 rounded-2xl bg-[#161C28]/60 hover:bg-[#1F2737] border border-[#242E42] text-xs font-semibold text-slate-400 hover:text-white transition flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-              Back
-            </button>
+            {isMobile ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('menu');
+                  setCurrentPin('');
+                }}
+                className="h-16 rounded-2xl bg-[#161C28]/60 hover:bg-[#1F2737] border border-[#242E42] text-xs font-semibold text-slate-400 hover:text-white transition flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+                Back
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCurrentPin('')}
+                className="h-16 rounded-2xl bg-[#161C28]/60 hover:bg-[#1F2737] border border-[#242E42] text-xs font-semibold text-slate-400 hover:text-white transition flex items-center justify-center gap-1 cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
             <button
               type="button"
               onClick={() => handleDigitPress('0')}

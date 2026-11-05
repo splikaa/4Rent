@@ -8,7 +8,6 @@ import {
   CalendarCheck,
   Camera,
   DoorOpen,
-  FileSpreadsheet,
   Home,
   Menu,
   Plus,
@@ -40,6 +39,7 @@ interface DashboardViewProps {
   onOpenScanMeter: (room: Room) => void;
   onSelectBillForReceipt: (bill: BillRecord) => void;
   onOpenAdvanceBalanceModal: (room: Room) => void;
+  onSelectRoomDetails: (room: Room) => void;
   onLoadSampleData: () => void;
 }
 
@@ -54,6 +54,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenScanMeter,
   onSelectBillForReceipt,
   onOpenAdvanceBalanceModal,
+  onSelectRoomDetails,
   onLoadSampleData,
 }) => {
   const [now, setNow] = useState(new Date());
@@ -114,7 +115,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-5 pb-24">
-      {/* Top Header (Matches Screenshot 3) */}
+      {/* Top Header */}
       <header className="flex items-start justify-between gap-4 mb-6">
         <div className="flex items-start gap-3.5">
           <button
@@ -142,7 +143,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 Global Rate: {formatPeso(globalElectricRate)}/kWh
               </span>
               <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 font-semibold">
-                Pay Schedule: Every 1st–10th
+                Pay Schedule: Day 1 to 10
               </span>
             </div>
           </div>
@@ -178,7 +179,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </header>
 
-      {/* 3 Primary KPI Summary Cards (Matches Screenshot 3) */}
+      {/* 3 Primary KPI Summary Cards */}
       <section
         aria-label="Room occupancy summary"
         className="grid grid-cols-3 gap-3 sm:gap-5 mb-7"
@@ -241,14 +242,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-bold text-amber-300">
-                1st–10th Monthly Payment Reminder ({roomsWithDueBalance.length}{' '}
+                1st to 10th Monthly Payment Reminder ({roomsWithDueBalance.length}{' '}
                 {roomsWithDueBalance.length === 1 ? 'room' : 'rooms'})
               </h2>
               <p className="text-xs text-slate-300 mt-0.5">
                 {roomsWithDueBalance
                   .map((r) => `${r.name} (${formatPeso(r.unpaidBalance)})`)
                   .join(' • ')}{' '}
-                have unpaid balances due between the 1st and 10th of the month.
+                have unpaid balances due between Day 1 and Day 10 of the month.
               </p>
             </div>
           </div>
@@ -264,9 +265,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Your Rooms Section Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-          Your Rooms
-        </h2>
+        <div>
+          <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+            Your Rooms
+          </h2>
+          <p className="text-xs text-slate-400">
+            Click any room card to view full details & previous transactions
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -301,7 +307,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Empty State (Matches Screenshot 3) OR Active Rooms Grid */}
+      {/* Empty State OR Active Rooms Grid */}
       {activeRooms.length === 0 ? (
         <div className="rounded-3xl bg-[#121722]/70 border border-[#1E2636] px-6 py-14 flex flex-col items-center text-center my-4">
           <div className="w-20 h-20 rounded-[24px] bg-[#241E14] border border-amber-500/20 flex items-center justify-center mb-5 shadow-inner">
@@ -346,20 +352,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               return (
                 <div
                   key={room.id}
-                  className="rounded-2xl bg-[#151B26] hover:bg-[#19202E] border border-[#232D40] p-5 flex flex-col justify-between transition shadow-lg"
+                  onClick={() => onSelectRoomDetails(room)}
+                  className="rounded-2xl bg-[#151B26] hover:bg-[#19202E] border border-[#232D40] hover:border-amber-500/40 p-5 flex flex-col justify-between transition shadow-lg cursor-pointer"
                 >
                   <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className="text-lg font-extrabold text-white">
-                          {room.name}
-                        </span>
-                        {room.floorOrUnit && (
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            {room.floorOrUnit}
-                          </p>
-                        )}
-                      </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-lg font-extrabold text-white">
+                        {room.name}
+                      </span>
                       <span
                         className={`px-2.5 py-1 rounded-full text-xs font-bold ${
                           isOccupied
@@ -374,9 +374,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <div className="mt-4 pt-3.5 border-t border-[#20293A] space-y-2 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">Tenant</span>
-                        <span className="font-semibold text-slate-200">
-                          {room.tenant?.fullName || '— Vacant (Ready to Book) —'}
-                        </span>
+                        {room.tenant?.fullName ? (
+                          <span className="font-semibold text-slate-200">
+                            {room.tenant.fullName}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-semibold text-[11px]">
+                            Available for Booking
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">
@@ -404,7 +410,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </span>
                         <button
                           type="button"
-                          onClick={() => onOpenAdvanceBalanceModal(room)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenAdvanceBalanceModal(room);
+                          }}
                           className="font-bold text-emerald-400 hover:underline font-mono-num inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Wallet className="w-3 h-3" />
@@ -423,7 +432,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
 
                   {/* 1 Room = 1 Receipt Direct Access + Scan Button */}
-                  <div className="mt-4 pt-3 border-t border-[#20293A] flex flex-col gap-2">
+                  <div
+                    className="mt-4 pt-3 border-t border-[#20293A] flex flex-col gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -447,10 +459,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => onNavigate('rooms')}
+                          onClick={() => onSelectRoomDetails(room)}
                           className="py-2.5 px-3 rounded-xl bg-[#1E2636] hover:bg-[#273146] text-slate-200 font-semibold text-xs transition cursor-pointer"
                         >
-                          Manage
+                          Details
                         </button>
                       )}
                     </div>
@@ -589,9 +601,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     );
 
                     return (
-                      <div key={r.id} className="space-y-1">
+                      <div
+                        key={r.id}
+                        onClick={() => onSelectRoomDetails(r)}
+                        className="space-y-1 cursor-pointer group"
+                      >
                         <div className="flex items-center justify-between text-xs">
-                          <span className="font-semibold text-slate-200">
+                          <span className="font-semibold text-slate-200 group-hover:text-amber-400 transition">
                             {r.name}{' '}
                             <span className="text-slate-500 font-normal">
                               (Current Meter: {r.lastMeterReading.toFixed(1)}{' '}

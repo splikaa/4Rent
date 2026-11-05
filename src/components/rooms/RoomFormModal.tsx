@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { DoorOpen, Lock, Save, Shield, User, X, Zap } from 'lucide-react';
+import { Calendar, DoorOpen, Lock, Save, Shield, User, X, Zap } from 'lucide-react';
 import { Room } from '../../types/rental';
 import {
   clampDueDayOneToTen,
   formatPeso,
+  formatPhoneNumber,
+  getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
 
 interface RoomFormModalProps {
@@ -28,7 +30,6 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   onSave,
 }) => {
   const [name, setName] = useState('');
-  const [floorOrUnit, setFloorOrUnit] = useState('');
   const [monthlyRent, setMonthlyRent] = useState(String(defaultRent));
   const [lastMeterReading, setLastMeterReading] = useState('0');
   const [status, setStatus] = useState<'occupied' | 'vacant'>('occupied');
@@ -53,13 +54,11 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
     new Date().toISOString().slice(0, 10)
   );
   const [dueDayOfMonth, setDueDayOfMonth] = useState('5'); // Strictly 1 to 10
-  const [notes, setNotes] = useState('');
 
   useEffect(() => {
     setFormError(null);
     if (initialRoom) {
       setName(initialRoom.name);
-      setFloorOrUnit(initialRoom.floorOrUnit || '');
       setMonthlyRent(String(initialRoom.monthlyRent));
       setLastMeterReading(String(initialRoom.lastMeterReading));
       setStatus(initialRoom.status);
@@ -72,7 +71,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setAmountDepositPaidByTenant(String(reqDep));
       setAdvanceRent(String(initialRoom.advanceRent || 0));
       setTenantName(initialRoom.tenant?.fullName || '');
-      setTenantPhone(initialRoom.tenant?.phone || '');
+      setTenantPhone(formatPhoneNumber(initialRoom.tenant?.phone || ''));
       setMessengerUsername(initialRoom.tenant?.messengerUsername || '');
       setMoveInDate(
         initialRoom.tenant?.moveInDate || new Date().toISOString().slice(0, 10)
@@ -80,10 +79,10 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setDueDayOfMonth(
         String(clampDueDayOneToTen(initialRoom.tenant?.dueDayOfMonth || 5))
       );
-      setNotes(initialRoom.tenant?.notes || '');
     } else {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const autoDay = clampDueDayOneToTen(new Date().getDate());
       setName('');
-      setFloorOrUnit('');
       setMonthlyRent(String(defaultRent));
       setLastMeterReading('0');
       setStatus('occupied');
@@ -94,9 +93,8 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setTenantName('');
       setTenantPhone('');
       setMessengerUsername('');
-      setMoveInDate(new Date().toISOString().slice(0, 10));
-      setDueDayOfMonth('5');
-      setNotes('');
+      setMoveInDate(todayIso);
+      setDueDayOfMonth(String(autoDay));
     }
   }, [initialRoom, defaultRent, isOpen]);
 
@@ -108,6 +106,29 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
     paidDepNum > reqDepNum
       ? Math.round((paidDepNum - reqDepNum) * 100) / 100
       : 0;
+
+  const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOfMonth, 10) || 5);
+  const nextMonthDueDateIso = getNextDueDateInOneToTenWindow(
+    safeDueDay,
+    moveInDate
+  );
+  const nextMonthDueDateFormatted = new Date(
+    nextMonthDueDateIso
+  ).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  const handleMoveInDateChange = (newDate: string) => {
+    setMoveInDate(newDate);
+    if (newDate) {
+      const d = new Date(newDate);
+      if (!Number.isNaN(d.getTime())) {
+        setDueDayOfMonth(String(clampDueDayOneToTen(d.getDate())));
+      }
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,9 +170,8 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
 
     const roomPayload: Omit<Room, 'id' | 'updatedAt'> = {
       name: name.trim(),
-      floorOrUnit: floorOrUnit.trim() || undefined,
       monthlyRent: Math.max(0, parseFloat(monthlyRent) || 0),
-      // Note: lastMeterReading continues even if tenant changes or room becomes vacant!
+      // Continuous physical electric sub-meter kWh reading (never resets on tenant change)
       lastMeterReading: Math.max(0, parseFloat(lastMeterReading) || 0),
       lastMeterPhotoDataUrl: initialRoom?.lastMeterPhotoDataUrl,
       lastReadingDate: initialRoom?.lastReadingDate || nowIso,
@@ -167,11 +187,10 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
           ? {
               id: initialRoom?.tenant?.id || `ten-${Date.now()}`,
               fullName: tenantName.trim(),
-              phone: tenantPhone.trim(),
+              phone: formatPhoneNumber(tenantPhone),
               messengerUsername: messengerUsername.trim() || undefined,
               moveInDate,
-              dueDayOfMonth: clampDueDayOneToTen(parseInt(dueDayOfMonth, 10)),
-              notes: notes.trim() || undefined,
+              dueDayOfMonth: safeDueDay,
             }
           : undefined,
     };
@@ -198,8 +217,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 {initialRoom ? `Edit ${initialRoom.name}` : 'Create New Room'}
               </h2>
               <p className="text-xs text-slate-400">
-                Required Deposit • Continuous kWh Sub-Meter • 1st–10th Monthly
-                Payment Schedule
+                Required Deposit • Continuous kWh Sub-Meter • Auto Next-Month Due (Day 1 to 10)
               </p>
             </div>
           </div>
@@ -228,9 +246,9 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
               <Zap className="w-3.5 h-3.5" />
               Room & Continuous Sub-Meter Configuration
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+              <div className="flex flex-col">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Room Name / Unit Number *
                 </label>
                 <input
@@ -239,75 +257,19 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   placeholder="e.g., Room 101"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Floor / Unit Description
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., 1st Floor • Studio Unit"
-                  value={floorOrUnit}
-                  onChange={(e) => setFloorOrUnit(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white focus:border-amber-500 focus:outline-none"
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Monthly Base Rent (₱) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={monthlyRent}
-                  onChange={(e) => setMonthlyRent(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1 flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-amber-400" />
-                  Electric Sub-Meter Rate (Managed in Settings)
-                </label>
-                <div className="w-full rounded-xl bg-[#0B0E14] border border-[#252F42] px-3.5 py-2.5 text-sm text-amber-400 font-bold font-mono-num flex items-center justify-between">
-                  <span>{formatPeso(globalElectricRate)} / kWh</span>
-                  <span className="text-[10px] text-slate-500 font-sans">
-                    Global Rate
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Continuous Sub-Meter Reading (kWh) *
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  required
-                  value={lastMeterReading}
-                  onChange={(e) => setLastMeterReading(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-amber-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
-                />
-                <span className="text-[10px] text-slate-500 mt-0.5 block">
-                  Continues across tenant changes without resetting to 0.
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <div className="flex flex-col">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Occupancy Status
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 h-10">
                   <button
                     type="button"
                     onClick={() => setStatus('occupied')}
-                    className={`py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    className={`rounded-xl text-xs font-bold border transition cursor-pointer ${
                       status === 'occupied'
                         ? 'bg-amber-500 text-slate-950 border-amber-500'
                         : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
@@ -318,7 +280,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setStatus('vacant')}
-                    className={`py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    className={`rounded-xl text-xs font-bold border transition cursor-pointer ${
                       status === 'vacant'
                         ? 'bg-emerald-500 text-slate-950 border-emerald-500'
                         : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
@@ -327,6 +289,50 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     Vacant
                   </button>
                 </div>
+              </div>
+
+              <div className="flex flex-col">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Monthly Base Rent (₱) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={monthlyRent}
+                  onChange={(e) => setMonthlyRent(e.target.value)}
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 flex items-center gap-1">
+                  <Lock className="w-3 h-3 text-amber-400" />
+                  Electric Rate (Managed in Settings)
+                </label>
+                <div className="w-full h-10 rounded-xl bg-[#0B0E14] border border-[#252F42] px-3.5 text-sm text-amber-400 font-bold font-mono-num flex items-center justify-between">
+                  <span>{formatPeso(globalElectricRate)} / kWh</span>
+                  <span className="text-[10px] text-slate-500 font-sans">
+                    Global Rate
+                  </span>
+                </div>
+              </div>
+
+              <div className="sm:col-span-2 flex flex-col">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Continuous Sub-Meter Reading (kWh) *
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  required
+                  value={lastMeterReading}
+                  onChange={(e) => setLastMeterReading(e.target.value)}
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-amber-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Continues across tenant changes without resetting to 0.
+                </span>
               </div>
             </div>
           </div>
@@ -344,7 +350,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 <select
                   value={vacatedReason}
                   onChange={(e) => setVacatedReason(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-amber-500/40 px-3 py-2 text-xs font-bold text-white"
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-amber-500/40 px-3 text-xs font-bold text-white"
                 >
                   <option value="Stopped Paying Rent / Vacated">
                     Stopped Paying Rent / Vacated
@@ -366,10 +372,10 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
               <Shield className="w-3.5 h-3.5" />
               Required Security Deposit & Withdrawable Advance Balance
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-              <div>
-                <label className="block text-xs font-bold text-emerald-400 mb-1">
-                  Required Room Deposit (₱) *
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 items-start">
+              <div className="flex flex-col">
+                <label className="block text-xs font-bold text-emerald-400 mb-1.5 whitespace-nowrap">
+                  Required Deposit (₱) *
                 </label>
                 <input
                   type="number"
@@ -378,39 +384,38 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   required
                   value={requiredSecurityDeposit}
                   onChange={(e) => setRequiredSecurityDeposit(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-emerald-500/40 px-3.5 py-2.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-emerald-500 focus:outline-none"
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-emerald-500/40 px-3.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-emerald-500 focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Deposit Amount Paid by Tenant (₱)
+              <div className="flex flex-col">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
+                  Deposit Paid (₱)
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   value={amountDepositPaidByTenant}
                   onChange={(e) => setAmountDepositPaidByTenant(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
                 />
                 {excessDepositToAdvance > 0 && (
-                  <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">
-                    +{formatPeso(excessDepositToAdvance)} excess goes to Advance
-                    Balance!
+                  <span className="text-[10px] text-emerald-400 font-semibold block mt-1">
+                    +{formatPeso(excessDepositToAdvance)} credited to Advance!
                   </span>
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Existing Advance Balance (₱)
+              <div className="flex flex-col">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
+                  Advance Balance (₱)
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   value={advanceRent}
                   onChange={(e) => setAdvanceRent(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -421,11 +426,11 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             <div className="pt-3 border-t border-[#222C3F]">
               <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5 mb-3">
                 <User className="w-3.5 h-3.5" />
-                Tenant Profile & Mandatory 1st–10th Monthly Payment Window
+                Tenant Profile & Auto Next-Month Payment Schedule (Day 1 to 10)
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+                <div className="flex flex-col">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Tenant Full Name *
                   </label>
                   <input
@@ -434,23 +439,25 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     placeholder="e.g., Juan Dela Cruz"
                     value={tenantName}
                     onChange={(e) => setTenantName(e.target.value)}
-                    className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white"
+                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Mobile Phone Number
+                <div className="flex flex-col">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Mobile Phone Number (Auto-Formatted)
                   </label>
                   <input
-                    type="text"
-                    placeholder="e.g., 0917-555-0101"
+                    type="tel"
+                    placeholder="0917-555-0101"
                     value={tenantPhone}
-                    onChange={(e) => setTenantPhone(e.target.value)}
-                    className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white"
+                    onChange={(e) =>
+                      setTenantPhone(formatPhoneNumber(e.target.value))
+                    }
+                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <div className="flex flex-col">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Facebook Messenger Username
                   </label>
                   <input
@@ -458,38 +465,48 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     placeholder="e.g., juandelacruz"
                     value={messengerUsername}
                     onChange={(e) => setMessengerUsername(e.target.value)}
-                    className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white"
+                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <div className="grid grid-cols-2 gap-2.5 items-start">
+                  <div className="flex flex-col">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
                       Move-In Date
                     </label>
                     <input
                       type="date"
                       value={moveInDate}
-                      onChange={(e) => setMoveInDate(e.target.value)}
-                      className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3 py-2.5 text-xs text-white"
+                      onChange={(e) => handleMoveInDateChange(e.target.value)}
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-amber-400 mb-1">
-                      Pay Day (1–10) *
+                  <div className="flex flex-col">
+                    <label className="block text-xs font-bold text-amber-400 mb-1.5 whitespace-nowrap">
+                      Pay Day (Day 1 to 10) *
                     </label>
                     <select
                       value={dueDayOfMonth}
                       onChange={(e) => setDueDayOfMonth(e.target.value)}
-                      className="w-full rounded-xl bg-[#0E131C] border border-amber-500/40 px-2.5 py-2.5 text-xs font-bold text-amber-400"
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-amber-500/40 px-2.5 text-xs font-bold text-amber-400 focus:border-amber-500 focus:outline-none"
                     >
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
                         <option key={d} value={d}>
-                          Every Day {d} (1st–10th)
+                          Day {d} of Month
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
+              </div>
+
+              <div className="mt-3 rounded-xl bg-[#0E131C] border border-amber-500/30 px-3.5 py-2.5 flex items-center justify-between text-xs">
+                <span className="text-slate-300 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  Auto-Scheduled Next Month Payment Due Date (1 to 10 Window):
+                </span>
+                <span className="font-bold text-amber-400">
+                  {nextMonthDueDateFormatted} (Day {safeDueDay})
+                </span>
               </div>
             </div>
           )}

@@ -17,7 +17,11 @@ import {
   Wallet,
 } from 'lucide-react';
 import { BillRecord, Room } from '../../types/rental';
-import { formatPeso } from '../../utils/billingCalculator';
+import {
+  formatPeso,
+  formatPhoneNumber,
+  getNextDueDateInOneToTenWindow,
+} from '../../utils/billingCalculator';
 
 interface ManageRoomsViewProps {
   rooms: Room[];
@@ -32,6 +36,7 @@ interface ManageRoomsViewProps {
   onOpenScanMeter: (room: Room) => void;
   onOpenRoomReceipt: (bill: BillRecord) => void;
   onOpenAdvanceBalanceModal: (room: Room) => void;
+  onSelectRoomDetails: (room: Room) => void;
   onOpenArchiveCenter: () => void;
 }
 
@@ -48,6 +53,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
   onOpenScanMeter,
   onOpenRoomReceipt,
   onOpenAdvanceBalanceModal,
+  onSelectRoomDetails,
   onOpenArchiveCenter,
 }) => {
   const activeRooms = rooms.filter((r) => !r.isArchived);
@@ -62,7 +68,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0B0E14] pb-28">
-      {/* Top Bar (Matches Screenshot 4) */}
+      {/* Top Bar */}
       <header className="sticky top-0 z-20 bg-[#141923] border-b border-[#222B3C] px-4 sm:px-6 h-16 flex items-center justify-between">
         <button
           type="button"
@@ -89,7 +95,6 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
 
       <div className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 flex flex-col">
         {activeRooms.length === 0 ? (
-          /* Exact Empty State from Screenshot 4 */
           <div className="flex-1 flex flex-col items-center justify-center text-center py-20 select-none">
             <button
               type="button"
@@ -113,11 +118,27 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
             {activeRooms.map((room) => {
               const isOccupied = room.status === 'occupied';
               const activeReceipt = getRoomActiveReceipt(room);
+              const roomBillsCount = bills.filter(
+                (b) => b.roomId === room.id
+              ).length;
+              const nextDueIso = getNextDueDateInOneToTenWindow(
+                room.tenant?.dueDayOfMonth || 5,
+                room.tenant?.moveInDate
+              );
+              const nextDueFormatted = new Date(nextDueIso).toLocaleDateString(
+                'en-US',
+                {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                }
+              );
 
               return (
                 <div
                   key={room.id}
-                  className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 flex flex-col justify-between shadow-lg"
+                  onClick={() => onSelectRoomDetails(room)}
+                  className="rounded-2xl bg-[#151B26] hover:bg-[#19202E] border border-[#232D40] hover:border-amber-500/40 p-5 flex flex-col justify-between shadow-lg transition cursor-pointer"
                 >
                   <div>
                     <div className="flex items-start justify-between gap-3">
@@ -126,10 +147,12 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           {room.name}
                         </h2>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          {room.floorOrUnit || 'Standard Apartment Unit'} • Rate:{' '}
+                          Global Rate:{' '}
                           <strong className="text-amber-400 font-mono-num">
                             {formatPeso(globalElectricRate)}/kWh
-                          </strong>
+                          </strong>{' '}
+                          • {roomBillsCount}{' '}
+                          {roomBillsCount === 1 ? 'Transaction' : 'Transactions'}
                         </p>
                       </div>
                       <span
@@ -174,7 +197,10 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                       </div>
                       <button
                         type="button"
-                        onClick={() => onOpenAdvanceBalanceModal(room)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenAdvanceBalanceModal(room);
+                        }}
                         className="rounded-xl bg-[#0F141D] hover:bg-[#172234] border border-emerald-500/30 p-2.5 text-left transition cursor-pointer"
                         title="Click to Withdraw or Manage Tenant Advance Balance"
                       >
@@ -189,7 +215,10 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                     </div>
 
                     {/* 1 Room = 1 Active Official Receipt Quick Bar */}
-                    <div className="mt-3 rounded-xl bg-[#101622] border border-[#222F46] px-3.5 py-2.5 flex items-center justify-between gap-2">
+                    <div
+                      className="mt-3 rounded-xl bg-[#101622] border border-[#222F46] px-3.5 py-2.5 flex items-center justify-between gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <div className="flex items-center gap-2 min-w-0">
                         <ReceiptText className="w-4 h-4 text-amber-400 shrink-0" />
                         {activeReceipt ? (
@@ -228,15 +257,15 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           </span>
                           <span className="text-amber-400 font-semibold flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
-                            Pay Window: 1st–10th (Day {room.tenant.dueDayOfMonth}
-                            )
+                            Next Due: {nextDueFormatted} (Day{' '}
+                            {room.tenant.dueDayOfMonth})
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-3 text-slate-400">
                           {room.tenant.phone && (
-                            <span className="inline-flex items-center gap-1">
+                            <span className="inline-flex items-center gap-1 font-mono-num">
                               <Phone className="w-3.5 h-3.5 text-slate-500" />
-                              {room.tenant.phone}
+                              {formatPhoneNumber(room.tenant.phone)}
                             </span>
                           )}
                           {room.tenant.messengerUsername && (
@@ -244,6 +273,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                               href={`https://m.me/${room.tenant.messengerUsername}`}
                               target="_blank"
                               rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
                               className="inline-flex items-center gap-1 text-blue-400 hover:underline"
                             >
                               <MessageCircle className="w-3.5 h-3.5" />
@@ -258,17 +288,19 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                       </div>
                     ) : (
                       <div className="mt-3 rounded-xl bg-[#101520] border border-dashed border-[#243044] p-3 text-xs text-slate-400 text-center">
-                        Room is currently vacant. Sub-Meter continues at{' '}
+                        Available for Booking • Continuous Sub-Meter at{' '}
                         <strong className="text-amber-400 font-mono-num">
                           {room.lastMeterReading.toFixed(1)} kWh
                         </strong>
-                        .
                       </div>
                     )}
                   </div>
 
                   {/* Actions */}
-                  <div className="mt-4 pt-3.5 border-t border-[#20293A] flex flex-wrap items-center justify-between gap-2">
+                  <div
+                    className="mt-4 pt-3.5 border-t border-[#20293A] flex flex-wrap items-center justify-between gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
@@ -340,7 +372,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
         )}
       </div>
 
-      {/* Bottom-Right Circular Amber FAB (Matches Screenshot 4) */}
+      {/* Bottom-Right Circular Amber FAB */}
       <button
         type="button"
         onClick={onOpenAddRoom}

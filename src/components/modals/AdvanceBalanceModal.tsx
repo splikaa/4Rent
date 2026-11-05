@@ -29,7 +29,6 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
     'withdraw'
   );
   const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   if (!room) return null;
@@ -58,19 +57,17 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
       onWithdrawAdvance(
         room.id,
         val,
-        note.trim() || 'Tenant decided to withdraw Advance Payment Balance'
+        'Advance Payment Balance Withdrawal'
       );
       setAmount('');
-      setNote('');
       onClose();
     } else if (actionType === 'add') {
       onAddAdvanceDeposit(
         room.id,
         val,
-        note.trim() || 'Tenant added extra Deposit / Advance Balance'
+        'Added Deposit / Advance Payment Balance'
       );
       setAmount('');
-      setNote('');
       onClose();
     } else {
       const maxApplicable = Math.min(currentAdvance, currentUnpaid);
@@ -96,11 +93,10 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-extrabold text-white">
-                Advance Payment Balance — {room.name}
+                Advance Payment Balance • {room.name}
               </h3>
               <p className="text-xs text-slate-400">
-                Overpayments & excess deposits can be withdrawn or applied by
-                tenant decision
+                Manage withdrawable advance balance and security deposit credits
               </p>
             </div>
           </div>
@@ -198,7 +194,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                 {actionType === 'withdraw'
                   ? 'Withdrawal Amount to Release to Tenant (₱) *'
                   : actionType === 'add'
@@ -214,28 +210,9 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-base font-bold text-white font-mono-num"
+                className="w-full h-11 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-base font-bold text-white font-mono-num focus:border-amber-500 focus:outline-none"
               />
             </div>
-
-            {actionType !== 'apply' && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Reason / Decision Note
-                </label>
-                <input
-                  type="text"
-                  placeholder={
-                    actionType === 'withdraw'
-                      ? 'e.g., Tenant requested cash withdrawal of excess advance'
-                      : 'e.g., Paid extra ₱1,000 above required deposit'
-                  }
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-xs text-white"
-                />
-              </div>
-            )}
 
             <button
               type="submit"
@@ -280,7 +257,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
                     >
                       {item.type === 'withdrawal' ||
                       item.type === 'applied_to_bill'
-                        ? '−'
+                        ? '-'
                         : '+'}
                       {formatPeso(item.amount)}
                     </span>

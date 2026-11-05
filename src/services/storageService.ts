@@ -8,22 +8,36 @@ import {
 } from '../types/rental';
 import { generateSimulatedSubMeterDataUrl } from './ocrService';
 import { getNextDueDateInOneToTenWindow } from '../utils/billingCalculator';
+import { saveSnapshotToIndexedDb } from './idbDatabase';
 
+/**
+ * Stable, version-independent storage keys so app updates NEVER wipe existing data.
+ */
 const STORAGE_KEYS = {
-  ROOMS: '4rent_rooms_v2',
-  BILLS: '4rent_bills_v2',
-  INQUIRIES: '4rent_inquiries_v2',
-  HISTORY: '4rent_tenant_history_v2',
-  SETTINGS: '4rent_settings_v2',
+  ROOMS: '4rent_db_rooms',
+  BILLS: '4rent_db_bills',
+  INQUIRIES: '4rent_db_inquiries',
+  HISTORY: '4rent_db_tenant_history',
+  SETTINGS: '4rent_db_settings',
 };
+
+/**
+ * Developer-level pre-configured Cloud Sync credentials.
+ * As the developer (splikaa), you can set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+ * in `.env` so the landlord's Desktop & Mobile apps sync out-of-the-box with zero setup.
+ */
+const viteEnv =
+  (import.meta as unknown as { env?: Record<string, string> }).env || {};
+const DEV_SUPABASE_URL = viteEnv.VITE_SUPABASE_URL || '';
+const DEV_SUPABASE_ANON_KEY = viteEnv.VITE_SUPABASE_ANON_KEY || '';
+const DEV_PROPERTY_CODE = viteEnv.VITE_PROPERTY_CODE || '4RENT-MAIN';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   apartmentName: '4Rent Apartments',
   landlordName: 'Property Administrator',
   landlordPhone: '0917-000-0000',
   landlordMessenger: '',
-  paymentInstructions:
-    'GCash / Maya: 0917-000-0000 (4Rent Apartments)\nPayment Schedule: Every 1st – 10th of the Month.',
+  paymentInstructions: '',
   defaultElectricRate: 15.0,
   defaultMonthlyRent: 4500.0,
   defaultSecurityDeposit: 4500.0,
@@ -37,10 +51,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     pinCode: '1234',
   },
   cloudSync: {
-    enabled: false,
-    supabaseUrl: '',
-    supabaseAnonKey: '',
-    propertyCode: '4RENT-MAIN',
+    enabled: Boolean(DEV_SUPABASE_URL && DEV_SUPABASE_ANON_KEY),
+    supabaseUrl: DEV_SUPABASE_URL,
+    supabaseAnonKey: DEV_SUPABASE_ANON_KEY,
+    propertyCode: DEV_PROPERTY_CODE,
   },
 };
 
@@ -48,6 +62,7 @@ export function loadSettings(): AppSettings {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEYS.SETTINGS) ||
+      localStorage.getItem('4rent_settings_v2') ||
       localStorage.getItem('4rent_settings_v1');
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw);
@@ -62,6 +77,9 @@ export function loadSettings(): AppSettings {
       cloudSync: {
         ...DEFAULT_SETTINGS.cloudSync,
         ...(parsed.cloudSync || {}),
+        supabaseUrl: parsed.cloudSync?.supabaseUrl || DEV_SUPABASE_URL,
+        supabaseAnonKey:
+          parsed.cloudSync?.supabaseAnonKey || DEV_SUPABASE_ANON_KEY,
       },
     };
   } catch {
@@ -71,12 +89,14 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings): void {
   localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  persistMasterIndexedDb();
 }
 
 export function loadRooms(): Room[] {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEYS.ROOMS) ||
+      localStorage.getItem('4rent_rooms_v2') ||
       localStorage.getItem('4rent_rooms_v1');
     return raw ? JSON.parse(raw) : [];
   } catch {
@@ -86,12 +106,14 @@ export function loadRooms(): Room[] {
 
 export function saveRooms(rooms: Room[]): void {
   localStorage.setItem(STORAGE_KEYS.ROOMS, JSON.stringify(rooms));
+  persistMasterIndexedDb();
 }
 
 export function loadBills(): BillRecord[] {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEYS.BILLS) ||
+      localStorage.getItem('4rent_bills_v2') ||
       localStorage.getItem('4rent_bills_v1');
     return raw ? JSON.parse(raw) : [];
   } catch {
@@ -101,11 +123,14 @@ export function loadBills(): BillRecord[] {
 
 export function saveBills(bills: BillRecord[]): void {
   localStorage.setItem(STORAGE_KEYS.BILLS, JSON.stringify(bills));
+  persistMasterIndexedDb();
 }
 
 export function loadInquiries(): RoomInquiryBooking[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.INQUIRIES);
+    const raw =
+      localStorage.getItem(STORAGE_KEYS.INQUIRIES) ||
+      localStorage.getItem('4rent_inquiries_v2');
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -114,12 +139,14 @@ export function loadInquiries(): RoomInquiryBooking[] {
 
 export function saveInquiries(inquiries: RoomInquiryBooking[]): void {
   localStorage.setItem(STORAGE_KEYS.INQUIRIES, JSON.stringify(inquiries));
+  persistMasterIndexedDb();
 }
 
 export function loadTenantHistory(): TenantHistoryEntry[] {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEYS.HISTORY) ||
+      localStorage.getItem('4rent_tenant_history_v2') ||
       localStorage.getItem('4rent_tenant_history_v1');
     return raw ? JSON.parse(raw) : [];
   } catch {
@@ -129,11 +156,12 @@ export function loadTenantHistory(): TenantHistoryEntry[] {
 
 export function saveTenantHistory(history: TenantHistoryEntry[]): void {
   localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+  persistMasterIndexedDb();
 }
 
 export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
   return {
-    version: '1.1.0',
+    version: '1.2.0',
     exportedAt: new Date().toISOString(),
     rooms: loadRooms(),
     bills: loadBills(),
@@ -143,19 +171,39 @@ export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
   };
 }
 
-export function importDatabaseSnapshot(snapshot: AppDatabaseSnapshot): void {
-  if (Array.isArray(snapshot.rooms)) saveRooms(snapshot.rooms);
-  if (Array.isArray(snapshot.bills)) saveBills(snapshot.bills);
-  if (Array.isArray(snapshot.inquiries)) saveInquiries(snapshot.inquiries);
-  if (Array.isArray(snapshot.tenantHistory))
-    saveTenantHistory(snapshot.tenantHistory);
-  if (snapshot.settings) saveSettings(snapshot.settings);
+function persistMasterIndexedDb(): void {
+  const snap = exportDatabaseSnapshot();
+  saveSnapshotToIndexedDb(snap);
 }
 
-/**
- * Generates sample apartment rooms, 1-to-1 room receipts with Dual Sub-Meter proofs,
- * inquiries/bookings, and tenant history.
- */
+export function importDatabaseSnapshot(snapshot: AppDatabaseSnapshot): void {
+  if (Array.isArray(snapshot.rooms)) {
+    localStorage.setItem(STORAGE_KEYS.ROOMS, JSON.stringify(snapshot.rooms));
+  }
+  if (Array.isArray(snapshot.bills)) {
+    localStorage.setItem(STORAGE_KEYS.BILLS, JSON.stringify(snapshot.bills));
+  }
+  if (Array.isArray(snapshot.inquiries)) {
+    localStorage.setItem(
+      STORAGE_KEYS.INQUIRIES,
+      JSON.stringify(snapshot.inquiries)
+    );
+  }
+  if (Array.isArray(snapshot.tenantHistory)) {
+    localStorage.setItem(
+      STORAGE_KEYS.HISTORY,
+      JSON.stringify(snapshot.tenantHistory)
+    );
+  }
+  if (snapshot.settings) {
+    localStorage.setItem(
+      STORAGE_KEYS.SETTINGS,
+      JSON.stringify(snapshot.settings)
+    );
+  }
+  persistMasterIndexedDb();
+}
+
 export function createSampleDemoData(globalElectricRate = 15.0): {
   rooms: Room[];
   bills: BillRecord[];
@@ -176,7 +224,6 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
     {
       id: 'room-101',
       name: 'Room 101',
-      floorOrUnit: '1st Floor • Studio w/ Sub-Meter',
       monthlyRent: 4500,
       lastMeterReading: 1485.6,
       lastMeterPhotoDataUrl: currPhoto101,
@@ -191,7 +238,7 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
           type: 'overpayment_credit',
           amount: 516,
           createdAt: isoNow,
-          note: 'Tenant paid ₱6,000 for ₱5,484 bill (₱516 excess credited to Advance Balance)',
+          note: 'Excess ₱516.00 credited to Advance Payment Balance',
         },
       ],
       activeReceiptId: 'bill-demo-1',
@@ -203,14 +250,11 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
         messengerUsername: 'juandelacruz',
         moveInDate: '2026-06-01',
         dueDayOfMonth: 5,
-        emergencyContact: 'Maria Dela Cruz (0918-555-0199)',
-        notes: 'Pays between 1st–5th every month via GCash',
       },
     },
     {
       id: 'room-102',
       name: 'Room 102',
-      floorOrUnit: '1st Floor • 1-Bedroom Unit',
       monthlyRent: 5500,
       lastMeterReading: 2340.2,
       lastMeterPhotoDataUrl: currPhoto102,
@@ -228,13 +272,11 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
         messengerUsername: 'angelasantos',
         moveInDate: '2026-08-08',
         dueDayOfMonth: 8,
-        notes: 'Partial payment recorded; remaining balance carried over',
       },
     },
     {
       id: 'room-201',
       name: 'Room 201',
-      floorOrUnit: '2nd Floor • Corner Unit',
       monthlyRent: 5000,
       lastMeterReading: 890.0,
       status: 'vacant',
@@ -257,7 +299,7 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
       billingPeriod: 'Nov 2026',
       createdAt: isoNow,
       dueDate: dueWindow5,
-      paymentWindowLabel: 'Every 1st – 10th of the Month (Day 5)',
+      paymentWindowLabel: 'Every 1st - 10th of the Month (Day 5)',
       prevReading: 1420.0,
       currReading: 1485.6,
       consumptionKwh: 65.6,
@@ -284,7 +326,6 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
           method: 'GCash',
           paidAt: isoNow,
           referenceNo: 'GC-99481023',
-          note: 'Paid ₱6,000.00 (₱516.00 excess credited to Advance Balance)',
         },
       ],
       updatedAt: isoNow,
@@ -300,7 +341,7 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
       billingPeriod: 'Nov 2026',
       createdAt: isoNow,
       dueDate: dueWindow8,
-      paymentWindowLabel: 'Every 1st – 10th of the Month (Day 8)',
+      paymentWindowLabel: 'Every 1st - 10th of the Month (Day 8)',
       prevReading: 2288.2,
       currReading: 2340.2,
       consumptionKwh: 52.0,
@@ -326,7 +367,6 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
           amount: 5500.0,
           method: 'Cash',
           paidAt: isoNow,
-          note: 'Paid base rent; electric + carry-over pending',
         },
       ],
       updatedAt: isoNow,
@@ -336,7 +376,7 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
   const inquiries: RoomInquiryBooking[] = [
     {
       id: 'inq-demo-1',
-      prospectName: 'kevin Mendoza',
+      prospectName: 'Kevin Mendoza',
       phone: '0917-888-9090',
       messengerUsername: 'kevinmendoza',
       roomId: 'room-201',
@@ -346,7 +386,6 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
       quotedMonthlyRent: 5000,
       requiredDeposit: 5000,
       status: 'booked',
-      notes: 'Paid ₱1,500 reservation fee via GCash; moving in on the 5th.',
       createdAt: isoNow,
     },
   ];
@@ -365,7 +404,6 @@ export function createSampleDemoData(globalElectricRate = 15.0): {
       depositHeld: 5000,
       unpaidBalanceAtMoveOut: 0,
       lastReceiptNo: '4R-202610-201',
-      notes: 'Sub-meter kWh reading (890.0 kWh) continues for next tenant.',
     },
   ];
 

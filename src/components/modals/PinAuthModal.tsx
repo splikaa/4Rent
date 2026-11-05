@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Delete, Fingerprint, Lock, ShieldAlert, X } from 'lucide-react';
 import { SecurityConfig } from '../../types/rental';
 import { verifyDeviceBiometrics } from '../../services/ocrService';
+import { isMobileDevice } from '../../utils/billingCalculator';
 
 interface PinAuthModalProps {
   isOpen: boolean;
@@ -20,6 +21,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
   onClose,
   onAuthorized,
 }) => {
+  const isMobile = isMobileDevice();
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +50,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
   };
 
   const handleBiometricVerify = async () => {
+    if (!isMobile) return;
     setError(null);
     const res = await verifyDeviceBiometrics(security.webAuthnCredentialId);
     if (res.ok) {
@@ -90,7 +93,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
             <Lock className="w-3.5 h-3.5 shrink-0" />
             <span>
               Default Admin PIN is <strong className="font-mono-num">1234</strong>{' '}
-              (Customize in Settings → Security).
+              (Customize in Settings).
             </span>
           </div>
         )}
@@ -127,14 +130,24 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
               {d}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={handleBiometricVerify}
-            title="Verify with Fingerprint"
-            className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] border border-[#242E42] text-amber-400 flex items-center justify-center transition cursor-pointer"
-          >
-            <Fingerprint className="w-5 h-5" />
-          </button>
+          {isMobile ? (
+            <button
+              type="button"
+              onClick={handleBiometricVerify}
+              title="Verify with Fingerprint"
+              className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] border border-[#242E42] text-amber-400 flex items-center justify-center transition cursor-pointer"
+            >
+              <Fingerprint className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPin('')}
+              className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] border border-[#242E42] text-xs font-semibold text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            >
+              Clear
+            </button>
+          )}
           <button
             type="button"
             onClick={() => handleDigit('0')}

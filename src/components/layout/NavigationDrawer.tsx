@@ -156,9 +156,10 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
         )}
       </nav>
 
-      {/* Version Footer */}
-      <div className="py-4 text-center text-xs font-medium text-slate-500 border-t border-[#1E2636]">
-        v1.1.0 • Cross-OS PWA
+      {/* Version & Developer Footer */}
+      <div className="py-4 px-3 text-center text-xs font-medium text-slate-400 border-t border-[#1E2636] space-y-0.5">
+        <div className="font-bold text-amber-400">4Rent v1.2.0</div>
+        <div className="text-[11px] text-slate-500">Developed by splikaa</div>
       </div>
     </div>
   );

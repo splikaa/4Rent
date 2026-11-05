@@ -7,6 +7,9 @@ import {
   clampDueDayOneToTen,
   extractMeterDigitsFromOcrText,
   formatPeso,
+  formatPhoneNumber,
+  getBillingPeriodOptions,
+  getNextDueDateInOneToTenWindow,
 } from './billingCalculator';
 import { BillRecord } from '../types/rental';
 
@@ -113,5 +116,23 @@ describe('4Rent Sub-Meter OCR & Billing Engine', () => {
   it('formats currency in Philippine Peso (₱)', () => {
     expect(formatPeso(0)).toBe('₱0.00');
     expect(formatPeso(5420.5)).toBe('₱5,420.50');
+  });
+
+  it('auto-formats Philippine mobile numbers as user types', () => {
+    expect(formatPhoneNumber('09175550101')).toBe('0917-555-0101');
+    expect(formatPhoneNumber('9175550101')).toBe('0917-555-0101');
+    expect(formatPhoneNumber('+639187770202')).toBe('0918-777-0202');
+  });
+
+  it('computes auto next-month due date strictly within Day 1 to Day 10', () => {
+    const dueIso = getNextDueDateInOneToTenWindow(18, '2026-06-15');
+    expect(dueIso).toBe('2026-07-10'); // Clamped to Day 10 of next month
+    const dueIsoDay5 = getNextDueDateInOneToTenWindow(5, '2026-11-06');
+    expect(dueIsoDay5).toBe('2026-12-05');
+  });
+
+  it('returns selectable billing period options for OCR reader dropdown', () => {
+    const options = getBillingPeriodOptions();
+    expect(options.length).toBeGreaterThanOrEqual(8);
   });
 });

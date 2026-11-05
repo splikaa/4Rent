@@ -13,7 +13,6 @@ import {
   Sparkles,
   Upload,
   X,
-  Zap,
 } from 'lucide-react';
 import { BillRecord, Room } from '../../types/rental';
 import {
@@ -21,6 +20,7 @@ import {
   calculateSubMeterDifference,
   clampDueDayOneToTen,
   formatPeso,
+  getBillingPeriodOptions,
   getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
 import {
@@ -59,6 +59,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     activeRooms.find((r) => r.id === selectedRoomId) ||
     initialRoom ||
     activeRooms[0];
+
+  const billingPeriodOptions = getBillingPeriodOptions();
 
   // Sub-meter & billing fields
   const [prevReading, setPrevReading] = useState('0');
@@ -175,9 +177,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     setIsOcrRunning(true);
     setOcrProgress(5);
     setOcrStatusMsg(
-      `Scanning ${
+      `Enhancing blurry image (2x Super-Resolution + Unsharp Filter) & scanning ${
         slot === 'prev' ? 'Previous Sub-Meter #1' : 'Current Sub-Meter #2'
-      } via Tesseract OCR...`
+      }...`
     );
 
     try {
@@ -200,13 +202,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         setOcrStatusMsg(
           `${
             slot === 'prev' ? 'Sub-Meter #1 (Prev)' : 'Sub-Meter #2 (Curr)'
-          } OCR Extracted: ${result.reading.toFixed(1)} kWh (${
+          } Enhanced OCR Extracted: ${result.reading.toFixed(1)} kWh (${
             result.confidence
           }% confidence)`
         );
       } else {
         setOcrStatusMsg(
-          'Photo attached! Please verify or type the exact kWh digits below.'
+          'Photo attached and enhanced! Please verify or type the exact kWh digits below.'
         );
       }
     } catch {
@@ -295,6 +297,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     depositApplied: depNum,
   });
 
+  const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOneToTen, 10) || 5);
+  const computedDueDateIso = getNextDueDateInOneToTenWindow(safeDueDay);
+  const computedDueDateLabel = new Date(computedDueDateIso).toLocaleDateString(
+    'en-US',
+    {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }
+  );
+
   const handleConfirmGenerateBill = (e: React.FormEvent) => {
     e.preventDefault();
     if (!subMeterCheck.isValid) return;
@@ -326,9 +339,6 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         ? 'partial'
         : 'unpaid';
 
-    const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOneToTen, 10) || 5);
-    const computedDueDate = getNextDueDateInOneToTenWindow(safeDueDay);
-
     const receiptCode = `4R-${new Date()
       .toISOString()
       .slice(0, 7)
@@ -349,8 +359,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       tenantMessenger: selectedRoom.tenant?.messengerUsername,
       billingPeriod,
       createdAt: nowIso,
-      dueDate: new Date(computedDueDate).toISOString(),
-      paymentWindowLabel: `Every 1st – 10th of the Month (Day ${safeDueDay})`,
+      dueDate: new Date(computedDueDateIso).toISOString(),
+      paymentWindowLabel: `Every 1st to 10th of the Month (Day ${safeDueDay})`,
       prevReading: prevNum,
       currReading: currNum,
       consumptionKwh: billBreakdown.consumptionKwh,
@@ -418,11 +428,11 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-white">
-                Dual Sub-Meter OCR Reader & Room Receipt Generator
+                Dual Sub-Meter Enhanced OCR Reader & Receipt Generator
               </h2>
               <p className="text-xs text-slate-400">
-                Provides 2 Sub-Meter Proofs (Previous & Current) on the Official
-                Receipt • Global Rate: {formatPeso(globalElectricRate)}/kWh
+                2x Super-Resolution De-Blur OCR • 2 Sub-Meter Proofs • Global Rate:{' '}
+                {formatPeso(globalElectricRate)}/kWh
               </p>
             </div>
           </div>
@@ -441,50 +451,58 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         >
           {/* Left Column: Dual Sub-Meter Scanner & Photo Proofs (7 cols) */}
           <div className="lg:col-span-7 p-5 border-b lg:border-b-0 lg:border-r border-[#222C3F] space-y-4">
-            {/* Room, Period & 1st–10th Due Day */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
+            {/* Room, Selectable Billing Period & Auto Next-Month Due Day (1-10) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
+              <div className="flex flex-col">
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 whitespace-nowrap">
                   Select Room
                 </label>
                 <select
                   value={selectedRoom.id}
                   onChange={(e) => setSelectedRoomId(e.target.value)}
-                  className="w-full rounded-xl bg-[#0D1119] border border-[#252F42] px-3 py-2 text-xs font-bold text-white"
+                  className="w-full h-10 rounded-xl bg-[#0D1119] border border-[#252F42] px-3 text-xs font-bold text-white focus:border-amber-500 focus:outline-none"
                 >
                   {activeRooms.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.name} — {r.tenant?.fullName || 'Vacant'} (
+                      {r.name} • {r.tenant?.fullName || 'Vacant'} (
                       {r.lastMeterReading.toFixed(1)} kWh)
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1">
+              <div className="flex flex-col">
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 whitespace-nowrap">
                   Billing Period
                 </label>
-                <input
-                  type="text"
+                <select
                   value={billingPeriod}
                   onChange={(e) => setBillingPeriod(e.target.value)}
-                  className="w-full rounded-xl bg-[#0D1119] border border-[#252F42] px-3 py-2 text-xs font-semibold text-white"
-                />
+                  className="w-full h-10 rounded-xl bg-[#0D1119] border border-[#252F42] px-3 text-xs font-bold text-white focus:border-amber-500 focus:outline-none"
+                >
+                  {!billingPeriodOptions.includes(billingPeriod) && (
+                    <option value={billingPeriod}>{billingPeriod}</option>
+                  )}
+                  {billingPeriodOptions.map((period) => (
+                    <option key={period} value={period}>
+                      {period}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-amber-400 mb-1">
-                  Payment Due Day (1–10) *
+              <div className="flex flex-col">
+                <label className="block text-xs font-bold text-amber-400 mb-1.5 whitespace-nowrap">
+                  Next Month Due (1 to 10) *
                 </label>
                 <select
                   value={dueDayOneToTen}
                   onChange={(e) => setDueDayOneToTen(e.target.value)}
-                  className="w-full rounded-xl bg-[#0D1119] border border-amber-500/40 px-3 py-2 text-xs font-bold text-amber-400"
+                  className="w-full h-10 rounded-xl bg-[#0D1119] border border-amber-500/40 px-3 text-xs font-bold text-amber-400 focus:border-amber-500 focus:outline-none"
                 >
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
                     <option key={d} value={d}>
-                      Day {d} of the Month (1st–10th Rule)
+                      Day {d} ({computedDueDateLabel})
                     </option>
                   ))}
                 </select>
@@ -618,7 +636,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       className="mt-2.5 w-full py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Camera className="w-4 h-4" />
-                      Capture & Extract{' '}
+                      Capture & De-Blur Extract{' '}
                       {targetMeterSlot === 'prev'
                         ? 'Previous Meter #1'
                         : 'Current Meter #2'}
@@ -641,6 +659,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         ? 'Sub-Meter #1 (Previous)'
                         : 'Sub-Meter #2 (Current)'}
                     </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Automatically sharpens blurry sub-meter digits via 2x Super-Resolution
+                    </p>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
@@ -654,7 +675,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 ) : (
                   <div className="text-center py-2">
                     <p className="text-xs text-slate-300 mb-2">
-                      Generate & OCR-scan a clear kWh sub-meter proof for{' '}
+                      Generate & OCR-scan a high-contrast kWh sub-meter proof for{' '}
                       <strong className="text-amber-400">
                         {targetMeterSlot === 'prev'
                           ? 'Sub-Meter #1 (Previous)'
@@ -671,7 +692,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       {isOcrRunning ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Scanning OCR ({ocrProgress}%)...</span>
+                          <span>Enhancing & Scanning ({ocrProgress}%)...</span>
                         </>
                       ) : (
                         <>
@@ -784,7 +805,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 <div className="flex justify-between text-slate-400">
                   <span>Less Sub-Meter #1 (Previous)</span>
                   <span className="font-mono-num font-bold text-slate-300">
-                    − {prevNum.toFixed(1)} kWh
+                    - {prevNum.toFixed(1)} kWh
                   </span>
                 </div>
                 <div className="pt-1.5 border-t border-[#263248] flex justify-between text-amber-400 font-bold">
@@ -802,9 +823,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+              <div className="grid grid-cols-3 gap-2 items-start">
+                <div className="flex flex-col">
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1 whitespace-nowrap">
                     Base Rent (₱)
                   </label>
                   <input
@@ -812,11 +833,11 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     step="0.01"
                     value={baseRent}
                     onChange={(e) => setBaseRent(e.target.value)}
-                    className="w-full rounded-xl bg-[#161D2B] border border-[#263248] px-2.5 py-2 text-xs font-bold text-white font-mono-num"
+                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-2.5 text-xs font-bold text-white font-mono-num"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                <div className="flex flex-col">
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1 whitespace-nowrap">
                     Prev Unpaid (₱)
                   </label>
                   <input
@@ -824,12 +845,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     step="0.01"
                     value={carryOverBalance}
                     onChange={(e) => setCarryOverBalance(e.target.value)}
-                    className="w-full rounded-xl bg-[#161D2B] border border-[#263248] px-2.5 py-2 text-xs font-bold text-red-400 font-mono-num"
+                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-2.5 text-xs font-bold text-red-400 font-mono-num"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-emerald-400 mb-1">
-                    Use Advance (Max {formatPeso(selectedRoom.advanceRent || 0)})
+                <div className="flex flex-col">
+                  <label className="block text-[10px] font-semibold text-emerald-400 mb-1 whitespace-nowrap">
+                    Advance ({formatPeso(selectedRoom.advanceRent || 0)})
                   </label>
                   <input
                     type="number"
@@ -837,7 +858,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     max={selectedRoom.advanceRent || 0}
                     value={depositApplied}
                     onChange={(e) => setDepositApplied(e.target.value)}
-                    className="w-full rounded-xl bg-[#161D2B] border border-[#263248] px-2.5 py-2 text-xs font-bold text-emerald-400 font-mono-num"
+                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-2.5 text-xs font-bold text-emerald-400 font-mono-num"
                   />
                 </div>
               </div>
@@ -848,7 +869,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     Total Amount Due
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    1 Room = 1 Active Official Receipt
+                    Next Due: {computedDueDateLabel} (Day {safeDueDay})
                   </span>
                 </div>
                 <div className="text-xl font-black text-white font-mono-num">
@@ -901,7 +922,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         step="0.01"
                         value={initialAmountPaid}
                         onChange={(e) => setInitialAmountPaid(e.target.value)}
-                        className="w-full rounded-xl bg-[#161D2B] border border-[#263248] px-3 py-2 text-xs font-bold text-emerald-400 font-mono-num"
+                        className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-emerald-400 font-mono-num"
                       />
                     </div>
                     <div>
@@ -919,7 +940,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                               | 'Bank Transfer'
                           )
                         }
-                        className="w-full rounded-xl bg-[#161D2B] border border-[#263248] px-3 py-2 text-xs font-bold text-white"
+                        className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-white"
                       >
                         <option value="GCash">GCash</option>
                         <option value="Cash">Cash</option>

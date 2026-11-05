@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   CalendarCheck,
@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { Room, RoomInquiryBooking } from '../../types/rental';
-import { formatPeso } from '../../utils/billingCalculator';
+import { formatPeso, formatPhoneNumber } from '../../utils/billingCalculator';
 
 interface InquiriesBookingsViewProps {
   rooms: Room[];
@@ -35,29 +35,37 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
   onDeleteInquiry,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const activeRooms = rooms.filter((r) => !r.isArchived);
+  // Only Vacant rooms are visible for booking (Occupied rooms are hidden)
+  const vacantRooms = rooms.filter(
+    (r) => !r.isArchived && r.status === 'vacant'
+  );
 
   const [prospectName, setProspectName] = useState('');
   const [phone, setPhone] = useState('');
   const [messengerUsername, setMessengerUsername] = useState('');
   const [selectedRoomId, setSelectedRoomId] = useState(
-    activeRooms[0]?.id || ''
+    vacantRooms[0]?.id || ''
   );
   const [targetMoveInDate, setTargetMoveInDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
   const [reservationFee, setReservationFee] = useState('0');
   const [status, setStatus] = useState<'inquiry' | 'booked'>('booked');
-  const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    if (vacantRooms.length > 0 && !vacantRooms.some((r) => r.id === selectedRoomId)) {
+      setSelectedRoomId(vacantRooms[0].id);
+    }
+  }, [vacantRooms.length, selectedRoomId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const room = activeRooms.find((r) => r.id === selectedRoomId);
+    const room = vacantRooms.find((r) => r.id === selectedRoomId);
     if (!room || !prospectName.trim()) return;
 
     onCreateInquiry({
       prospectName: prospectName.trim(),
-      phone: phone.trim(),
+      phone: formatPhoneNumber(phone),
       messengerUsername: messengerUsername.trim() || undefined,
       roomId: room.id,
       roomName: room.name,
@@ -66,14 +74,12 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
       quotedMonthlyRent: room.monthlyRent,
       requiredDeposit: room.securityDeposit || defaultDeposit,
       status,
-      notes: notes.trim() || undefined,
     });
 
     setProspectName('');
     setPhone('');
     setMessengerUsername('');
     setReservationFee('0');
-    setNotes('');
     setIsModalOpen(false);
   };
 
@@ -93,8 +99,8 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
         <button
           type="button"
           onClick={() => {
-            if (activeRooms.length > 0 && !selectedRoomId) {
-              setSelectedRoomId(activeRooms[0].id);
+            if (vacantRooms.length > 0 && !selectedRoomId) {
+              setSelectedRoomId(vacantRooms[0].id);
             }
             setIsModalOpen(true);
           }}
@@ -109,12 +115,12 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
         <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-white">
-              Prospective Tenant Reservations & Room Inquiries
+              Vacant Room Reservations & Tenant Inquiries
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Book vacant or upcoming rooms, record reservation deposits, and
-              convert bookings into active tenants in 1 click (while keeping the
-              room’s continuous kWh meter reading).
+              Only vacant rooms are listed for booking ({vacantRooms.length}{' '}
+              available). Convert bookings into active tenants in 1 click while
+              preserving continuous kWh sub-meter readings.
             </p>
           </div>
           <span className="text-xs font-mono-num text-amber-400 font-bold shrink-0">
@@ -129,8 +135,8 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
               No inquiries or room bookings yet
             </h3>
             <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              Log prospective tenants inquiring about available rooms or reserve
-              a unit with a booking fee.
+              Log prospective tenants inquiring about available vacant rooms or
+              reserve a unit with a booking deposit.
             </p>
           </div>
         ) : (
@@ -173,7 +179,7 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">Target Move-In:</span>
                         <span className="font-mono-num font-bold">
-                          {inq.targetMoveInDate} (Pays every 1st–10th)
+                          {inq.targetMoveInDate} (Pays Day 1 to 10)
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -195,9 +201,9 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
                       </div>
                       <div className="flex flex-wrap items-center gap-3 pt-1 text-slate-400">
                         {inq.phone && (
-                          <span className="inline-flex items-center gap-1">
+                          <span className="inline-flex items-center gap-1 font-mono-num">
                             <Phone className="w-3.5 h-3.5" />
-                            {inq.phone}
+                            {formatPhoneNumber(inq.phone)}
                           </span>
                         )}
                         {inq.messengerUsername && (
@@ -212,11 +218,6 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
                           </a>
                         )}
                       </div>
-                      {inq.notes && (
-                        <p className="text-xs text-slate-400 italic pt-1">
-                          “{inq.notes}”
-                        </p>
-                      )}
                     </div>
                   </div>
 
@@ -259,7 +260,7 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
           <div className="w-full max-w-md rounded-3xl bg-[#151B26] border border-[#28334A] p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-white">
-                Record Room Inquiry / Booking
+                Book Vacant Room / Log Inquiry
               </h3>
               <button
                 type="button"
@@ -270,147 +271,154 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Target Room *
-                </label>
-                <select
-                  required
-                  value={selectedRoomId}
-                  onChange={(e) => setSelectedRoomId(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm font-bold text-white"
-                >
-                  {activeRooms.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name} ({r.status.toUpperCase()}) — Rent:{' '}
-                      {formatPeso(r.monthlyRent)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Prospective Tenant Full Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., Kevin Mendoza"
-                  value={prospectName}
-                  onChange={(e) => setProspectName(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2.5 text-sm text-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Contact Phone
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="0917-xxx-xxxx"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3 py-2 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Messenger Username
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="username"
-                    value={messengerUsername}
-                    onChange={(e) => setMessengerUsername(e.target.value)}
-                    className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3 py-2 text-xs text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Target Move-In Date
-                  </label>
-                  <input
-                    type="date"
-                    value={targetMoveInDate}
-                    onChange={(e) => setTargetMoveInDate(e.target.value)}
-                    className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3 py-2 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Booking / Advance Paid (₱)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={reservationFee}
-                    onChange={(e) => setReservationFee(e.target.value)}
-                    className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3 py-2 text-xs font-bold text-emerald-400 font-mono-num"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setStatus('inquiry')}
-                  className={`py-2 rounded-xl text-xs font-bold border cursor-pointer ${
-                    status === 'inquiry'
-                      ? 'bg-blue-500 text-white border-blue-500'
-                      : 'bg-[#0E131C] text-slate-400 border-[#252F42]'
-                  }`}
-                >
-                  Inquiry Only
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatus('booked')}
-                  className={`py-2 rounded-xl text-xs font-bold border cursor-pointer ${
-                    status === 'booked'
-                      ? 'bg-amber-500 text-slate-950 border-amber-500'
-                      : 'bg-[#0E131C] text-slate-400 border-[#252F42]'
-                  }`}
-                >
-                  Reserved / Booked
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Notes
-                </label>
-                <input
-                  type="text"
-                  placeholder="Optional booking details or deposit agreement"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 py-2 text-xs text-white"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3">
+            {vacantRooms.length === 0 ? (
+              <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-4 text-center space-y-3">
+                <p className="text-xs font-bold text-amber-300">
+                  All rooms are currently Occupied!
+                </p>
+                <p className="text-xs text-slate-400">
+                  Occupied rooms are hidden from booking. Create a new room or
+                  mark a room as Vacant first to accept new bookings.
+                </p>
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-[#1D2535] text-slate-300 text-xs font-bold cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs cursor-pointer"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 text-xs font-extrabold cursor-pointer"
-                >
-                  Save Inquiry / Booking
+                  Close
                 </button>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Select Available Vacant Room *
+                  </label>
+                  <select
+                    required
+                    value={selectedRoomId}
+                    onChange={(e) => setSelectedRoomId(e.target.value)}
+                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm font-bold text-white"
+                  >
+                    {vacantRooms.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} (VACANT) • Rent: {formatPeso(r.monthlyRent)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Prospective Tenant Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g., Kevin Mendoza"
+                    value={prospectName}
+                    onChange={(e) => setProspectName(e.target.value)}
+                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Mobile Number
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="0917-555-0199"
+                      value={phone}
+                      onChange={(e) =>
+                        setPhone(formatPhoneNumber(e.target.value))
+                      }
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3 text-xs text-white font-mono-num"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Messenger Username
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="username"
+                      value={messengerUsername}
+                      onChange={(e) => setMessengerUsername(e.target.value)}
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3 text-xs text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Target Move-In Date
+                    </label>
+                    <input
+                      type="date"
+                      value={targetMoveInDate}
+                      onChange={(e) => setTargetMoveInDate(e.target.value)}
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Booking / Advance Paid (₱)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={reservationFee}
+                      onChange={(e) => setReservationFee(e.target.value)}
+                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3 text-xs font-bold text-emerald-400 font-mono-num"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStatus('inquiry')}
+                    className={`py-2.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                      status === 'inquiry'
+                        ? 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-[#0E131C] text-slate-400 border-[#252F42]'
+                    }`}
+                  >
+                    Inquiry Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatus('booked')}
+                    className={`py-2.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                      status === 'booked'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500'
+                        : 'bg-[#0E131C] text-slate-400 border-[#252F42]'
+                    }`}
+                  >
+                    Reserved / Booked
+                  </button>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-[#1D2535] text-slate-300 text-xs font-bold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 text-xs font-extrabold cursor-pointer"
+                  >
+                    Save Inquiry / Booking
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

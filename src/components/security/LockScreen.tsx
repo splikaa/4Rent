@@ -3,6 +3,7 @@ import { Delete, Fingerprint, LockOpen } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
 import { SecurityConfig } from '../../types/rental';
 import { verifyDeviceBiometrics } from '../../services/ocrService';
+import { isMobileDevice } from '../../utils/billingCalculator';
 
 interface LockScreenProps {
   security: SecurityConfig;
@@ -10,6 +11,7 @@ interface LockScreenProps {
 }
 
 export const LockScreen: React.FC<LockScreenProps> = ({ security, onUnlock }) => {
+  const isMobile = isMobileDevice();
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -33,6 +35,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ security, onUnlock }) =>
   };
 
   const handleBiometricUnlock = async () => {
+    if (!isMobile) return;
     setError(null);
     setIsScanning(true);
     if (security.webAuthnCredentialId === 'simulated-biometric-id') {
@@ -57,7 +60,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ security, onUnlock }) =>
       <BrandLogo size="lg" withGlow className="mb-6" />
       <h1 className="text-2xl font-bold text-white">Welcome Back to 4Rent</h1>
       <p className="text-sm text-slate-400 mt-1.5 text-center">
-        {security.authMethod === 'fingerprint'
+        {isMobile && security.authMethod === 'fingerprint'
           ? 'Authenticate with your fingerprint to unlock'
           : 'Enter your 4-digit Passcode PIN to unlock'}
       </p>
@@ -68,7 +71,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ security, onUnlock }) =>
         </div>
       )}
 
-      {security.authMethod === 'fingerprint' && !security.pinCode ? (
+      {isMobile && security.authMethod === 'fingerprint' && !security.pinCode ? (
         <div className="mt-10 flex flex-col items-center gap-4">
           <button
             type="button"
@@ -112,14 +115,24 @@ export const LockScreen: React.FC<LockScreenProps> = ({ security, onUnlock }) =>
                 {d}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={handleBiometricUnlock}
-              title="Biometric Unlock"
-              className="h-16 rounded-2xl bg-[#161C28]/60 hover:bg-[#1F2737] border border-[#242E42] text-amber-500 flex items-center justify-center transition cursor-pointer"
-            >
-              <Fingerprint className="w-6 h-6" />
-            </button>
+            {isMobile ? (
+              <button
+                type="button"
+                onClick={handleBiometricUnlock}
+                title="Biometric Unlock"
+                className="h-16 rounded-2xl bg-[#161C28]/60 hover:bg-[#1F2737] border border-[#242E42] text-amber-500 flex items-center justify-center transition cursor-pointer"
+              >
+                <Fingerprint className="w-6 h-6" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPin('')}
+                className="h-16 rounded-2xl bg-[#161C28]/60 hover:bg-[#1F2737] border border-[#242E42] text-xs font-semibold text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
             <button
               type="button"
               onClick={() => handleDigit('0')}
@@ -149,4 +162,3 @@ export const LockScreen: React.FC<LockScreenProps> = ({ security, onUnlock }) =>
     </div>
   );
 };
-

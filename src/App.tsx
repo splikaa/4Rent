@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AppSettings,
   BillRecord,
@@ -12,6 +12,7 @@ import {
   createSampleDemoData,
   DEFAULT_SETTINGS,
   exportDatabaseSnapshot,
+  importDatabaseSnapshot,
   loadBills,
   loadInquiries,
   loadRooms,
@@ -23,7 +24,11 @@ import {
   saveSettings,
   saveTenantHistory,
 } from './services/storageService';
-import { pushSnapshotToCloud } from './services/supabaseSync';
+import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
+import {
+  pullSnapshotFromCloud,
+  pushSnapshotToCloud,
+} from './services/supabaseSync';
 import {
   applyPaymentWithOverpayment,
   clampDueDayOneToTen,
@@ -37,6 +42,7 @@ import { NavigationDrawer } from './components/layout/NavigationDrawer';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ManageRoomsView } from './components/rooms/ManageRoomsView';
 import { RoomFormModal } from './components/rooms/RoomFormModal';
+import { RoomDetailsModal } from './components/rooms/RoomDetailsModal';
 import { InquiriesBookingsView } from './components/inquiries/InquiriesBookingsView';
 import { AllPaymentsView } from './components/payments/AllPaymentsView';
 import { ArchiveCenterView } from './components/archive/ArchiveCenterView';
@@ -67,6 +73,9 @@ export function App() {
   // Modals
   const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [selectedRoomDetailsId, setSelectedRoomDetailsId] = useState<
+    string | null
+  >(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerTargetRoom, setScannerTargetRoom] = useState<Room | null>(null);
   const [activeReceiptBill, setActiveReceiptBill] = useState<BillRecord | null>(
@@ -80,6 +89,77 @@ export function App() {
   const [roomPendingPinDelete, setRoomPendingPinDelete] = useState<Room | null>(
     null
   );
+
+  // PWA Install Prompt Reference
+  const deferredInstallPromptRef = useRef<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      deferredInstallPromptRef.current = e;
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () =>
+      window.removeEventListener(
+        'beforeinstallprompt',
+        handleBeforeInstallPrompt
+      );
+  }, []);
+
+  // Hydrate from Persistent IndexedDB if localStorage was cleared by an OS/browser update
+  useEffect(() => {
+    let mounted = true;
+    loadSnapshotFromIndexedDb().then((idbSnap) => {
+      if (!mounted || !idbSnap) return;
+      const currentRooms = loadRooms();
+      if (currentRooms.length === 0 && idbSnap.rooms?.length > 0) {
+        importDatabaseSnapshot(idbSnap);
+        setRooms(idbSnap.rooms);
+        setBills(idbSnap.bills || []);
+        setInquiries(idbSnap.inquiries || []);
+        setTenantHistory(idbSnap.tenantHistory || []);
+        if (idbSnap.settings) {
+          setSettings(idbSnap.settings);
+        }
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Automatic Desktop <-> Mobile Cloud Sync when window gains focus
+  useEffect(() => {
+    const syncFromCloudOnFocus = async () => {
+      if (
+        settings.cloudSync.enabled &&
+        settings.cloudSync.supabaseUrl &&
+        settings.cloudSync.supabaseAnonKey
+      ) {
+        const res = await pullSnapshotFromCloud(settings.cloudSync);
+        if (res.ok && res.snapshot) {
+          importDatabaseSnapshot(res.snapshot);
+          setRooms(loadRooms());
+          setBills(loadBills());
+          setInquiries(loadInquiries());
+          setTenantHistory(loadTenantHistory());
+        }
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncFromCloudOnFocus();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibility);
+    return () =>
+      window.removeEventListener('visibilitychange', handleVisibility);
+  }, [
+    settings.cloudSync.enabled,
+    settings.cloudSync.supabaseUrl,
+    settings.cloudSync.supabaseAnonKey,
+  ]);
 
   useEffect(() => {
     saveSettings(settings);
@@ -110,6 +190,18 @@ export function App() {
       setTimeout(() => {
         pushSnapshotToCloud(settings.cloudSync, exportDatabaseSnapshot());
       }, 200);
+    }
+  };
+
+  const handleInstallDesktopApp = async () => {
+    if (deferredInstallPromptRef.current) {
+      try {
+        deferredInstallPromptRef.current.prompt();
+        await deferredInstallPromptRef.current.userChoice;
+        deferredInstallPromptRef.current = null;
+      } catch {
+        // fallback handled by SettingsView .bat download
+      }
     }
   };
 
@@ -174,7 +266,6 @@ export function App() {
           finalMeterReading: roomData.lastMeterReading,
           depositHeld: prevRoom.securityDeposit,
           unpaidBalanceAtMoveOut: prevRoom.unpaidBalance,
-          notes: prevRoom.tenant.notes,
         };
         setTenantHistory((prev) => [entry, ...prev]);
       }
@@ -247,7 +338,6 @@ export function App() {
       finalMeterReading: room.lastMeterReading,
       depositHeld: room.securityDeposit,
       unpaidBalanceAtMoveOut: room.unpaidBalance,
-      notes: room.tenant.notes,
     };
     setTenantHistory((prev) => [entry, ...prev]);
 
@@ -558,7 +648,8 @@ export function App() {
           ...r,
           status: 'occupied',
           securityDeposit: reqDep,
-          advanceRent: Math.round(((r.advanceRent || 0) + excessAdvance) * 100) / 100,
+          advanceRent:
+            Math.round(((r.advanceRent || 0) + excessAdvance) * 100) / 100,
           // Continuous kWh reading is strictly preserved!
           tenant: {
             id: `ten-${Date.now()}`,
@@ -567,7 +658,6 @@ export function App() {
             messengerUsername: inquiry.messengerUsername,
             moveInDate: inquiry.targetMoveInDate,
             dueDayOfMonth: moveInDay,
-            notes: inquiry.notes,
           },
           updatedAt: nowIso,
         };
@@ -694,6 +784,9 @@ export function App() {
   const activeAdvanceModalRoom =
     rooms.find((r) => r.id === advanceModalRoomId) || null;
 
+  const selectedRoomForDetails =
+    rooms.find((r) => r.id === selectedRoomDetailsId) || null;
+
   // 1. Setup Security Screen
   if (showSecuritySetup) {
     return <SecuritySetupScreen onComplete={handleCompleteSecuritySetup} />;
@@ -740,6 +833,7 @@ export function App() {
             onOpenAdvanceBalanceModal={(room) =>
               setAdvanceModalRoomId(room.id)
             }
+            onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onLoadSampleData={handleLoadSampleData}
           />
         )}
@@ -768,6 +862,7 @@ export function App() {
             onOpenAdvanceBalanceModal={(room) =>
               setAdvanceModalRoomId(room.id)
             }
+            onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onOpenArchiveCenter={() => setActiveTab('archive')}
           />
         )}
@@ -825,6 +920,7 @@ export function App() {
             onLoadSampleData={handleLoadSampleData}
             onResetAllData={handleResetAllData}
             onOpenSecuritySetup={() => setShowSecuritySetup(true)}
+            onInstallDesktopApp={handleInstallDesktopApp}
           />
         )}
       </main>
@@ -847,6 +943,41 @@ export function App() {
           setEditingRoom(null);
         }}
         onSave={handleSaveRoom}
+      />
+
+      {/* Clickable Room Details & Previous Transactions Modal */}
+      <RoomDetailsModal
+        room={selectedRoomForDetails}
+        activeBill={
+          selectedRoomForDetails
+            ? bills.find(
+                (b) =>
+                  b.id === selectedRoomForDetails.activeReceiptId ||
+                  (b.roomId === selectedRoomForDetails.id && !b.isArchived)
+              ) || null
+            : null
+        }
+        roomBills={
+          selectedRoomForDetails
+            ? bills.filter((b) => b.roomId === selectedRoomForDetails.id)
+            : []
+        }
+        previousTenants={
+          selectedRoomForDetails
+            ? tenantHistory.filter(
+                (h) => h.roomId === selectedRoomForDetails.id
+              )
+            : []
+        }
+        globalElectricRate={settings.defaultElectricRate}
+        onClose={() => setSelectedRoomDetailsId(null)}
+        onEditRoom={(room) => {
+          setEditingRoom(room);
+          setIsRoomModalOpen(true);
+        }}
+        onOpenScannerForRoom={(room) => handleOpenScanForRoom(room)}
+        onOpenReceipt={(bill) => setActiveReceiptBill(bill)}
+        onOpenAdvanceModal={(room) => setAdvanceModalRoomId(room.id)}
       />
 
       {/* Dual Sub-Meter OCR Scanner & Bill Generator Modal */}

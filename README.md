@@ -1,4 +1,4 @@
-# 4Rent — Desktop & Mobile Apartment Rental & Dual Sub-Meter Management System
+# 4Rent • Desktop & Mobile Apartment Rental & Dual Sub-Meter Management System
 
 <p align="center">
   <img src="public/icon.svg" width="110" height="110" alt="4Rent Logo" />
@@ -6,53 +6,41 @@
 
 <p align="center">
   <strong>A modern, cross-OS (MacBook, Windows, Linux, iOS & Android) Progressive Web Application (PWA) for apartment landlords and property managers.</strong><br/>
+  <strong>Version: v1.2.0 • Developed by <a href="https://github.com/splikaa">splikaa</a></strong><br/>
   <strong>🌐 Instant Live App (Works on Any OS/Device): <a href="https://splikaa.github.io/4Rent/">https://splikaa.github.io/4Rent/</a></strong>
 </p>
 
 ---
 
-## Instant Use on Any Device (MacBook, Windows, Linux, iPhone, Android)
+## Desktop Installer & Developer-Integrated Cloud Sync (`v1.2.0`)
 
-You can use **4Rent** immediately on **any device or operating system** without installing anything:
-
-1. **Instant Web & Installable PWA (Recommended for MacBook, iOS & Android)**:
-   - Open **[https://splikaa.github.io/4Rent/](https://splikaa.github.io/4Rent/)** in Safari, Chrome, or Edge.
-   - **On MacBook (macOS)**: In Safari/Chrome, click **Share → Add to Dock** (or click the **Install App** icon in the address bar) to run **4Rent** as a native desktop app.
-   - **On iPhone / Android**: Tap **Share → Add to Home Screen** to install **4Rent** on your phone.
-2. **Cross-Device Cloud Sync**:
-   - Connect your **Supabase Cloud Sync** credentials in **Settings** (with a shared Property Code like `4RENT-MAIN`) so rooms, readings, receipts, and bookings sync across your MacBook, Windows PC, and mobile phone.
+1. **1-Click Desktop Installer (`Install-4Rent-Desktop.bat`)**:
+   - Double-click `Install-4Rent-Desktop.bat` (or click **Install 4Rent for Desktop** inside **Settings**) to install a native Desktop shortcut and window for the landlord.
+   - **MacBook / iOS / Android**: Open **[https://splikaa.github.io/4Rent/](https://splikaa.github.io/4Rent/)** and choose **Add to Dock** or **Add to Home Screen**.
+2. **Persistent Update-Safe Database (`IndexedDB` + `LocalStorage` + Cloud Sync)**:
+   - All rooms, continuous sub-meter readings, receipts, bookings, and tenant history are stored in a version-independent `IndexedDB` (`FourRentPersistentDatabase`) + `LocalStorage` + developer-integrated Cloud Sync so updating the application **never resets or alters existing landlord data**.
 
 ---
 
-## Core System Rules & Architecture
+## Core System Features (`v1.2.0`)
 
-**4Rent (`v1.1.0`)** enforces strict, landlord-tested operational rules:
-
-1. **Dual Electric Sub-Meter Proofs on Every Official Receipt (`2 Sub-Meters`)**:
-   - Every Official Receipt displays **2 Side-by-Side Sub-Meter Proofs**:
-     1. **Sub-Meter #1 (Previous Reading Proof)**: Previous $\text{kWh}$ reading + meter snapshot.
-     2. **Sub-Meter #2 (Current Reading Proof)**: Current $\text{kWh}$ reading + meter snapshot.
-   - Shows the exact formula so tenants can legitimately verify their own consumption:
+1. **Enhanced 2× Super-Resolution De-Blur Sub-Meter OCR**:
+   - Uses 2× super-resolution upscaling, a 3×3 unsharp mask convolution kernel, and dynamic histogram contrast stretching so even blurry sub-meter photos are read accurately.
+   - Includes a selectable **Billing Period** dropdown (no manual typing required).
+2. **Dual Electric Sub-Meter Proofs on Every Official Receipt (`2 Sub-Meters`)**:
+   - Every Official Receipt displays **Sub-Meter #1 (Previous)** and **Sub-Meter #2 (Current)** side-by-side along with:
      $$\Delta \text{Consumption (kWh)} = \text{Current Reading} - \text{Previous Reading}$$
      $$\text{Electric Sub-Total (₱)} = \Delta \text{Consumption (kWh)} \times \text{Global Settings Rate (₱/kWh)}$$
-2. **Centralized Settings Electric Rate**:
-   - The Electric Sub-Meter Rate ($\text{₱/kWh}$) is configured **exclusively in Settings** and automatically reflects across every room and unpaid bill.
-3. **Continuous $\text{kWh}$ Sub-Meter Reading Across Tenant Changes**:
-   - When a tenant vacates or changes, the room's physical sub-meter reading (`lastMeterReading`) **continues seamlessly** without resetting to `0`.
-4. **1 Room = 1 Active Official Receipt (Auto-Archive)**:
-   - Each room holds **1 Active Official Receipt** directly accessible from the Room Card (`Open Receipt →`) for instant lookup. Whenever a new billing cycle receipt is generated for that room, older receipts are automatically moved to the **Archive Center**.
-5. **Mandatory 1st–10th Monthly Payment Window**:
-   - Tenant monthly due dates are strictly scheduled within **Day 1 to Day 10** of every month.
-6. **Required Security Deposit & Withdrawable Advance Payment Balance**:
-   - Every room requires a **Security Deposit (`₱`)**.
-   - If a tenant pays **more** than the required Deposit or more than the exact Bill Amount Due, the excess is **automatically credited into the room's Advance Payment Balance**, which can be **withdrawn in cash/GCash** or **applied to future bills** depending on the tenant's decision.
-7. **Automatic Previous Tenant History on Move-Out / Vacancy**:
-   - If a tenant leaves or stops paying rent and the room turns `Vacant`, their record (move-in/move-out dates, reason, final $\text{kWh}$ reading, deposit held, and unpaid balance) is automatically saved to **Previous Tenants History**.
-8. **Room Inquiries & Bookings**:
-   - Track prospective tenant inquiries and room reservations (`Inquiry` / `Reserved / Booked`), record reservation fees, and convert a booking into an active room tenant in one click.
-9. **PIN-Protected Room Removal & Archive Center**:
-   - Removing a room requires **4-Digit Security PIN Authentication** (`Default PIN: 1234`, customizable in Settings).
-   - Rooms and receipts can also be archived and restored anytime in **Archive & History**.
+3. **Auto Next-Month Payment Due Date (Strictly Day 1 to Day 10)**:
+   - Automatically schedules the next month's payment due date strictly within **Day 1 to Day 10** of the month.
+4. **Auto-Formatted Mobile Numbers**:
+   - Automatically formats mobile numbers as `09XX-XXX-XXXX` while typing.
+5. **Clickable Room Cards for Details & Previous Transactions**:
+   - Clicking any Room Card opens the **Room Details & Transactions Modal**, displaying the room's profile, active receipt, advance payment ledger, all previous billing transactions, and previous tenants.
+6. **Vacant-Only Room Booking Filter**:
+   - Occupied rooms are automatically hidden in the **Room Inquiries & Bookings** selector so only `Vacant` rooms can be booked.
+7. **Desktop PIN-Only Security (Mobile Biometrics + PIN)**:
+   - Desktop devices display **4-Digit Passcode PIN** authentication only (hiding mobile fingerprint prompts on Desktop).
 
 ---
 
@@ -64,11 +52,12 @@ cd 4Rent
 npm install
 npm run dev
 ```
-- **Windows**: Double-click `Start-4Rent.bat`
+- **Install Desktop App (Windows)**: Double-click `Install-4Rent-Desktop.bat`
+- **Start Local Dev Server (Windows)**: Double-click `Start-4Rent.bat`
 - **MacBook / Linux**: Run `chmod +x start-4rent.sh && ./start-4rent.sh`
 
 ---
 
 ## License
 
-Distributed under the **MIT License**. See [`LICENSE`](./LICENSE) for full details.
+Distributed under the **MIT License**. Developed by **splikaa**. See [`LICENSE`](./LICENSE) for full details.

@@ -362,7 +362,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
           <div className="w-full max-w-md rounded-3xl bg-[#161C28] border border-[#28334A] p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-white">
-                Record Payment — {payingBill.roomName}
+                Record Payment • {payingBill.roomName}
               </h3>
               <button
                 type="button"

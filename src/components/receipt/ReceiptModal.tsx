@@ -92,11 +92,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   };
 
   const handleCopySummary = async () => {
-    const summary = formatMessengerBillSummary(
-      bill,
-      settings.apartmentName,
-      settings.paymentInstructions
-    );
+    const summary = formatMessengerBillSummary(bill, settings.apartmentName);
     await navigator.clipboard.writeText(summary);
     setCopiedText(true);
     setShareFeedback(
@@ -107,11 +103,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const handleShareToMessenger = async () => {
     setShareFeedback(null);
-    const summary = formatMessengerBillSummary(
-      bill,
-      settings.apartmentName,
-      settings.paymentInstructions
-    );
+    const summary = formatMessengerBillSummary(bill, settings.apartmentName);
 
     try {
       await navigator.clipboard.writeText(summary);
@@ -130,7 +122,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           await navigator.share({
-            title: `${settings.apartmentName} — ${bill.roomName} Official Receipt`,
+            title: `${settings.apartmentName} • ${bill.roomName} Official Receipt`,
             text: summary,
             files: [file],
           });
@@ -219,7 +211,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         )}
 
-        {/* Scrollable Receipt Body — Organized & Perfectly Proportioned */}
+        {/* Scrollable Receipt Body • Organized & Perfectly Proportioned */}
         <div className="p-3 sm:p-5 overflow-y-auto flex-1 flex justify-center">
           <div
             id="printable-receipt-area"
@@ -274,7 +266,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             </div>
 
-            {/* 2. Room, Tenant & 1st–10th Payment Schedule Grid */}
+            {/* 2. Room, Tenant & 1st-10th Payment Schedule Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-2.5 text-xs border-b border-dashed border-slate-500/30">
               <div>
                 <span
@@ -310,13 +302,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </span>
                 <span className="font-semibold">{bill.billingPeriod}</span>
               </div>
-              <div className=" sm:text-right">
+              <div className="sm:text-right">
                 <span
                   className={`block text-[10px] uppercase ${
                     isDark ? 'text-slate-400' : 'text-slate-500'
                   }`}
                 >
-                  Due Date (1st–10th)
+                  Next Due (Day 1 to 10)
                 </span>
                 <span className="font-bold font-mono-num text-amber-500">
                   {new Date(bill.dueDate).toLocaleDateString('en-PH', {
@@ -416,7 +408,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <span className="font-medium">
                   Difference:{' '}
                   <strong className="font-mono-num">
-                    {bill.currReading.toFixed(1)} −{' '}
+                    {bill.currReading.toFixed(1)} -{' '}
                     {bill.prevReading.toFixed(1)} ={' '}
                     {bill.consumptionKwh.toFixed(1)} kWh
                   </strong>{' '}
@@ -471,7 +463,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <div className="flex justify-between text-emerald-400 font-semibold">
                   <span>Less Advance / Deposit Credit Applied</span>
                   <span className="font-mono-num">
-                    −{formatPeso(bill.depositApplied)}
+                    -{formatPeso(bill.depositApplied)}
                   </span>
                 </div>
               )}
@@ -528,13 +520,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 Payment Policy: Tenants are required to pay between the 1st and
                 10th of every month.
               </div>
-              {settings.paymentInstructions && (
-                <p className="whitespace-pre-line leading-snug">
-                  {settings.paymentInstructions}
-                </p>
-              )}
               <div className="pt-1 flex items-center justify-between text-[9px] opacity-70 font-mono-num">
-                <span>4Rent Official Receipt • 1 Room = 1 Active Receipt</span>
+                <span>4Rent Official Receipt • Developed by splikaa</span>
                 <span>{new Date(bill.createdAt).toLocaleString('en-PH')}</span>
               </div>
             </div>

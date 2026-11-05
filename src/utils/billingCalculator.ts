@@ -39,6 +39,43 @@ export interface ApplyPaymentOutcome {
 }
 
 /**
+ * Detects whether the current device is a mobile/tablet touch device.
+ * Desktop systems use PIN-only authentication (no biometric prompts).
+ */
+export function isMobileDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  const ua = navigator.userAgent || '';
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    ua
+  );
+}
+
+/**
+ * Automatically formats Philippine mobile phone numbers as the user types:
+ * e.g., "09175550101" -> "0917-555-0101"
+ */
+export function formatPhoneNumber(raw: string): string {
+  if (!raw) return '';
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('639') && digits.length >= 11) {
+    digits = '0' + digits.slice(2);
+  } else if (digits.startsWith('9') && digits.length <= 10) {
+    digits = '0' + digits;
+  }
+  digits = digits.slice(0, 11);
+
+  if (digits.length <= 4) {
+    return digits;
+  }
+  if (digits.length <= 7) {
+    return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  }
+  return `${digits.slice(0, 4)}-${digits.slice(4, 7)}-${digits.slice(7, 11)}`;
+}
+
+/**
  * Clamps any due day of the month to the mandatory 1st–10th payment window.
  */
 export function clampDueDayOneToTen(day: number): number {
@@ -47,23 +84,44 @@ export function clampDueDayOneToTen(day: number): number {
 }
 
 /**
- * Computes the next due date falling strictly within Day 1 to Day 10 of the billing month.
+ * Automatically computes the Next Month's Payment Due Date strictly within Day 1 to Day 10.
+ * If a baseDate (such as Move-In Date) is provided, the due date is set to the NEXT month on `preferredDay` (1-10).
  */
-export function getNextDueDateInOneToTenWindow(preferredDay = 5): string {
+export function getNextDueDateInOneToTenWindow(
+  preferredDay = 5,
+  baseDateStr?: string
+): string {
   const safeDay = clampDueDayOneToTen(preferredDay);
-  const now = new Date();
-  let year = now.getFullYear();
-  let month = now.getMonth();
+  const base = baseDateStr ? new Date(baseDateStr) : new Date();
+  const validBase = Number.isNaN(base.getTime()) ? new Date() : base;
 
-  if (now.getDate() > 10) {
-    month += 1;
-    if (month > 11) {
-      month = 0;
-      year += 1;
-    }
+  let year = validBase.getFullYear();
+  let month = validBase.getMonth() + 1; // Always advance to next month cycle
+  if (month > 11) {
+    month = 0;
+    year += 1;
   }
+
   const target = new Date(year, month, safeDay, 12, 0, 0);
   return target.toISOString().slice(0, 10);
+}
+
+/**
+ * Generates a list of selectable Billing Period options (e.g., "Nov 2026", "Dec 2026", etc.)
+ * so the user doesn't have to type the billing period manually in the OCR Reader.
+ */
+export function getBillingPeriodOptions(): string[] {
+  const now = new Date();
+  const options: string[] = [];
+  for (let offset = -2; offset <= 6; offset++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    const label = d.toLocaleDateString('en-US', {
+      month: 'short',
+      year: 'numeric',
+    });
+    options.push(label);
+  }
+  return options;
 }
 
 /**
@@ -148,7 +206,10 @@ export function applyPaymentWithOverpayment(
   referenceNo?: string,
   note?: string
 ): ApplyPaymentOutcome {
-  const validPayment = Math.max(0, Math.round(Number(paymentAmount) * 100) / 100);
+  const validPayment = Math.max(
+    0,
+    Math.round(Number(paymentAmount) * 100) / 100
+  );
   const nowIso = new Date().toISOString();
 
   const currentRemaining = Math.max(
@@ -164,13 +225,14 @@ export function applyPaymentWithOverpayment(
   const newTx: PaymentTransaction = {
     id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     amount: validPayment,
-    overpaymentCredited: overpaymentCredited > 0 ? overpaymentCredited : undefined,
+    overpaymentCredited:
+      overpaymentCredited > 0 ? overpaymentCredited : undefined,
     method,
     paidAt: nowIso,
     referenceNo,
     note:
       overpaymentCredited > 0
-        ? `${note ? note + ' • ' : ''}Excess ₱${overpaymentCredited.toFixed(
+        ? `Excess ₱${overpaymentCredited.toFixed(
             2
           )} credited to Advance Payment Balance`
         : note,
@@ -272,8 +334,7 @@ export function formatPeso(amount: number): string {
  */
 export function formatMessengerBillSummary(
   bill: BillRecord,
-  apartmentName: string,
-  paymentInstructions: string
+  apartmentName: string
 ): string {
   const statusLabel =
     bill.status === 'paid'
@@ -283,24 +344,24 @@ export function formatMessengerBillSummary(
       : '🔴 UNPAID / DUE';
 
   const lines = [
-    `🏠 *${apartmentName} — Official Billing Statement*`,
+    `🏠 *${apartmentName} • Official Billing Statement*`,
     `Receipt No: ${bill.receiptNo}`,
     `Room: *${bill.roomName}*`,
     `Tenant: ${bill.tenantName}`,
     `Billing Period: ${bill.billingPeriod}`,
-    `Payment Schedule: Every 1st – 10th of the Month (Due: ${new Date(
+    `Next Due Date (1st-10th Window): ${new Date(
       bill.dueDate
     ).toLocaleDateString('en-PH', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
-    })})`,
+    })}`,
     `────────────────────`,
     `⚡ *DUAL ELECTRIC SUB-METER PROOF*`,
     `• Sub-Meter #1 (Previous): ${bill.prevReading.toFixed(1)} kWh`,
     `• Sub-Meter #2 (Current): ${bill.currReading.toFixed(1)} kWh`,
     `• Consumption Difference (Δ): *${bill.consumptionKwh.toFixed(1)} kWh*`,
-    `• Electric Rate (Settings): ${formatPeso(bill.electricRate)} / kWh`,
+    `• Electric Rate: ${formatPeso(bill.electricRate)} / kWh`,
     `• Electric Sub-Total: *${formatPeso(bill.electricTotal)}*`,
     `────────────────────`,
     `📋 *BILLING BREAKDOWN*`,
@@ -337,15 +398,6 @@ export function formatMessengerBillSummary(
   }
 
   lines.push(`• Status: ${statusLabel}`);
-
-  if (paymentInstructions && bill.status !== 'paid') {
-    lines.push(
-      `────────────────────`,
-      `💳 *Payment Channels:*`,
-      paymentInstructions
-    );
-  }
-
-  lines.push(`\nGenerated via 4Rent Property Management System`);
+  lines.push(`\n4Rent System • Developed by splikaa`);
   return lines.join('\n');
 }
