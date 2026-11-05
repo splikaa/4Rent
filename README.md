@@ -180,3 +180,4 @@ npm run build
 ## License
 
 Distributed under the **MIT License**. See [`LICENSE`](./LICENSE) for full details.
+
