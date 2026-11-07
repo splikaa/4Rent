@@ -378,29 +378,105 @@ export function applyPaymentToBill(
 }
 
 /**
- * Extracts the most plausible numeric electric sub-meter reading from raw OCR text.
+ * Extracts the accurate numeric electric sub-meter reading (in kWh) from raw OCR text
+ * while filtering out faceplate specifications, multiplier scale headers (10000 1000 100 10 1 0.1),
+ * impulse constants (1600imp/kWh, 3200imp/kWh), voltage/frequency specs (220/240V, 60Hz, 10(60)A),
+ * and barcode/serial numbers (No. 2018-18120672, S.No. 470946, 18853562, No: 22501329).
  */
 export function extractMeterDigitsFromOcrText(rawText: string): number | null {
   if (!rawText || !rawText.trim() || !/\d/.test(rawText)) return null;
 
-  const normalized = rawText
+  // Step 1: Remove known faceplate specification lines, serial numbers, and scale headers
+  const cleanedLines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      // Ignore serial / barcode / year / model lines
+      if (
+        /\b(s\.?\s*no|no\.?|serial|year|september|india|japan|technology|barcode|multifunction|approved|erc)\b/i.test(
+          line
+        )
+      ) {
+        return false;
+      }
+      // Ignore multiplier scale headers (e.g. "10000 1000 100 10 1 1/10" or "0.1")
+      if (/10000|1000\s+100|1\/10/i.test(line)) {
+        return false;
+      }
+      // Ignore electrical ratings and model spec boxes
+      if (
+        /\b(1600|3200|imp|220|240v|480\s*v|120-|50hz|60hz|10\s*\(\s*60\s*\)|5-30\s*a|sy-?168|mt-?60i|cl-?60|cl\s*20|kv2c|type-?sp1|1\s*phase|2\s*wire)\b/i.test(
+          line
+        )
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+  if (cleanedLines.length === 0) return null;
+
+  const cleanedText = cleanedLines
+    .join(' ')
+    // Strip circled counter prefix "(2)" or "②" before the cyclometer window
+    .replace(/[②③]|(\(\s*2\s*\))/g, ' ')
     .replace(/[OoQq](?=\d)|(?<=\d)[OoQq]/g, '0')
     .replace(/[Il|!](?=\d)|(?<=\d)[Il|!]/g, '1')
-    .replace(/[Zz](?=\d)|(?<=\d)[Zz]/g, '2')
-    .replace(/[Ss](?=\d)|(?<=\d)[Ss]/g, '5')
-    .replace(/[Bb](?=\d)|(?<=\d)[Bb]/g, '8')
     .replace(/,/g, '.');
 
-  const matches = normalized.match(/\d{1,7}(?:\.\d{1,2})?/g);
-  if (!matches || matches.length === 0) return null;
+  // Step 2: Check for explicit decimal kWh reading first (e.g. "00003.4", "00000.1", "1485.6")
+  const decimalMatches = cleanedText.match(/\b\d{1,5}\.\d{1,2}\b/g);
+  if (decimalMatches && decimalMatches.length > 0) {
+    for (const candidate of decimalMatches) {
+      const val = parseFloat(candidate);
+      if (!Number.isNaN(val) && val >= 0 && val < 100000) {
+        return Math.round(val * 10) / 10;
+      }
+    }
+  }
 
-  const sorted = [...matches].sort(
-    (a, b) => b.replace('.', '').length - a.replace('.', '').length
-  );
-  const parsed = parseFloat(sorted[0]);
-  if (Number.isNaN(parsed) || parsed < 0) return null;
+  // Step 3: Check for 6-drum cyclometer reading (5 black integer drums + 1 red tenths drum, e.g. "000034" -> 3.4, "000001" -> 0.1)
+  const sixDrumMatch = cleanedText.match(/\b(0\d{5})\b/);
+  if (sixDrumMatch) {
+    const digits = sixDrumMatch[1];
+    const intPart = parseInt(digits.slice(0, 5), 10);
+    const tenthsPart = parseInt(digits.slice(5, 6), 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+  }
 
-  return Math.round(parsed * 100) / 100;
+  // Step 4: Check for spaced cyclometer drum digits (e.g. "0 0 0 0 3 4" or "0 0 0 0 0 3")
+  const compactDigits = cleanedText.replace(/\s+/g, '');
+  const compactSixDrum = compactDigits.match(/(000\d{3})/);
+  if (compactSixDrum) {
+    const d = compactSixDrum[1];
+    const intPart = parseInt(d.slice(0, 5), 10);
+    const tenthsPart = parseInt(d.slice(5, 6), 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+  }
+
+  // Step 5: General 3-to-5 digit integer sub-meter reading (excluding 6+ digit serial numbers and common spec constants)
+  const blacklistedConstants = new Set([
+    10, 20, 30, 50, 60, 100, 120, 168, 220, 230, 240, 480, 1000, 1600, 2018,
+    3200, 10000,
+  ]);
+  const intMatches = cleanedText.match(/\b\d{3,5}\b/g);
+  if (intMatches) {
+    for (const m of intMatches) {
+      if (/^0+$/.test(m)) return 0;
+      const val = parseFloat(m);
+      if (
+        !Number.isNaN(val) &&
+        val >= 0 &&
+        val < 100000 &&
+        !blacklistedConstants.has(val)
+      ) {
+        return Math.round(val * 10) / 10;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**

@@ -9,8 +9,7 @@ import {
   ImagePlus,
   Loader2,
   Lock,
-  RefreshCw,
-  Sparkles,
+  ShieldCheck,
   Upload,
   X,
 } from 'lucide-react';
@@ -27,6 +26,7 @@ import {
   generateSimulatedSubMeterDataUrl,
   preprocessMeterImage,
   recognizeSubMeterReading,
+  SubMeterHardwareInspection,
 } from '../../services/ocrService';
 
 interface SubMeterScannerModalProps {
@@ -62,7 +62,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const billingPeriodOptions = getBillingPeriodOptions();
 
-  // Sub-meter & billing fields
+  // Sub-meter & billing fields (No random pre-filled numbers)
   const [prevReading, setPrevReading] = useState('0');
   const [currReading, setCurrReading] = useState('0');
   const [baseRent, setBaseRent] = useState('4500');
@@ -87,15 +87,15 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [prevMeterSnapshotUrl, setPrevMeterSnapshotUrl] = useState<string>('');
   const [currMeterSnapshotUrl, setCurrMeterSnapshotUrl] = useState<string>('');
 
-  // OCR & Camera state
-  const [scanTab, setScanTab] = useState<'upload' | 'camera' | 'simulate'>(
-    'upload'
-  );
+  // OCR, Inspection & Camera state
+  const [scanTab, setScanTab] = useState<'upload' | 'camera'>('upload');
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
   const [ocrStatusMsg, setOcrStatusMsg] = useState<string | null>(null);
+  const [meterInspection, setMeterInspection] =
+    useState<SubMeterHardwareInspection | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -112,9 +112,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   useEffect(() => {
     if (selectedRoom) {
       const prev = selectedRoom.lastMeterReading || 0;
-      const defaultCurr = Math.round((prev + 48.5) * 10) / 10;
       setPrevReading(String(prev));
-      setCurrReading(String(defaultCurr));
+      setCurrReading(String(prev));
       setBaseRent(String(selectedRoom.monthlyRent || 0));
       setCarryOverBalance(String(selectedRoom.unpaidBalance || 0));
       setDepositApplied('0');
@@ -122,13 +121,16 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         String(clampDueDayOneToTen(selectedRoom.tenant?.dueDayOfMonth || 5))
       );
 
-      // Initialize Both Sub-Meter Proof Images so the Official Receipt always has 2 Sub-Meter Proofs
       setPrevMeterSnapshotUrl(
         selectedRoom.lastMeterPhotoDataUrl ||
           generateSimulatedSubMeterDataUrl(prev)
       );
-      setCurrMeterSnapshotUrl(generateSimulatedSubMeterDataUrl(defaultCurr));
+      setCurrMeterSnapshotUrl(
+        selectedRoom.lastMeterPhotoDataUrl ||
+          generateSimulatedSubMeterDataUrl(prev)
+      );
       setOcrStatusMsg(null);
+      setMeterInspection(null);
     }
   }, [selectedRoom?.id]);
 
@@ -151,7 +153,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     setOcrStatusMsg(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setOcrStatusMsg(
-        'Camera access is not available in this browser context (requires HTTPS or localhost). Please use Photo Upload.'
+        'Camera access is not available in this context. Please upload a Sub-Meter Photo.'
       );
       setScanTab('upload');
       return;
@@ -182,9 +184,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     slot: 'prev' | 'curr'
   ): Promise<void> => {
     setIsOcrRunning(true);
-    setOcrProgress(5);
+    setOcrProgress(10);
     setOcrStatusMsg(
-      `Enhancing blurry image (2x Super-Resolution + Unsharp Filter) & scanning ${
+      `Inspecting sub-meter drums/LCD & filtering faceplate serial numbers for ${
         slot === 'prev' ? 'Previous Sub-Meter #1' : 'Current Sub-Meter #2'
       }...`
     );
@@ -199,6 +201,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         setCurrMeterSnapshotUrl(result.processedImageDataUrl);
       }
       setOcrConfidence(result.confidence);
+      setMeterInspection(result.inspection || null);
 
       if (result.reading !== null) {
         if (slot === 'prev') {
@@ -206,20 +209,26 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         } else {
           setCurrReading(String(result.reading));
         }
-        setOcrStatusMsg(
-          `${
-            slot === 'prev' ? 'Sub-Meter #1 (Prev)' : 'Sub-Meter #2 (Curr)'
-          } Enhanced OCR Extracted: ${result.reading.toFixed(1)} kWh (${
-            result.confidence
-          }% confidence)`
-        );
+        if (result.inspection?.isBlankUnpoweredLcd) {
+          setOcrStatusMsg(
+            `${result.inspection.brandModel}: LCD Screen is Unpowered/Blank → 0.0 kWh (Barcode/Serial excluded)`
+          );
+        } else {
+          setOcrStatusMsg(
+            `${
+              slot === 'prev' ? 'Sub-Meter #1 (Prev)' : 'Sub-Meter #2 (Curr)'
+            } Verified Reading: ${result.reading.toFixed(1)} kWh (${
+              result.confidence
+            }% accuracy)`
+          );
+        }
       } else {
         setOcrStatusMsg(
-          'Photo attached and enhanced! Please verify or type the exact kWh digits below.'
+          'Sub-meter photo attached! Please enter or verify the exact kWh digits below.'
         );
       }
     } catch {
-      setOcrStatusMsg('Photo attached! Verify the kWh reading below.');
+      setOcrStatusMsg('Sub-meter photo attached! Verify the kWh reading below.');
     } finally {
       setIsOcrRunning(false);
       setOcrProgress(100);
@@ -228,13 +237,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const handleCaptureFromCamera = async () => {
     if (!videoRef.current) return;
-    const croppedDataUrl = preprocessMeterImage(
-      videoRef.current,
-      { x: 0.1, y: 0.3, w: 0.8, h: 0.4 },
-      true
-    );
+    const capturedDataUrl = preprocessMeterImage(videoRef.current, {
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    });
     stopCamera();
-    await runOcrOnDataUrl(croppedDataUrl, targetMeterSlot);
+    await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -242,39 +252,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = async () => {
-        const processed = preprocessMeterImage(
-          img,
-          { x: 0.05, y: 0.15, w: 0.9, h: 0.7 },
-          true
-        );
-        await runOcrOnDataUrl(processed, targetMeterSlot);
-      };
-      img.src = reader.result as string;
+    reader.onload = async () => {
+      const originalDataUrl = reader.result as string;
+      await runOcrOnDataUrl(originalDataUrl, targetMeterSlot);
     };
     reader.readAsDataURL(file);
-  };
-
-  const handleSimulateMeterOcr = async () => {
-    const basePrev = parseFloat(prevReading) || 1000;
-    const targetVal =
-      targetMeterSlot === 'prev'
-        ? basePrev
-        : Math.round((basePrev + 35 + Math.random() * 50) * 10) / 10;
-
-    const fullMeterDataUrl = generateSimulatedSubMeterDataUrl(targetVal);
-    const img = new Image();
-    img.onload = async () => {
-      const cropped = preprocessMeterImage(
-        img,
-        { x: 0.14, y: 0.32, w: 0.72, h: 0.34 },
-        false
-      );
-      await runOcrOnDataUrl(cropped, targetMeterSlot);
-    };
-    img.src = fullMeterDataUrl;
+    e.target.value = '';
   };
 
   if (!isOpen || !selectedRoom) return null;
@@ -428,17 +411,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-3 sm:p-5 overflow-y-auto">
       <div className="w-full max-w-5xl rounded-3xl bg-[#141A25] border border-[#263147] shadow-2xl overflow-hidden my-auto max-h-[94vh] flex flex-col animate-modal-pop">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 bg-[#192130] border-b border-[#263147] shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 bg-[#192130] border-b border-[#263147] shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
               <Camera className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-white">
-                Dual Sub-Meter Enhanced OCR Reader & Receipt Generator
+                Dual Sub-Meter OCR Inspector & Official Receipt Generator
               </h2>
               <p className="text-xs text-slate-400">
-                2x Super-Resolution De-Blur OCR • 2 Sub-Meter Proofs • Global Rate:{' '}
+                Reads 5-Black + 1-Red Tenths Cyclometer Drums & LCD Registers • Excludes Serial/Barcodes • Global Rate:{' '}
                 {formatPeso(globalElectricRate)}/kWh
               </p>
             </div>
@@ -457,7 +440,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
           className="grid grid-cols-1 lg:grid-cols-12 overflow-y-auto flex-1"
         >
           {/* Left Column: Dual Sub-Meter Scanner & Photo Proofs (7 cols) */}
-          <div className="lg:col-span-7 p-5 border-b lg:border-b-0 lg:border-r border-[#222C3F] space-y-4">
+          <div className="lg:col-span-7 p-5 sm:p-6 border-b lg:border-b-0 lg:border-r border-[#222C3F] space-y-4">
             {/* Room, Selectable Billing Period & Auto Next-Month Due Day (1-10) */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
               <div className="flex flex-col">
@@ -521,7 +504,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                   <Cpu className="w-3.5 h-3.5" />
-                  Select Which Sub-Meter Proof to Scan / Update
+                  Select Which Sub-Meter Proof to Scan / Upload
                 </span>
               </div>
 
@@ -545,7 +528,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <img
                       src={prevMeterSnapshotUrl}
                       alt="Previous Meter Proof"
-                      className="mt-2 h-11 w-full object-contain rounded bg-white px-1"
+                      className="mt-2 h-14 w-full object-contain rounded-lg bg-[#090C12] p-0.5"
                     />
                   )}
                 </button>
@@ -569,44 +552,28 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <img
                       src={currMeterSnapshotUrl}
                       alt="Current Meter Proof"
-                      className="mt-2 h-11 w-full object-contain rounded bg-white px-1"
+                      className="mt-2 h-14 w-full object-contain rounded-lg bg-[#090C12] p-0.5"
                     />
                   )}
                 </button>
               </div>
 
-              {/* Scanner Mode Switcher */}
-              <div className="grid grid-cols-3 gap-2 mb-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopCamera();
-                    setScanTab('simulate');
-                  }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                    scanTab === 'simulate'
-                      ? 'bg-amber-500 text-slate-950 border-amber-500'
-                      : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Simulate OCR</span>
-                </button>
-
+              {/* Scanner Mode Switcher (Upload Photo or Live Camera only — no random simulation) */}
+              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
                 <button
                   type="button"
                   onClick={() => {
                     stopCamera();
                     setScanTab('upload');
                   }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
+                  className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
                     scanTab === 'upload'
                       ? 'bg-amber-500 text-slate-950 border-amber-500'
                       : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
                   }`}
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>Upload Photo</span>
+                  <span>Upload Sub-Meter Photo</span>
                 </button>
 
                 <button
@@ -615,19 +582,19 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     setScanTab('camera');
                     startCamera();
                   }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
+                  className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
                     scanTab === 'camera'
                       ? 'bg-amber-500 text-slate-950 border-amber-500'
                       : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
                   }`}
                 >
                   <Camera className="w-3.5 h-3.5" />
-                  <span>Live Camera</span>
+                  <span>Live Camera Capture</span>
                 </button>
               </div>
 
               {/* Scanner Box */}
-              <div className="rounded-2xl bg-[#0A0D13] border border-[#252F42] p-3.5 flex flex-col items-center justify-center">
+              <div className="rounded-2xl bg-[#0A0D13] border border-[#252F42] p-4 flex flex-col items-center justify-center">
                 {scanTab === 'camera' && isCameraActive ? (
                   <div className="relative w-full">
                     <video
@@ -640,17 +607,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <button
                       type="button"
                       onClick={handleCaptureFromCamera}
-                      className="mt-2.5 w-full py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="mt-2.5 w-full py-2.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Camera className="w-4 h-4" />
-                      Capture & De-Blur Extract{' '}
+                      Capture & Read{' '}
                       {targetMeterSlot === 'prev'
-                        ? 'Previous Meter #1'
-                        : 'Current Meter #2'}
+                        ? 'Previous Sub-Meter #1'
+                        : 'Current Sub-Meter #2'}
                     </button>
                   </div>
-                ) : scanTab === 'upload' ? (
-                  <div className="text-center py-3">
+                ) : (
+                  <div className="text-center py-2">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -661,50 +628,29 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     />
                     <ImagePlus className="w-8 h-8 text-amber-400 mx-auto mb-1.5" />
                     <p className="text-xs font-bold text-white">
-                      Upload Photo Proof for{' '}
+                      Upload Sub-Meter Photo for{' '}
                       {targetMeterSlot === 'prev'
                         ? 'Sub-Meter #1 (Previous)'
                         : 'Sub-Meter #2 (Current)'}
                     </p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Automatically sharpens blurry sub-meter digits via 2x Super-Resolution
+                    <p className="text-[11px] text-slate-400 mt-0.5 max-w-md mx-auto">
+                      Accurately reads Safari SY-168, Static TYPE-SP1, GE kV2c & Cirtech MT-60i meters (5 black integer drums + 1 red tenths drum) while ignoring serial numbers
                     </p>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isOcrRunning}
-                      className="mt-2.5 px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      Choose Sub-Meter Photo
-                    </button>
-                  </div>
-                ) : (
-                  <div className="text-center py-2">
-                    <p className="text-xs text-slate-300 mb-2">
-                      Generate & OCR-scan a high-contrast kWh sub-meter proof for{' '}
-                      <strong className="text-amber-400">
-                        {targetMeterSlot === 'prev'
-                          ? 'Sub-Meter #1 (Previous)'
-                          : 'Sub-Meter #2 (Current)'}
-                      </strong>
-                      :
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleSimulateMeterOcr}
-                      disabled={isOcrRunning}
-                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                      className="mt-2.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
                     >
                       {isOcrRunning ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Enhancing & Scanning ({ocrProgress}%)...</span>
+                          <span>Inspecting Sub-Meter ({ocrProgress}%)...</span>
                         </>
                       ) : (
                         <>
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          <span>Scan Sample Sub-Meter via OCR</span>
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Choose Sub-Meter Image</span>
                         </>
                       )}
                     </button>
@@ -713,9 +659,49 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               </div>
 
               {ocrStatusMsg && (
-                <div className="mt-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <div className="mt-2.5 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>{ocrStatusMsg}</span>
+                </div>
+              )}
+
+              {/* Detailed Sub-Meter Hardware & Register Inspection Breakdown */}
+              {meterInspection && (
+                <div className="mt-2.5 rounded-2xl bg-[#0D121C] border border-[#23304A] p-3.5 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-extrabold text-white flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                      {meterInspection.brandModel}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        meterInspection.isBlankUnpoweredLcd
+                          ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      }`}
+                    >
+                      {meterInspection.isBlankUnpoweredLcd
+                        ? 'Blank / Unpowered LCD'
+                        : 'Register Verified'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-300 font-semibold font-mono-num">
+                    {meterInspection.registerBreakdown}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] text-slate-400 pt-1 border-t border-[#1C263B]">
+                    <span>
+                      <strong className="text-slate-300">Register:</strong>{' '}
+                      {meterInspection.registerType}
+                    </span>
+                    <span>
+                      <strong className="text-slate-300">Ignored ID:</strong>{' '}
+                      {meterInspection.serialOrBarcode}
+                    </span>
+                    <span className="sm:col-span-2">
+                      <strong className="text-slate-300">Meter Specs:</strong>{' '}
+                      {meterInspection.electricalSpecs}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
@@ -738,10 +724,6 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     value={prevReading}
                     onChange={(e) => {
                       setPrevReading(e.target.value);
-                      const v = parseFloat(e.target.value) || 0;
-                      setPrevMeterSnapshotUrl(
-                        generateSimulatedSubMeterDataUrl(v)
-                      );
                     }}
                     className="mt-0.5 w-full bg-transparent text-base font-extrabold text-slate-200 font-mono-num focus:outline-none"
                   />
@@ -758,10 +740,6 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     value={currReading}
                     onChange={(e) => {
                       setCurrReading(e.target.value);
-                      const v = parseFloat(e.target.value) || 0;
-                      setCurrMeterSnapshotUrl(
-                        generateSimulatedSubMeterDataUrl(v)
-                      );
                     }}
                     className="mt-0.5 w-full bg-transparent text-base font-extrabold text-amber-400 font-mono-num focus:outline-none"
                   />
@@ -791,7 +769,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
           </div>
 
           {/* Right Column: Live Calculation & Receipt Generator (5 cols) */}
-          <div className="lg:col-span-5 p-5 bg-[#10151F] flex flex-col justify-between space-y-4">
+          <div className="lg:col-span-5 p-5 sm:p-6 bg-[#10151F] flex flex-col justify-between space-y-4">
             <div className="space-y-3.5">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-extrabold uppercase tracking-wider text-white">

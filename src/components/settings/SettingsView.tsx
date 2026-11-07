@@ -580,11 +580,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <div
             className={`grid grid-cols-1 ${
-              !isDesktopInstalled ? 'sm:grid-cols-2' : 'sm:grid-cols-2'
+              !isDesktopInstalled ? 'sm:grid-cols-2' : 'sm:grid-cols-1'
             } gap-5`}
           >
             {/* Only show Desktop Launcher download if NOT already running in Desktop version */}
-            {!isDesktopInstalled ? (
+            {!isDesktopInstalled && (
               <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 flex flex-col justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-bold text-white">
@@ -606,18 +606,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <span>Download 4Rent Launcher</span>
                 </button>
               </div>
-            ) : (
-              /* Mobile App Companion Box when Desktop is already installed */
-              <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 flex flex-col justify-between gap-4">
+            )}
+
+            {/* Desktop <-> Native Mobile App (Flutter / Swift) Real-Time Cloud Sync Box */}
+            <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 flex flex-col justify-between gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-bold text-white">
                     <Smartphone className="w-4 h-4 text-amber-400" />
-                    <span>4Rent Mobile App (iOS & Android)</span>
+                    <span>
+                      Native Mobile App (Flutter / Swift) ↔ Desktop Real-Time Sync
+                    </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                    Open on your phone and tap{' '}
-                    <strong className="text-slate-200">Add to Home Screen</strong>{' '}
-                    for the standalone Mobile App with live sub-meter camera OCR.
+                    Syncs rooms, sub-meter readings, and official receipts live
+                    between this Desktop and the installable{' '}
+                    <strong className="text-slate-200">
+                      Flutter / iOS Swift Mobile App
+                    </strong>{' '}
+                    using Property Sync Code{' '}
+                    <code className="px-1.5 py-0.5 rounded bg-[#182235] text-amber-400 font-mono-num font-bold">
+                      {form.cloudSync.propertyCode || '4RENT-MAIN'}
+                    </code>
+                    .
                   </p>
                 </div>
                 <button
@@ -625,7 +636,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(
-                        'https://splikaa.github.io/4Rent/'
+                        form.cloudSync.propertyCode || '4RENT-MAIN'
                       );
                       setCopiedMobileUrl(true);
                       setTimeout(() => setCopiedMobileUrl(false), 3000);
@@ -633,36 +644,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       // ignore clipboard error
                     }
                   }}
-                  className="w-full py-3 px-4 rounded-2xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-amber-400 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer btn-fluid"
+                  className="px-3.5 py-2 rounded-xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-amber-400 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer btn-fluid shrink-0"
                 >
                   {copiedMobileUrl ? (
                     <>
-                      <Check className="w-4 h-4 text-emerald-400" />
-                      <span className="text-emerald-400">
-                        Mobile App Link Copied!
-                      </span>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-400">Sync Code Copied</span>
                     </>
                   ) : (
                     <>
-                      <Copy className="w-4 h-4" />
-                      <span>Copy Mobile App Link</span>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>
+                        Copy Sync Code ({form.cloudSync.propertyCode || '4RENT-MAIN'})
+                      </span>
                     </>
                   )}
                 </button>
-              </div>
-            )}
-
-            {/* Desktop <-> Mobile Cloud Sync Box */}
-            <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 flex flex-col justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-bold text-white">
-                  <RefreshCw className="w-4 h-4 text-blue-400" />
-                  <span>Desktop ↔ Mobile Synchronization</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                  All rooms, continuous sub-meter readings, and receipts are
-                  stored in a version-proof database that never resets on update.
-                </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <button

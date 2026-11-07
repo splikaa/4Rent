@@ -70,16 +70,38 @@ export function subscribeToRealtimeSync(
       config: { broadcast: { ack: false } },
     });
 
-    channel.on('broadcast', { event: 'db_update' }, (payload) => {
-      try {
-        const snap = payload?.payload?.snapshot;
-        if (snap && typeof snap === 'object' && Array.isArray(snap.rooms)) {
-          onRemoteSnapshot(snap as AppDatabaseSnapshot);
+    channel
+      .on('broadcast', { event: 'db_update' }, (payload) => {
+        try {
+          const snap = payload?.payload?.snapshot;
+          if (snap && typeof snap === 'object' && Array.isArray(snap.rooms)) {
+            onRemoteSnapshot(snap as AppDatabaseSnapshot);
+          }
+        } catch (err) {
+          console.warn('Realtime sync payload parsing error:', err);
         }
-      } catch (err) {
-        console.warn('Realtime sync payload parsing error:', err);
-      }
-    });
+      })
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'four_rent_sync',
+          filter: `property_code=eq.${propCode}`,
+        },
+        (payload) => {
+          try {
+            const snap = (
+              payload?.new as { snapshot?: AppDatabaseSnapshot } | undefined
+            )?.snapshot;
+            if (snap && typeof snap === 'object' && Array.isArray(snap.rooms)) {
+              onRemoteSnapshot(snap);
+            }
+          } catch (err) {
+            console.warn('Realtime postgres_changes parsing error:', err);
+          }
+        }
+      );
 
     channel.subscribe();
     activeLiveChannel = channel;
