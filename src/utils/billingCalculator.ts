@@ -53,6 +53,53 @@ export function isMobileDevice(): boolean {
 }
 
 /**
+ * Detects whether 4Rent Management System is currently running inside the installed
+ * Desktop Launcher (Electron, Edge/Chrome --app window, standalone PWA, or already installed).
+ */
+export function isRunningInDesktopApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const ua = navigator.userAgent || '';
+    if (/Electron/i.test(ua)) return true;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('desktop') === '1' || params.get('app') === '1') {
+      localStorage.setItem('4rent_desktop_installed', 'true');
+      return true;
+    }
+
+    if (localStorage.getItem('4rent_desktop_installed') === 'true') {
+      return true;
+    }
+
+    if (
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      window.matchMedia?.('(display-mode: minimal-ui)').matches ||
+      window.matchMedia?.('(display-mode: window-controls-overlay)').matches
+    ) {
+      localStorage.setItem('4rent_desktop_installed', 'true');
+      return true;
+    }
+
+    // Chromium --app mode hides the browser menubar/toolbar
+    const winAny = window as unknown as {
+      menubar?: { visible?: boolean };
+      toolbar?: { visible?: boolean };
+    };
+    if (
+      (winAny.menubar && winAny.menubar.visible === false) ||
+      (winAny.toolbar && winAny.toolbar.visible === false)
+    ) {
+      localStorage.setItem('4rent_desktop_installed', 'true');
+      return true;
+    }
+  } catch {
+    // ignore access errors
+  }
+  return false;
+}
+
+/**
  * Automatically formats Philippine mobile phone numbers as the user types:
  * e.g., "09175550101" -> "0917-555-0101"
  */
@@ -73,6 +120,44 @@ export function formatPhoneNumber(raw: string): string {
     return `${digits.slice(0, 4)}-${digits.slice(4)}`;
   }
   return `${digits.slice(0, 4)}-${digits.slice(4, 7)}-${digits.slice(7, 11)}`;
+}
+
+/**
+ * Masks a phone number for Tenant Privacy Protection (e.g., "0917-555-0101" -> "0917-•••-••01").
+ */
+export function maskPhoneNumber(raw?: string, shouldMask = true): string {
+  if (!raw) return '';
+  const formatted = formatPhoneNumber(raw);
+  if (!shouldMask) return formatted;
+  const digits = formatted.replace(/\D/g, '');
+  if (digits.length < 6) return '••••-•••-••••';
+  return `${digits.slice(0, 4)}-•••-••${digits.slice(-2)}`;
+}
+
+/**
+ * Masks currency figures when Landlord Privacy Shield is active in public view.
+ */
+export function formatPesoPrivacy(amount: number, shouldMask = false): string {
+  if (shouldMask) return '₱••,•••.••';
+  return formatPeso(amount);
+}
+
+/**
+ * Generates an anti-tamper verification code for Official Receipts to protect Landlord & Tenant.
+ */
+export function generateReceiptVerificationCode(
+  receiptNo: string,
+  roomName: string,
+  totalAmount: number
+): string {
+  const seed = `${receiptNo}|${roomName}|${totalAmount.toFixed(2)}`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const hex = (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  return `4R-SEAL-${hex.slice(0, 6)}`;
 }
 
 /**
@@ -343,9 +428,15 @@ export function formatMessengerBillSummary(
       ? '🟡 PARTIAL PAYMENT'
       : '🔴 UNPAID / DUE';
 
+  const seal = generateReceiptVerificationCode(
+    bill.receiptNo,
+    bill.roomName,
+    bill.totalAmountDue
+  );
+
   const lines = [
-    `🏠 *${apartmentName} • Official Billing Statement*`,
-    `Receipt No: ${bill.receiptNo}`,
+    `🏠 *${apartmentName || '4Rent Management System'} • Official Statement*`,
+    `Receipt No: ${bill.receiptNo} (${seal})`,
     `Room: *${bill.roomName}*`,
     `Tenant: ${bill.tenantName}`,
     `Billing Period: ${bill.billingPeriod}`,
@@ -398,6 +489,6 @@ export function formatMessengerBillSummary(
   }
 
   lines.push(`• Status: ${statusLabel}`);
-  lines.push(`\n4Rent System • Developed by splikaa`);
+  lines.push(`\n4Rent Management System v1.0.0 • Developed by splikaa`);
   return lines.join('\n');
 }

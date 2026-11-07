@@ -27,7 +27,9 @@ import {
 import {
   clampDueDayOneToTen,
   formatPeso,
+  formatPesoPrivacy,
   formatPhoneNumber,
+  maskPhoneNumber,
   getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
 
@@ -37,6 +39,7 @@ interface RoomDetailsModalProps {
   roomBills: BillRecord[];
   previousTenants: TenantHistoryEntry[];
   globalElectricRate: number;
+  privacyMaskEnabled?: boolean;
   onClose: () => void;
   onEditRoom: (room: Room) => void;
   onOpenScannerForRoom: (room: Room) => void;
@@ -50,6 +53,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   roomBills,
   previousTenants,
   globalElectricRate,
+  privacyMaskEnabled = false,
   onClose,
   onEditRoom,
   onOpenScannerForRoom,
@@ -77,10 +81,10 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   const advanceHistory = isOccupied ? room.advanceHistory || [] : [];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-[#111622] border border-[#1E2638] rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+      <div className="w-full max-w-2xl bg-[#111622] border border-[#1E2638] rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col animate-modal-pop">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1E2638] bg-[#131926] shrink-0">
+        <div className="flex items-center justify-between px-6 sm:px-7 py-5 border-b border-[#1E2638] bg-[#131926] shrink-0">
           <div className="flex items-center gap-3.5">
             <div className="w-11 h-11 rounded-2xl bg-[#F59E0B]/15 border border-[#F59E0B]/30 flex items-center justify-center text-[#F59E0B] shrink-0">
               <DoorOpen className="w-5 h-5" />
@@ -129,23 +133,23 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
         </div>
 
         {/* Scrollable Content */}
-        <div className="p-6 overflow-y-auto space-y-5">
+        <div className="p-6 sm:p-7 overflow-y-auto space-y-6">
           {/* Top Metrics Grid — 4 columns when Occupied, 3 columns when Vacant (No Advance Balance on Vacant Rooms) */}
           <div
             className={`grid grid-cols-1 ${
               isOccupied ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
-            } gap-3`}
+            } gap-4`}
           >
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 flex flex-col justify-between">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                 Monthly Rent
               </p>
               <p className="text-base font-extrabold text-white font-mono-num mt-1.5">
-                {formatPeso(room.monthlyRent)}
+                {formatPesoPrivacy(room.monthlyRent, privacyMaskEnabled)}
               </p>
             </div>
 
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 flex flex-col justify-between">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                 Continuous Meter
               </p>
@@ -155,49 +159,64 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               </p>
             </div>
 
-            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+            <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 flex flex-col justify-between">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                 {isOccupied ? 'Security Deposit' : 'Required Deposit'}
               </p>
               <p className="text-base font-extrabold text-[#10B981] font-mono-num mt-1.5 flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                <span>{formatPeso(safeDeposit)}</span>
+                <span>{formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}</span>
               </p>
             </div>
 
             {isOccupied && (
-              <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-3.5 flex flex-col justify-between">
+              <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 flex flex-col justify-between">
                 <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                   Advance Balance
                 </p>
                 <p className="text-base font-extrabold text-[#10B981] font-mono-num mt-1.5 flex items-center gap-1">
                   <Wallet className="w-3.5 h-3.5 shrink-0" />
-                  <span>{formatPeso(safeAdvance)}</span>
+                  <span>{formatPesoPrivacy(safeAdvance, privacyMaskEnabled)}</span>
                 </p>
               </div>
             )}
           </div>
 
           {/* Current Tenant & Auto Next-Month Due Date — Symmetrical 12-Column Grid */}
-          <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 sm:p-5">
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-stretch">
+          <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-5 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-stretch">
               {/* Left 7 Columns: Tenant Details */}
               <div className="sm:col-span-7 flex flex-col justify-center">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[#3B82F6] mb-2 flex items-center gap-1.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#3B82F6] mb-2.5 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5" />
                   Current Tenant & Billing Rate
                 </p>
 
                 {isOccupied && room.tenant ? (
-                  <div className="space-y-2">
-                    <p className="text-lg font-extrabold text-white leading-snug">
-                      {room.tenant.fullName}
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-300">
+                  <div className="space-y-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-lg font-extrabold text-white leading-snug">
+                        {room.tenant.fullName}
+                      </p>
+                      {room.tenant.validIdVerified !== false && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#10B981]/15 text-[#10B981] border border-[#10B981]/30 text-[10px] font-bold">
+                          <ShieldCheck className="w-3 h-3" />
+                          ID Verified
+                        </span>
+                      )}
+                      {room.tenant.privacyConsentSigned !== false && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 text-[10px] font-bold">
+                          RA 10173 Signed
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300">
                       <span className="inline-flex items-center gap-1.5 font-mono-num">
                         <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         {room.tenant.phone
-                          ? formatPhoneNumber(room.tenant.phone)
+                          ? privacyMaskEnabled
+                            ? maskPhoneNumber(room.tenant.phone)
+                            : formatPhoneNumber(room.tenant.phone)
                           : 'No mobile number'}
                       </span>
                       <span className="inline-flex items-center gap-1.5">
@@ -215,6 +234,17 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         Rate: {formatPeso(globalElectricRate)}/kWh
                       </span>
                     </div>
+                    {room.tenant.emergencyContact && (
+                      <div className="pt-1.5 text-[11px] text-slate-400 flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+                        <span>
+                          Emergency Contact:{' '}
+                          <strong className="text-slate-200">
+                            {room.tenant.emergencyContact}
+                          </strong>
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="rounded-xl bg-[#111622] border border-[#10B981]/30 px-3.5 py-3">

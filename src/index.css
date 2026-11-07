@@ -2,18 +2,30 @@
 
 @layer base {
   :root {
-    --bg-canvas: #0b0e14;
-    --bg-surface: #151b26;
-    --bg-elevated: #1d2535;
-    --border-subtle: #252f42;
+    --bg-canvas: #090d14;
+    --bg-surface: #131924;
+    --bg-elevated: #1a2232;
+    --border-subtle: #243047;
     --brand-amber: #f59e0b;
     --brand-amber-dark: #d97706;
+    --spring-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  html {
+    scroll-behavior: smooth;
   }
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background-color: #0b0e14;
-    color: #f1f5f9;
+    background-color: #090d14;
+    background-image:
+      radial-gradient(circle at 12% 8%, rgba(245, 158, 11, 0.065), transparent 36%),
+      radial-gradient(circle at 88% 14%, rgba(59, 130, 246, 0.055), transparent 38%),
+      radial-gradient(circle at 50% 92%, rgba(16, 185, 129, 0.04), transparent 42%);
+    background-attachment: fixed;
+    color: #f8fafc;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
     overflow-x: hidden;
     -webkit-tap-highlight-color: transparent;
   }
@@ -24,16 +36,115 @@
   }
 }
 
+/* Smooth Spring Keyframes for Views, Modals, and Cards */
+@keyframes viewEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes modalPop {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cardFloatIn {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-view-enter {
+  animation: viewEnter 0.42s var(--spring-ease) both;
+}
+
+.animate-modal-pop {
+  animation: modalPop 0.36s var(--spring-ease) both;
+}
+
+.animate-card-in {
+  animation: cardFloatIn 0.45s var(--spring-ease) both;
+}
+
+/* Fluid Interactive Surface & Button Classes */
+.surface-card {
+  background: linear-gradient(180deg, rgba(22, 29, 43, 0.92) 0%, rgba(17, 23, 35, 0.96) 100%);
+  border: 1px solid rgba(38, 50, 74, 0.85);
+  box-shadow:
+    0 12px 32px -12px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  transition:
+    transform 0.32s var(--spring-ease),
+    border-color 0.32s var(--spring-ease),
+    box-shadow 0.32s var(--spring-ease),
+    background-color 0.32s var(--spring-ease);
+}
+
+.surface-card-interactive:hover {
+  transform: translateY(-3px);
+  border-color: rgba(245, 158, 11, 0.45);
+  box-shadow:
+    0 20px 38px -14px rgba(0, 0, 0, 0.65),
+    0 0 24px -6px rgba(245, 158, 11, 0.14),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.09);
+}
+
+.btn-fluid {
+  transition:
+    transform 0.24s var(--spring-ease),
+    background-color 0.24s var(--spring-ease),
+    box-shadow 0.24s var(--spring-ease),
+    border-color 0.24s var(--spring-ease);
+}
+
+.btn-fluid:hover {
+  transform: translateY(-1px);
+}
+
+.btn-fluid:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-view-enter,
+  .animate-modal-pop,
+  .animate-card-in {
+    animation: none !important;
+  }
+  .surface-card,
+  .surface-card-interactive:hover,
+  .btn-fluid {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
 /* Custom subtle scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b0e14;
+  background: #090d14;
 }
 ::-webkit-scrollbar-thumb {
-  background: #252f42;
+  background: #253045;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -67,4 +178,3 @@
     display: none !important;
   }
 }
-

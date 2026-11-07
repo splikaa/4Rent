@@ -8,19 +8,28 @@ import {
   Copy,
   Database,
   Download,
+  Eye,
+  EyeOff,
+  FileCheck2,
   Lock,
   Monitor,
   RefreshCw,
   Save,
   Shield,
-  Sparkles,
-  Trash2,
+  ShieldCheck,
+  Smartphone,
+  Timer,
   Upload,
 } from 'lucide-react';
-import { AppDatabaseSnapshot, AppSettings } from '../../types/rental';
+import {
+  AppDatabaseSnapshot,
+  AppSettings,
+  SecurityAuditEntry,
+} from '../../types/rental';
 import {
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
+  loadAuditLogs,
 } from '../../services/storageService';
 import {
   pullSnapshotFromCloud,
@@ -30,6 +39,7 @@ import {
 import {
   formatPhoneNumber,
   isMobileDevice,
+  isRunningInDesktopApp,
 } from '../../utils/billingCalculator';
 
 interface SettingsViewProps {
@@ -37,7 +47,6 @@ interface SettingsViewProps {
   onBack: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
   onReloadAllData: () => void;
-  onResetAllData: () => void;
   onOpenSecuritySetup: () => void;
   onInstallDesktopApp?: () => void;
 }
@@ -47,22 +56,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onBack,
   onUpdateSettings,
   onReloadAllData,
-  onResetAllData,
   onOpenSecuritySetup,
   onInstallDesktopApp,
 }) => {
   const isMobile = isMobileDevice();
+  const [isDesktopInstalled, setIsDesktopInstalled] = useState<boolean>(() =>
+    isRunningInDesktopApp()
+  );
   const [form, setForm] = useState<AppSettings>(settings);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showDevCloudConfig, setShowDevCloudConfig] = useState(false);
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedMobileUrl, setCopiedMobileUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const auditLogs: SecurityAuditEntry[] = loadAuditLogs();
 
   const handleSaveGeneral = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateSettings(form);
-    setStatusBanner('Settings saved to persistent database!');
+    setStatusBanner('Property & billing settings saved to persistent database!');
     setTimeout(() => setStatusBanner(null), 3500);
   };
 
@@ -105,44 +120,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleDownloadDesktopInstallerBat = () => {
+  const handleDownload4RentLauncher = () => {
     if (onInstallDesktopApp) {
       onInstallDesktopApp();
     }
     const batContent = [
       '@echo off',
-      'title 4Rent Desktop Application Installer (Developed by splikaa)',
+      'title 4Rent Launcher — 4Rent Management System (v1.0.0)',
       'echo ================================================================',
-      'echo   Installing 4Rent Apartment ^& Sub-Meter System (v1.3.0)',
+      'echo   4Rent Management System (v1.0.0)',
       'echo   Developed by splikaa',
       'echo ================================================================',
       'echo.',
-      'set "APP_URL=https://splikaa.github.io/4Rent/"',
+      'set "APP_URL=https://splikaa.github.io/4Rent/?desktop=1"',
       'set "ICON_DIR=%LOCALAPPDATA%\\4Rent"',
       'set "ICON_PATH=%LOCALAPPDATA%\\4Rent\\4rent-icon.ico"',
-      'set "SHORTCUT=%USERPROFILE%\\Desktop\\4Rent Apartment System.lnk"',
+      'set "OLD_SHORTCUT=%USERPROFILE%\\Desktop\\4Rent Apartment System.lnk"',
+      'set "SHORTCUT=%USERPROFILE%\\Desktop\\4Rent Launcher.lnk"',
       '',
+      'if exist "%OLD_SHORTCUT%" del /F /Q "%OLD_SHORTCUT%" >nul 2>&1',
       'if not exist "%ICON_DIR%" mkdir "%ICON_DIR%"',
       'powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri \'https://splikaa.github.io/4Rent/4rent-icon.ico\' -OutFile \'%ICON_PATH%\' -UseBasicParsing } catch {}"',
       '',
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\'%SHORTCUT%\'); if (Test-Path \'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\') { $s.TargetPath = \'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\'; $s.Arguments = \'--app=%APP_URL%\'; } elseif (Test-Path \'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\') { $s.TargetPath = \'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\'; $s.Arguments = \'--app=%APP_URL%\'; } else { $s.TargetPath = \'%APP_URL%\'; }; if (Test-Path \'%ICON_PATH%\') { $s.IconLocation = \'%ICON_PATH%,0\'; }; $s.Description = \'4Rent Apartment Management System by splikaa\'; $s.Save()"',
+      'powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\'%SHORTCUT%\'); if (Test-Path \'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\') { $s.TargetPath = \'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\'; $s.Arguments = \'--app=%APP_URL%\'; } elseif (Test-Path \'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\') { $s.TargetPath = \'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\'; $s.Arguments = \'--app=%APP_URL%\'; } else { $s.TargetPath = \'%APP_URL%\'; }; if (Test-Path \'%ICON_PATH%\') { $s.IconLocation = \'%ICON_PATH%,0\'; }; $s.Description = \'4Rent Management System (v1.0.0) by splikaa\'; $s.Save()"',
       '',
       'ie4uinit.exe -show >nul 2>&1',
-      'echo [SUCCESS] "4Rent Apartment System" shortcut with 4Rent Icon installed on Desktop!',
-      'echo Launching 4Rent Desktop Application...',
-      'start "" "msedge" --app=https://splikaa.github.io/4Rent/ 2>nul || start "" "https://splikaa.github.io/4Rent/"',
-      'exit',
+      'echo [SUCCESS] "4Rent Launcher" installed on Desktop!',
+      'echo Launching 4Rent Management System...',
+      'start "" "msedge" --app=https://splikaa.github.io/4Rent/?desktop=1 2>nul || start "" "https://splikaa.github.io/4Rent/?desktop=1"',
+      '(goto) 2>nul & del "%~f0"',
     ].join('\r\n');
 
     const blob = new Blob([batContent], { type: 'application/bat' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'Install-4Rent-Desktop.bat';
+    a.download = '4Rent Launcher.bat';
     a.click();
     URL.revokeObjectURL(url);
+
+    // Mark desktop launcher as installed so the installer card removes itself
+    try {
+      localStorage.setItem('4rent_desktop_installed', 'true');
+    } catch {
+      // ignore storage error
+    }
+    setIsDesktopInstalled(true);
     setStatusBanner(
-      '4Rent Desktop Installer downloaded! Run Install-4Rent-Desktop.bat to install the 4Rent icon on your Desktop.'
+      '4Rent Launcher downloaded and configured! The Desktop Installer prompt has been removed.'
     );
   };
 
@@ -157,7 +182,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     a.download = `4Rent-Backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setStatusBanner('Backup JSON file downloaded!');
+    setStatusBanner('Portable database backup (.JSON) downloaded!');
   };
 
   const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -179,23 +204,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.readAsText(file);
   };
 
+  const toggleInstantSetting = (patch: Partial<AppSettings>) => {
+    const next: AppSettings = {
+      ...form,
+      ...patch,
+    };
+    setForm(next);
+    onUpdateSettings(next);
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#0B0E14] pb-24">
-      <header className="sticky top-0 z-20 bg-[#141923] border-b border-[#222B3C] px-4 sm:px-6 h-16 flex items-center justify-between">
+    <div className="min-h-screen flex flex-col bg-transparent pb-32 animate-view-enter">
+      {/* Top Header with Generous Spacing */}
+      <header className="sticky top-0 z-20 bg-[#111722]/90 backdrop-blur-xl border-b border-[#232E42] px-5 sm:px-8 h-18 flex items-center justify-between">
         <button
           type="button"
           onClick={onBack}
-          className="w-10 h-10 rounded-xl hover:bg-[#1E2636] flex items-center justify-center text-slate-200 transition cursor-pointer"
+          aria-label="Back to Dashboard"
+          className="w-11 h-11 rounded-2xl bg-[#172030] hover:bg-[#1E293D] border border-[#26334B] flex items-center justify-center text-slate-200 transition cursor-pointer btn-fluid"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-lg sm:text-xl font-bold text-white">Settings</h1>
-        <div className="w-10" />
+        <div className="text-center">
+          <h1 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
+            Settings & Privacy
+          </h1>
+          <p className="text-[11px] text-slate-400 hidden sm:block">
+            4Rent Management System • v1.0.0
+          </p>
+        </div>
+        <div className="w-11" />
       </header>
 
-      <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+      {/* Main Content Container — Generous Breathing Room */}
+      <div className="w-full max-w-4xl mx-auto px-5 sm:px-8 lg:px-10 pt-8 space-y-8">
         {statusBanner && (
-          <div className="rounded-2xl bg-amber-500/15 border border-amber-500/30 px-4 py-3 text-xs sm:text-sm font-semibold text-amber-300">
+          <div className="rounded-2xl bg-amber-500/15 border border-amber-500/35 px-5 py-4 text-xs sm:text-sm font-semibold text-amber-300 shadow-lg animate-view-enter">
             {statusBanner}
           </div>
         )}
@@ -203,25 +247,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         {/* 1. Property & Global Sub-Meter Billing Rates */}
         <form
           onSubmit={handleSaveGeneral}
-          className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 sm:p-6 space-y-4"
+          className="surface-card rounded-3xl p-6 sm:p-8 space-y-6"
         >
-          <div className="flex items-center gap-2.5 pb-3 border-b border-[#20293A]">
-            <Shield className="w-5 h-5 text-amber-400" />
+          <div className="flex items-start sm:items-center gap-3.5 pb-4 border-b border-[#232F44]">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
             <div>
-              <h2 className="text-base font-bold text-white">
-                Apartment Profile & Global Sub-Meter Rate
+              <h2 className="text-base sm:text-lg font-extrabold text-white">
+                Property Profile & Global Sub-Meter Rate
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                 Electric sub-meter rate configured here automatically reflects
-                across all created rooms
+                across all rooms and unpaid bills
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6 items-start">
             <div className="flex flex-col">
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Apartment / Property Name
+              <label className="block text-xs font-semibold text-slate-300 mb-2">
+                System / Property Name
               </label>
               <input
                 type="text"
@@ -229,12 +275,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onChange={(e) =>
                   setForm({ ...form, apartmentName: e.target.value })
                 }
-                className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
+                className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#263248] px-4 text-sm text-white focus:border-amber-500 focus:outline-none transition"
               />
             </div>
 
             <div className="flex flex-col">
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-300 mb-2">
                 Landlord / Admin Mobile Number (Auto-Formatted)
               </label>
               <input
@@ -247,12 +293,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     landlordPhone: formatPhoneNumber(e.target.value),
                   })
                 }
-                className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
+                className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#263248] px-4 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none transition"
               />
             </div>
 
             <div className="flex flex-col">
-              <label className="block text-xs font-semibold text-amber-400 mb-1.5">
+              <label className="block text-xs font-semibold text-amber-400 mb-2">
                 Global Electric Sub-Meter Rate (₱ / kWh)
               </label>
               <input
@@ -265,12 +311,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     defaultElectricRate: parseFloat(e.target.value) || 0,
                   })
                 }
-                className="w-full h-10 rounded-xl bg-[#0E131C] border border-amber-500/40 px-3.5 text-sm font-bold text-amber-400 font-mono-num focus:border-amber-500 focus:outline-none"
+                className="w-full h-11 rounded-2xl bg-[#0D121B] border border-amber-500/40 px-4 text-sm font-bold text-amber-400 font-mono-num focus:border-amber-500 focus:outline-none transition"
               />
             </div>
 
             <div className="flex flex-col">
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-300 mb-2">
                 Default Monthly Room Rent (₱)
               </label>
               <input
@@ -283,7 +329,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     defaultMonthlyRent: parseFloat(e.target.value) || 0,
                   })
                 }
-                className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm font-bold text-white font-mono-num focus:border-amber-500 focus:outline-none"
+                className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#263248] px-4 text-sm font-bold text-white font-mono-num focus:border-amber-500 focus:outline-none transition"
               />
             </div>
           </div>
@@ -291,7 +337,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex justify-end pt-2">
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-xs flex items-center gap-2 cursor-pointer"
+              className="px-6 py-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer btn-fluid"
             >
               <Save className="w-4 h-4" />
               <span>Save Property Settings</span>
@@ -299,117 +345,331 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </form>
 
-        {/* 2. Security Lock & Notification Reminders */}
-        <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#20293A]">
-            <div className="flex items-center gap-2.5">
-              <Lock className="w-5 h-5 text-amber-400" />
+        {/* 2. Landlord Safety & Tenant Privacy Protection (RA 10173 Compliance) */}
+        <div className="surface-card rounded-3xl p-6 sm:p-8 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#232F44]">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
               <div>
-                <h2 className="text-base font-bold text-white">
-                  {isMobile
-                    ? 'App Security (PIN & Mobile Biometrics)'
-                    : 'Desktop Security (4-Digit Passcode PIN)'}
+                <h2 className="text-base sm:text-lg font-extrabold text-white">
+                  Landlord Safety & Tenant Privacy Protection
                 </h2>
-                <p className="text-xs text-slate-400">
-                  {isMobile
-                    ? 'Manage your 4-digit PIN, mobile fingerprint lock, and due-date reminders'
-                    : 'Desktop mode uses 4-digit Passcode PIN protection for app lock and room removal'}
+                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                  Protect landlord financial figures, tenant personal contact data
+                  (RA 10173), and unauthorized access
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={onOpenSecuritySetup}
-              className="px-4 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 font-bold text-xs cursor-pointer"
+              className="px-4 py-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-400 font-bold text-xs cursor-pointer btn-fluid"
             >
               {isMobile ? 'Configure PIN / Biometrics' : 'Change 4-Digit PIN'}
             </button>
           </div>
 
-          <div className="flex items-center justify-between text-xs sm:text-sm">
-            <span className="text-slate-300 flex items-center gap-2">
-              <Bell className="w-4 h-4 text-amber-400" />
-              Unpaid Bill & Next-Month Due Reminders (Day 1 to 10)
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                const next = {
-                  ...form,
-                  remindersEnabled: !form.remindersEnabled,
-                };
-                setForm(next);
-                onUpdateSettings(next);
-              }}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                form.remindersEnabled
-                  ? 'bg-emerald-500 text-slate-950'
-                  : 'bg-[#0E131C] text-slate-400 border border-[#252F42]'
-              }`}
-            >
-              {form.remindersEnabled ? 'Enabled' : 'Disabled'}
-            </button>
-          </div>
-        </div>
-
-        {/* 3. Desktop Installer & Developer-Integrated Cloud Database Sync */}
-        <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 sm:p-6 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#20293A]">
-            <div className="flex items-center gap-2.5">
-              <Cloud className="w-5 h-5 text-blue-400" />
-              <div>
-                <h2 className="text-base font-bold text-white">
-                  Desktop Installer & Persistent Cloud Sync (Desktop ↔ Mobile)
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Pre-integrated by developer <strong className="text-amber-400">splikaa</strong> • Data persists safely across all app updates
-                </p>
-              </div>
-            </div>
-            <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
-              Persistent DB Active
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="rounded-xl bg-[#0E131C] border border-[#252F42] p-4 flex flex-col justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 text-xs font-bold text-white">
-                  <Monitor className="w-4 h-4 text-amber-400" />
-                  <span>4Rent Desktop Installer</span>
+          <div className="space-y-4">
+            {/* Toggle 1: Screen Privacy Shield */}
+            <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                {form.privacyMaskEnabled ? (
+                  <EyeOff className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <Eye className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <div className="text-sm font-bold text-white">
+                    Public Screen Privacy Shield (Mask Tenant PII & Revenue)
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Hides tenant phone numbers (0917-•••-••01) and total landlord
+                    revenue on screen when viewing around guests or tenants.
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Install 4Rent directly onto Windows / Mac Desktop for instant
-                  1-click landlord access.
-                </p>
               </div>
               <button
                 type="button"
-                onClick={handleDownloadDesktopInstallerBat}
-                className="w-full py-2.5 px-3 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                onClick={() =>
+                  toggleInstantSetting({
+                    privacyMaskEnabled: !form.privacyMaskEnabled,
+                  })
+                }
+                className={`self-start sm:self-center px-4 py-2 rounded-full text-xs font-extrabold transition cursor-pointer shrink-0 ${
+                  form.privacyMaskEnabled
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'bg-[#172030] text-slate-300 border border-[#29364F]'
+                }`}
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>Install 4Rent for Desktop</span>
+                {form.privacyMaskEnabled ? 'Privacy Masked' : 'Standard View'}
               </button>
             </div>
 
-            <div className="rounded-xl bg-[#0E131C] border border-[#252F42] p-4 flex flex-col justify-between gap-3">
+            {/* Toggle 2: Receipt Contact Redaction */}
+            <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <FileCheck2 className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-sm font-bold text-white">
+                    Redact Tenant Mobile Number on Shared Receipts
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Partially masks tenant phone numbers on exported receipt
+                    images & printouts + embeds an anti-tamper verification seal.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  toggleInstantSetting({
+                    maskReceiptContacts: !form.maskReceiptContacts,
+                  })
+                }
+                className={`self-start sm:self-center px-4 py-2 rounded-full text-xs font-extrabold transition cursor-pointer shrink-0 ${
+                  form.maskReceiptContacts
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'bg-[#172030] text-slate-300 border border-[#29364F]'
+                }`}
+              >
+                {form.maskReceiptContacts ? 'Protected' : 'Unmasked'}
+              </button>
+            </div>
+
+            {/* Toggle 3: Auto-Lock Inactivity Timer & PIN Protection */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4 sm:p-5 flex items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <Timer className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs sm:text-sm font-bold text-white">
+                      Idle Auto-Lock Timer
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Locks system automatically when left unattended
+                    </p>
+                  </div>
+                </div>
+                <select
+                  value={form.security.autoLockMinutes ?? 15}
+                  onChange={(e) => {
+                    const mins = parseInt(e.target.value, 10);
+                    toggleInstantSetting({
+                      security: {
+                        ...form.security,
+                        autoLockMinutes: mins,
+                      },
+                    });
+                  }}
+                  className="h-9 rounded-xl bg-[#161E2E] border border-[#28354E] px-3 text-xs font-bold text-amber-400 focus:outline-none"
+                >
+                  <option value={0}>Off</option>
+                  <option value={5}>5 Mins</option>
+                  <option value={15}>15 Mins</option>
+                  <option value={30}>30 Mins</option>
+                </select>
+              </div>
+
+              <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4 sm:p-5 flex items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <Bell className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs sm:text-sm font-bold text-white">
+                      Due Reminders (Day 1–10)
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Monthly payment window alerts
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    toggleInstantSetting({
+                      remindersEnabled: !form.remindersEnabled,
+                    })
+                  }
+                  className={`px-4 py-1.5 rounded-full text-xs font-extrabold transition cursor-pointer ${
+                    form.remindersEnabled
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-[#172030] text-slate-400 border border-[#29364F]'
+                  }`}
+                >
+                  {form.remindersEnabled ? 'Enabled' : 'Disabled'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Collapsible Landlord Security Audit Log */}
+          <div className="pt-2 border-t border-[#1E283B]">
+            <button
+              type="button"
+              onClick={() => setShowAuditLogs((prev) => !prev)}
+              className="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1.5 cursor-pointer"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>
+                {showAuditLogs
+                  ? 'Hide Landlord Security & Activity Audit Log'
+                  : `View Landlord Security & Activity Audit Log (${auditLogs.length})`}
+              </span>
+            </button>
+
+            {showAuditLogs && (
+              <div className="mt-4 rounded-2xl bg-[#0D121B] border border-[#243047] p-4 max-h-56 overflow-y-auto space-y-2">
+                {auditLogs.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">
+                    No security or billing events logged in this session yet.
+                  </p>
+                ) : (
+                  auditLogs.slice(0, 15).map((log) => (
+                    <div
+                      key={log.id}
+                      className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-[#131B29] border border-[#202B40] text-xs"
+                    >
+                      <div>
+                        <span className="font-bold text-white">{log.action}</span>
+                        <span className="text-slate-400 ml-2">{log.details}</span>
+                      </div>
+                      <span className="text-[10px] font-mono-num text-slate-500 shrink-0">
+                        {new Date(log.createdAt).toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3. Persistent Cloud Sync & Mobile App Companion (Desktop Installer Auto-Removed Once Installed!) */}
+        <div className="surface-card rounded-3xl p-6 sm:p-8 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#232F44]">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                <Cloud className="w-5 h-5" />
+              </div>
               <div>
-                <div className="flex items-center gap-2 text-xs font-bold text-white">
+                <h2 className="text-base sm:text-lg font-extrabold text-white">
+                  Persistent Cloud Sync & Mobile App (Desktop ↔ Mobile)
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                  Pre-integrated by developer{' '}
+                  <strong className="text-amber-400">splikaa</strong> • Data
+                  persists safely across all app updates
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {isDesktopInstalled && (
+                <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/35 text-amber-400 text-xs font-bold">
+                  4Rent Launcher Active
+                </span>
+              )}
+              <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-400 text-xs font-bold">
+                Persistent DB Active
+              </span>
+            </div>
+          </div>
+
+          <div
+            className={`grid grid-cols-1 ${
+              !isDesktopInstalled ? 'sm:grid-cols-2' : 'sm:grid-cols-2'
+            } gap-5`}
+          >
+            {/* Only show Desktop Launcher download if NOT already running in Desktop version */}
+            {!isDesktopInstalled ? (
+              <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 flex flex-col justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-bold text-white">
+                    <Monitor className="w-4 h-4 text-amber-400" />
+                    <span>4Rent Launcher (Desktop)</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                    Download <strong>4Rent Launcher</strong> for 1-click Desktop
+                    access. Automatically removes this installer card once
+                    installed.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDownload4RentLauncher}
+                  className="w-full py-3 px-4 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer btn-fluid"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download 4Rent Launcher</span>
+                </button>
+              </div>
+            ) : (
+              /* Mobile App Companion Box when Desktop is already installed */
+              <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 flex flex-col justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-bold text-white">
+                    <Smartphone className="w-4 h-4 text-amber-400" />
+                    <span>4Rent Mobile App (iOS & Android)</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                    Open on your phone and tap{' '}
+                    <strong className="text-slate-200">Add to Home Screen</strong>{' '}
+                    for the standalone Mobile App with live sub-meter camera OCR.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        'https://splikaa.github.io/4Rent/'
+                      );
+                      setCopiedMobileUrl(true);
+                      setTimeout(() => setCopiedMobileUrl(false), 3000);
+                    } catch {
+                      // ignore clipboard error
+                    }
+                  }}
+                  className="w-full py-3 px-4 rounded-2xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-amber-400 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer btn-fluid"
+                >
+                  {copiedMobileUrl ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      <span className="text-emerald-400">
+                        Mobile App Link Copied!
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copy Mobile App Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Desktop <-> Mobile Cloud Sync Box */}
+            <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 flex flex-col justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-bold text-white">
                   <RefreshCw className="w-4 h-4 text-blue-400" />
                   <span>Desktop ↔ Mobile Synchronization</span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  All rooms, sub-meter readings, and receipts are stored in a
-                  version-proof database that never resets on update.
+                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                  All rooms, continuous sub-meter readings, and receipts are
+                  stored in a version-proof database that never resets on update.
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={handlePushCloud}
                   disabled={isSyncing}
-                  className="py-2.5 px-3 rounded-xl bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="py-3 px-3.5 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer btn-fluid"
                 >
                   <RefreshCw
                     className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`}
@@ -420,7 +680,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   type="button"
                   onClick={handlePullCloud}
                   disabled={isSyncing}
-                  className="py-2.5 px-3 rounded-xl bg-[#1D2638] hover:bg-[#26324A] text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="py-3 px-3.5 rounded-2xl bg-[#1A2438] hover:bg-[#24314A] border border-[#2B3B59] text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer btn-fluid"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Sync Pull</span>
@@ -429,12 +689,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Collapsible Developer Cloud Endpoint Panel (for splikaa) */}
+          {/* Collapsible Developer Cloud Endpoint Panel */}
           <div className="pt-2">
             <button
               type="button"
               onClick={() => setShowDevCloudConfig((prev) => !prev)}
-              className="text-[11px] text-slate-500 hover:text-slate-300 font-semibold cursor-pointer"
+              className="text-xs text-slate-500 hover:text-slate-300 font-semibold cursor-pointer"
             >
               {showDevCloudConfig
                 ? 'Hide Developer Cloud Endpoint Settings (splikaa)'
@@ -442,10 +702,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
 
             {showDevCloudConfig && (
-              <div className="mt-3 p-4 rounded-xl bg-[#0E131C] border border-[#252F42] space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="mt-4 p-5 rounded-2xl bg-[#0D121B] border border-[#243047] space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                       Supabase Project URL
                     </label>
                     <input
@@ -462,11 +722,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           },
                         })
                       }
-                      className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-xs text-white"
+                      className="w-full h-10 rounded-xl bg-[#151B26] border border-[#252F42] px-3.5 text-xs text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                       Supabase Anon Key
                     </label>
                     <input
@@ -483,11 +743,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           },
                         })
                       }
-                      className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-xs text-white"
+                      className="w-full h-10 rounded-xl bg-[#151B26] border border-[#252F42] px-3.5 text-xs text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                       Property Sync Code
                     </label>
                     <input
@@ -503,7 +763,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           },
                         })
                       }
-                      className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-xs font-mono-num font-bold text-amber-400"
+                      className="w-full h-10 rounded-xl bg-[#151B26] border border-[#252F42] px-3.5 text-xs font-mono-num font-bold text-amber-400"
                     />
                   </div>
                 </div>
@@ -515,12 +775,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       setCopiedSql(true);
                       setTimeout(() => setCopiedSql(false), 3000);
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-[#151B26] border border-[#252F42] text-slate-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-[#151B26] border border-[#252F42] text-slate-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                   >
                     {copiedSql ? (
                       <>
                         <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400">SQL Schema Copied!</span>
+                        <span className="text-emerald-400">
+                          SQL Schema Copied!
+                        </span>
                       </>
                     ) : (
                       <>
@@ -535,17 +797,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* 4. Local Offline Backup & Reset */}
-        <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 sm:p-6 space-y-4">
-          <div className="flex items-center gap-2.5 pb-3 border-b border-[#20293A]">
-            <Database className="w-5 h-5 text-emerald-400" />
+        {/* 4. Portable Database Backup & Restore (Reset to Empty Removed for Landlord Safety) */}
+        <div className="surface-card rounded-3xl p-6 sm:p-8 space-y-6">
+          <div className="flex items-start sm:items-center gap-3.5 pb-4 border-b border-[#232F44]">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Database className="w-5 h-5" />
+            </div>
             <div>
-              <h2 className="text-base font-bold text-white">
-                Database Backup & Reset
+              <h2 className="text-base sm:text-lg font-extrabold text-white">
+                Database Backup & Restore
               </h2>
-              <p className="text-xs text-slate-400">
-                Export or restore your entire 4Rent database as a portable JSON
-                file
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                Export or restore your entire 4Rent Management System database as
+                a portable JSON file
               </p>
             </div>
           </div>
@@ -558,11 +822,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             className="hidden"
           />
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-4">
             <button
               type="button"
               onClick={handleExportJson}
-              className="px-4 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              className="px-5 py-3 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-extrabold text-xs sm:text-sm flex items-center gap-2 cursor-pointer btn-fluid"
             >
               <Download className="w-4 h-4" />
               <span>Export Backup (.JSON)</span>
@@ -571,50 +835,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2.5 rounded-xl bg-[#1D2638] hover:bg-[#26324A] text-slate-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+              className="px-5 py-3 rounded-2xl bg-[#1A2438] hover:bg-[#24314A] border border-[#2B3B59] text-slate-200 font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer btn-fluid"
             >
               <Upload className="w-4 h-4" />
               <span>Restore Backup (.JSON)</span>
             </button>
-
-            <button
-              type="button"
-              onClick={onResetAllData}
-              className="px-4 py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer ml-auto"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Reset Database to Empty</span>
-            </button>
           </div>
         </div>
 
-        {/* 5. System Version & Developer Attribution */}
-        <div className="rounded-2xl bg-[#151B26] border border-[#232D40] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-              <Code2 className="w-5 h-5" />
+        {/* 5. System Version (v1.0.0) & Peaceful Naming */}
+        <div className="surface-card rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <Code2 className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-white">
-                4Rent Apartment & Sub-Meter Management System
+              <h2 className="text-base sm:text-lg font-extrabold text-white">
+                4Rent Management System
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Persistent Database • Enhanced De-Blur OCR • Desktop & Mobile
-                Synchronized
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                Persistent Database • De-Blur Sub-Meter OCR • Desktop & Mobile
+                App
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 sm:text-right">
-            <div className="px-3.5 py-2 rounded-xl bg-[#0E131C] border border-[#252F42]">
+          <div className="flex items-center gap-3.5 sm:text-right">
+            <div className="px-4 py-2.5 rounded-2xl bg-[#0D121B] border border-[#253148]">
               <span className="text-[10px] uppercase tracking-wider text-slate-400 block">
                 System Version
               </span>
               <span className="text-sm font-extrabold text-amber-400 font-mono-num">
-                v1.3.0
+                v1.0.0
               </span>
             </div>
-            <div className="px-3.5 py-2 rounded-xl bg-[#0E131C] border border-amber-500/30">
+            <div className="px-4 py-2.5 rounded-2xl bg-[#0D121B] border border-amber-500/35">
               <span className="text-[10px] uppercase tracking-wider text-slate-400 block">
                 Developer
               </span>

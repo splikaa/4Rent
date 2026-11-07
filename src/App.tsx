@@ -9,7 +9,7 @@ import {
   TenantHistoryEntry,
 } from './types/rental';
 import {
-  DEFAULT_SETTINGS,
+  appendAuditLog,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   loadBills,
@@ -23,10 +23,7 @@ import {
   saveSettings,
   saveTenantHistory,
 } from './services/storageService';
-import {
-  clearSnapshotFromIndexedDb,
-  loadSnapshotFromIndexedDb,
-} from './services/idbDatabase';
+import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
@@ -42,6 +39,7 @@ import { EnableRemindersModal } from './components/modals/EnableRemindersModal';
 import { PinAuthModal } from './components/modals/PinAuthModal';
 import { AdvanceBalanceModal } from './components/modals/AdvanceBalanceModal';
 import { NavigationDrawer } from './components/layout/NavigationDrawer';
+import { MobileBottomNav } from './components/layout/MobileBottomNav';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { ManageRoomsView } from './components/rooms/ManageRoomsView';
 import { RoomFormModal } from './components/rooms/RoomFormModal';
@@ -108,6 +106,36 @@ export function App() {
         handleBeforeInstallPrompt
       );
   }, []);
+
+  // Auto-Lock Inactivity Timer for Landlord & Tenant Privacy Protection
+  useEffect(() => {
+    const idleMins = settings.security.autoLockMinutes ?? 15;
+    if (!idleMins || idleMins <= 0 || isLocked || showSecuritySetup) {
+      return;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const resetIdleTimer = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setIsLocked(true);
+        appendAuditLog(
+          'Idle Auto-Lock',
+          `System locked automatically after ${idleMins} minutes of inactivity.`,
+          'security'
+        );
+      }, idleMins * 60 * 1000);
+    };
+
+    const events = ['mousemove', 'keydown', 'pointerdown', 'touchstart'];
+    events.forEach((ev) => window.addEventListener(ev, resetIdleTimer));
+    resetIdleTimer();
+
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach((ev) => window.removeEventListener(ev, resetIdleTimer));
+    };
+  }, [settings.security.autoLockMinutes, isLocked, showSecuritySetup]);
 
   // Hydrate from Persistent IndexedDB if localStorage was cleared by an OS/browser update
   useEffect(() => {
@@ -236,6 +264,23 @@ export function App() {
     }
   };
 
+  const handleTogglePrivacyMask = () => {
+    setSettings((prev) => {
+      const nextMask = !prev.privacyMaskEnabled;
+      appendAuditLog(
+        'Privacy Shield',
+        nextMask
+          ? 'Enabled screen privacy masking for tenant PII & revenue'
+          : 'Disabled screen privacy masking',
+        'privacy'
+      );
+      return {
+        ...prev,
+        privacyMaskEnabled: nextMask,
+      };
+    });
+  };
+
   const handleCompleteSecuritySetup = (secConfig: SecurityConfig) => {
     const updated: AppSettings = {
       ...settings,
@@ -244,6 +289,11 @@ export function App() {
     setSettings(updated);
     setShowSecuritySetup(false);
     setIsLocked(false);
+    appendAuditLog(
+      'Security Configured',
+      `Passcode PIN & security preferences updated.`,
+      'security'
+    );
   };
 
   const handleAllowReminders = async () => {
@@ -308,6 +358,11 @@ export function App() {
             : r
         )
       );
+      appendAuditLog(
+        'Room Updated',
+        `${roomData.name} (${roomData.status}) saved.`,
+        'tenant'
+      );
     } else {
       const newRoom: Room = {
         ...roomData,
@@ -315,6 +370,11 @@ export function App() {
         updatedAt: nowIso,
       };
       setRooms((prev) => [...prev, newRoom]);
+      appendAuditLog(
+        'Room Created',
+        `${roomData.name} added to system.`,
+        'tenant'
+      );
     }
     triggerOptionalCloudSync();
   };
@@ -322,8 +382,14 @@ export function App() {
   const handleConfirmDeleteRoomAfterPin = () => {
     if (!roomPendingPinDelete) return;
     const targetId = roomPendingPinDelete.id;
+    const targetName = roomPendingPinDelete.name;
     setRooms((prev) => prev.filter((r) => r.id !== targetId));
     setRoomPendingPinDelete(null);
+    appendAuditLog(
+      'Room Removed (PIN Verified)',
+      `${targetName} permanently removed.`,
+      'security'
+    );
     triggerOptionalCloudSync();
   };
 
@@ -381,11 +447,15 @@ export function App() {
               tenant: undefined,
               unpaidBalance: 0,
               advanceRent: 0,
-              // Note: lastMeterReading & securityDeposit requirement remain intact for the room!
               updatedAt: new Date().toISOString(),
             }
           : r
       )
+    );
+    appendAuditLog(
+      'Tenant Vacated',
+      `${room.tenant.fullName} moved out of ${room.name}.`,
+      'tenant'
     );
     triggerOptionalCloudSync();
   };
@@ -460,6 +530,11 @@ export function App() {
       })
     );
 
+    appendAuditLog(
+      'Official Receipt Generated',
+      `Receipt #${newBill.receiptNo} issued for ${newBill.roomName}.`,
+      'billing'
+    );
     setActiveReceiptBill(newBill);
     triggerOptionalCloudSync();
   };
@@ -524,6 +599,11 @@ export function App() {
         })
       );
     }
+    appendAuditLog(
+      'Payment Recorded',
+      `₱${amount.toFixed(2)} via ${method} for Receipt #${receiptNo}.`,
+      'billing'
+    );
     triggerOptionalCloudSync();
   };
 
@@ -557,6 +637,11 @@ export function App() {
           updatedAt: nowIso,
         };
       })
+    );
+    appendAuditLog(
+      'Advance Balance Withdrawn',
+      `₱${amount.toFixed(2)} withdrawn from room advance balance.`,
+      'billing'
     );
     triggerOptionalCloudSync();
   };
@@ -643,7 +728,6 @@ export function App() {
     const nowIso = new Date().toISOString();
     const targetRoom = rooms.find((r) => r.id === inquiry.roomId);
 
-    // If room had a previous tenant, archive them to Previous Tenant History first
     if (targetRoom && targetRoom.status === 'occupied' && targetRoom.tenant) {
       const entry: TenantHistoryEntry = {
         id: `hist-${Date.now()}`,
@@ -681,12 +765,13 @@ export function App() {
           securityDeposit: reqDep,
           advanceRent:
             Math.round(((r.advanceRent || 0) + excessAdvance) * 100) / 100,
-          // Continuous kWh reading is strictly preserved!
           tenant: {
             id: `ten-${Date.now()}`,
             fullName: inquiry.prospectName,
             phone: inquiry.phone,
             messengerUsername: inquiry.messengerUsername,
+            validIdVerified: true,
+            privacyConsentSigned: true,
             moveInDate: inquiry.targetMoveInDate,
             dueDayOfMonth: moveInDay,
           },
@@ -724,47 +809,6 @@ export function App() {
       )
     );
     triggerOptionalCloudSync();
-  };
-
-  const handleResetAllData = () => {
-    setRooms([]);
-    setBills([]);
-    setInquiries([]);
-    setTenantHistory([]);
-    const resetSettings: AppSettings = {
-      ...DEFAULT_SETTINGS,
-      security: {
-        isSetupComplete: true,
-        lockEnabled: false,
-        authMethod: 'none',
-        pinCode: settings.security.pinCode || '1234',
-      },
-      remindersPromptShown: true,
-    };
-    setSettings(resetSettings);
-    saveRooms([]);
-    saveBills([]);
-    saveInquiries([]);
-    saveTenantHistory([]);
-    saveSettings(resetSettings);
-    clearSnapshotFromIndexedDb();
-
-    if (
-      resetSettings.cloudSync.enabled &&
-      resetSettings.cloudSync.supabaseUrl &&
-      resetSettings.cloudSync.supabaseAnonKey
-    ) {
-      pushSnapshotToCloud(resetSettings.cloudSync, {
-        version: '1.3.0',
-        exportedAt: new Date().toISOString(),
-        rooms: [],
-        bills: [],
-        inquiries: [],
-        tenantHistory: [],
-        settings: resetSettings,
-      });
-    }
-    setActiveTab('dashboard');
   };
 
   const handleReloadAllData = () => {
@@ -847,14 +891,16 @@ export function App() {
     );
   }
 
-  // 3. Main Adaptive Application Shell
+  // 3. Main Adaptive Application Shell (Desktop + Mobile App)
   return (
-    <div className="min-h-screen w-full bg-[#0B0E14] text-slate-100 flex">
+    <div className="min-h-screen w-full bg-transparent text-slate-100 flex">
       <NavigationDrawer
         activeTab={activeTab}
         isOpenMobile={isDrawerOpen}
+        privacyMaskEnabled={settings.privacyMaskEnabled}
         onCloseMobile={() => setIsDrawerOpen(false)}
         onSelectTab={(tab) => setActiveTab(tab)}
+        onTogglePrivacyMask={handleTogglePrivacyMask}
         onLockApp={() => setIsLocked(true)}
         hasRooms={rooms.filter((r) => !r.isArchived).length > 0}
       />
@@ -866,6 +912,8 @@ export function App() {
             bills={bills}
             inquiries={inquiries}
             globalElectricRate={settings.defaultElectricRate}
+            privacyMaskEnabled={settings.privacyMaskEnabled}
+            onTogglePrivacyMask={handleTogglePrivacyMask}
             onOpenDrawer={() => setIsDrawerOpen(true)}
             onNavigate={(tab) => setActiveTab(tab)}
             onOpenAddRoom={() => {
@@ -886,6 +934,7 @@ export function App() {
             rooms={rooms}
             bills={bills}
             globalElectricRate={settings.defaultElectricRate}
+            privacyMaskEnabled={settings.privacyMaskEnabled}
             onBack={() => setActiveTab('dashboard')}
             onOpenAddRoom={() => {
               setEditingRoom(null);
@@ -915,6 +964,7 @@ export function App() {
             rooms={rooms}
             inquiries={inquiries}
             defaultDeposit={settings.defaultMonthlyRent}
+            privacyMaskEnabled={settings.privacyMaskEnabled}
             onBack={() => setActiveTab('dashboard')}
             onCreateInquiry={handleCreateInquiry}
             onApproveBookingMoveIn={handleApproveBookingMoveIn}
@@ -927,6 +977,7 @@ export function App() {
         {activeTab === 'payments' && (
           <AllPaymentsView
             bills={bills}
+            privacyMaskEnabled={settings.privacyMaskEnabled}
             onBack={() => setActiveTab('dashboard')}
             onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
             onRecordPayment={handleRecordPayment}
@@ -960,12 +1011,18 @@ export function App() {
             onBack={() => setActiveTab('dashboard')}
             onUpdateSettings={handleUpdateSettings}
             onReloadAllData={handleReloadAllData}
-            onResetAllData={handleResetAllData}
             onOpenSecuritySetup={() => setShowSecuritySetup(true)}
             onInstallDesktopApp={handleInstallDesktopApp}
           />
         )}
       </main>
+
+      {/* Mobile Bottom Navigation Bar for Native Mobile App Experience */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onOpenScanner={() => handleOpenScanForRoom()}
+      />
 
       {/* Enable Reminders Modal */}
       <EnableRemindersModal
@@ -1012,6 +1069,7 @@ export function App() {
             : []
         }
         globalElectricRate={settings.defaultElectricRate}
+        privacyMaskEnabled={settings.privacyMaskEnabled}
         onClose={() => setSelectedRoomDetailsId(null)}
         onEditRoom={(room) => {
           setEditingRoom(room);

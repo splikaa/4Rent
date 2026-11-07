@@ -14,6 +14,8 @@ export interface TenantProfile {
   moveInDate: string;
   dueDayOfMonth: number; // Strictly 1 - 10 of every month
   emergencyContact?: string;
+  validIdVerified?: boolean; // Landlord safety: Tenant valid ID verified on file
+  privacyConsentSigned?: boolean; // Tenant privacy: RA 10173 Data Privacy & Lease terms acknowledged
   notes?: string;
 }
 
@@ -74,6 +76,8 @@ export interface RoomInquiryBooking {
   quotedMonthlyRent: number;
   requiredDeposit: number;
   status: 'inquiry' | 'booked' | 'converted' | 'cancelled';
+  validIdPresented?: boolean;
+  privacyConsentAccepted?: boolean;
   notes?: string;
   createdAt: string;
 }
@@ -130,12 +134,22 @@ export interface BillRecord {
   updatedAt: string;
 }
 
+export interface SecurityAuditEntry {
+  id: string;
+  action: string;
+  details: string;
+  category: 'security' | 'privacy' | 'billing' | 'tenant';
+  createdAt: string;
+}
+
 export interface SecurityConfig {
   isSetupComplete: boolean;
   lockEnabled: boolean;
   authMethod: 'none' | 'pin' | 'fingerprint' | 'both';
   pinCode: string; // 4-digit PIN (Required for deleting rooms & protected actions; defaults to "1234" if skipped)
   webAuthnCredentialId?: string;
+  autoLockMinutes?: number; // Auto-lock inactivity timer (e.g., 0 = disabled, 5, 15, 30)
+  requirePinForSensitiveActions?: boolean; // Require PIN for advance withdrawals & room deletions
 }
 
 export interface CloudSyncConfig {
@@ -158,6 +172,8 @@ export interface AppSettings {
   remindersPromptShown: boolean;
   remindersEnabled: boolean;
   receiptPrintFormat: 'standard' | 'thermal80';
+  privacyMaskEnabled?: boolean; // Masks tenant PII and revenue when viewing in public
+  maskReceiptContacts?: boolean; // Masks tenant phone digits on exported receipts for privacy
   security: SecurityConfig;
   cloudSync: CloudSyncConfig;
 }

@@ -85,7 +85,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-lg rounded-3xl bg-[#151B26] border border-[#263147] shadow-2xl overflow-hidden my-6">
+      <div className="w-full max-w-lg rounded-3xl bg-[#151B26] border border-[#263147] shadow-2xl overflow-hidden my-6 animate-modal-pop">
         <div className="flex items-center justify-between px-6 py-4 bg-[#192130] border-b border-[#263147]">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">

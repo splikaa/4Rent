@@ -64,7 +64,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
-      <div className="w-full max-w-sm rounded-3xl bg-[#151B26] border border-[#28334A] p-6 shadow-2xl select-none">
+      <div className="w-full max-w-sm rounded-3xl bg-[#151B26] border border-[#28334A] p-6 shadow-2xl select-none animate-modal-pop">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">

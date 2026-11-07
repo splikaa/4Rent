@@ -1,0 +1,10 @@
+{
+  "appId": "com.splikaa.fourrent",
+  "appName": "4Rent Management System",
+  "version": "1.0.0",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

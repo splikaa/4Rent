@@ -1,5 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Calendar, DoorOpen, Lock, Save, Shield, User, X, Zap } from 'lucide-react';
+import {
+  Calendar,
+  CheckSquare,
+  DoorOpen,
+  Lock,
+  Save,
+  Shield,
+  ShieldCheck,
+  User,
+  X,
+  Zap,
+} from 'lucide-react';
 import { Room } from '../../types/rental';
 import {
   clampDueDayOneToTen,
@@ -46,10 +57,13 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   );
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Tenant details
+  // Tenant details + Landlord Safety & Tenant Privacy Consent
   const [tenantName, setTenantName] = useState('');
   const [tenantPhone, setTenantPhone] = useState('');
   const [messengerUsername, setMessengerUsername] = useState('');
+  const [emergencyContact, setEmergencyContact] = useState('');
+  const [validIdVerified, setValidIdVerified] = useState(true);
+  const [privacyConsentSigned, setPrivacyConsentSigned] = useState(true);
   const [moveInDate, setMoveInDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
@@ -73,6 +87,9 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setTenantName(initialRoom.tenant?.fullName || '');
       setTenantPhone(formatPhoneNumber(initialRoom.tenant?.phone || ''));
       setMessengerUsername(initialRoom.tenant?.messengerUsername || '');
+      setEmergencyContact(initialRoom.tenant?.emergencyContact || '');
+      setValidIdVerified(initialRoom.tenant?.validIdVerified ?? true);
+      setPrivacyConsentSigned(initialRoom.tenant?.privacyConsentSigned ?? true);
       setMoveInDate(
         initialRoom.tenant?.moveInDate || new Date().toISOString().slice(0, 10)
       );
@@ -93,6 +110,9 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setTenantName('');
       setTenantPhone('');
       setMessengerUsername('');
+      setEmergencyContact('');
+      setValidIdVerified(true);
+      setPrivacyConsentSigned(true);
       setMoveInDate(todayIso);
       setDueDayOfMonth(String(autoDay));
     }
@@ -196,6 +216,9 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
               fullName: tenantName.trim(),
               phone: formatPhoneNumber(tenantPhone),
               messengerUsername: messengerUsername.trim() || undefined,
+              emergencyContact: emergencyContact.trim() || undefined,
+              validIdVerified,
+              privacyConsentSigned,
               moveInDate,
               dueDayOfMonth: safeDueDay,
             }
@@ -213,25 +236,26 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl rounded-3xl bg-[#151B26] border border-[#263147] shadow-2xl overflow-hidden my-6">
-        <div className="flex items-center justify-between px-6 py-4 bg-[#1A2232] border-b border-[#263147]">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-400">
+      <div className="w-full max-w-2xl rounded-3xl bg-[#141B28] border border-[#26334D] shadow-2xl overflow-hidden my-6 animate-modal-pop">
+        <div className="flex items-center justify-between px-6 sm:px-7 py-5 bg-[#192233] border-b border-[#26334D]">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
               <DoorOpen className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">
+              <h2 className="text-lg font-extrabold text-white">
                 {initialRoom ? `Edit ${initialRoom.name}` : 'Create New Room'}
               </h2>
               <p className="text-xs text-slate-400">
-                Required Deposit • Continuous kWh Sub-Meter • Auto Next-Month Due (Day 1 to 10)
+                Required Deposit • Continuous Sub-Meter • Landlord & Tenant
+                Protection
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-9 h-9 rounded-xl bg-[#10151F] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+            className="w-9 h-9 rounded-2xl bg-[#10151F] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -239,21 +263,21 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
 
         <form
           onSubmit={handleSubmit}
-          className="p-6 space-y-5 max-h-[82vh] overflow-y-auto"
+          className="p-6 sm:p-7 space-y-6 max-h-[82vh] overflow-y-auto"
         >
           {formError && (
-            <div className="rounded-xl bg-red-500/15 border border-red-500/30 p-3 text-xs text-red-300 font-semibold">
+            <div className="rounded-2xl bg-red-500/15 border border-red-500/30 p-3.5 text-xs text-red-300 font-semibold">
               {formError}
             </div>
           )}
 
           {/* Section 1: Room & Continuous Sub-Meter Configuration */}
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5 mb-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5 mb-3.5">
               <Zap className="w-3.5 h-3.5" />
               Room & Continuous Sub-Meter Configuration
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
               <div className="flex flex-col">
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Room Name / Unit Number *
@@ -264,7 +288,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   placeholder="e.g., Room 101"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
+                  className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
@@ -272,14 +296,14 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Occupancy Status
                 </label>
-                <div className="grid grid-cols-2 gap-2 h-10">
+                <div className="grid grid-cols-2 gap-2.5 h-11">
                   <button
                     type="button"
                     onClick={() => setStatus('occupied')}
-                    className={`rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    className={`rounded-2xl text-xs font-bold border transition cursor-pointer ${
                       status === 'occupied'
                         ? 'bg-amber-500 text-slate-950 border-amber-500'
-                        : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
+                        : 'bg-[#0D121B] text-slate-300 border-[#253148]'
                     }`}
                   >
                     Occupied
@@ -287,10 +311,10 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setStatus('vacant')}
-                    className={`rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    className={`rounded-2xl text-xs font-bold border transition cursor-pointer ${
                       status === 'vacant'
                         ? 'bg-emerald-500 text-slate-950 border-emerald-500'
-                        : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
+                        : 'bg-[#0D121B] text-slate-300 border-[#253148]'
                     }`}
                   >
                     Vacant
@@ -308,7 +332,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   required
                   value={monthlyRent}
                   onChange={(e) => setMonthlyRent(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
+                  className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
@@ -317,7 +341,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   <Lock className="w-3 h-3 text-amber-400" />
                   Electric Rate (Managed in Settings)
                 </label>
-                <div className="w-full h-10 rounded-xl bg-[#0B0E14] border border-[#252F42] px-3.5 text-sm text-amber-400 font-bold font-mono-num flex items-center justify-between">
+                <div className="w-full h-11 rounded-2xl bg-[#0A0E16] border border-[#253148] px-4 text-sm text-amber-400 font-bold font-mono-num flex items-center justify-between">
                   <span>{formatPeso(globalElectricRate)} / kWh</span>
                   <span className="text-[10px] text-slate-500 font-sans">
                     Global Rate
@@ -335,9 +359,9 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   required
                   value={lastMeterReading}
                   onChange={(e) => setLastMeterReading(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-amber-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                  className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-amber-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
                 />
-                <span className="text-[10px] text-slate-500 mt-1 block">
+                <span className="text-[11px] text-slate-400 mt-1 block">
                   Continues across tenant changes without resetting to 0.
                 </span>
               </div>
@@ -345,7 +369,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
           </div>
 
           {wasOccupiedNowVacant && (
-            <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-4 space-y-2">
+            <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-4 space-y-2.5">
               <p className="text-xs font-bold text-amber-300">
                 Tenant "{initialRoom?.tenant?.fullName}" will be automatically
                 archived to Previous Tenant History!
@@ -357,7 +381,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 <select
                   value={vacatedReason}
                   onChange={(e) => setVacatedReason(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-amber-500/40 px-3 text-xs font-bold text-white"
+                  className="w-full h-10 rounded-xl bg-[#0D121B] border border-amber-500/40 px-3 text-xs font-bold text-white"
                 >
                   <option value="Stopped Paying Rent / Vacated">
                     Stopped Paying Rent / Vacated
@@ -374,8 +398,8 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
           )}
 
           {/* Section 2: Required Deposit & Overpayment -> Advance Balance */}
-          <div className="pt-3 border-t border-[#222C3F]">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 mb-3">
+          <div className="pt-4 border-t border-[#222E44]">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 mb-3.5">
               <Shield className="w-3.5 h-3.5" />
               {status === 'occupied'
                 ? 'Required Security Deposit & Withdrawable Advance Balance'
@@ -384,7 +408,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             <div
               className={`grid grid-cols-1 ${
                 status === 'occupied' ? 'sm:grid-cols-3' : 'sm:grid-cols-1'
-              } gap-3.5 items-start`}
+              } gap-4 items-start`}
             >
               <div className="flex flex-col">
                 <label className="block text-xs font-bold text-emerald-400 mb-1.5 whitespace-nowrap">
@@ -397,7 +421,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   required
                   value={requiredSecurityDeposit}
                   onChange={(e) => setRequiredSecurityDeposit(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-emerald-500/40 px-3.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-emerald-500 focus:outline-none"
+                  className="w-full h-11 rounded-2xl bg-[#0D121B] border border-emerald-500/40 px-4 text-sm text-emerald-400 font-bold font-mono-num focus:border-emerald-500 focus:outline-none"
                 />
               </div>
 
@@ -414,7 +438,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                       onChange={(e) =>
                         setAmountDepositPaidByTenant(e.target.value)
                       }
-                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                      className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
                     />
                     {excessDepositToAdvance > 0 && (
                       <span className="text-[10px] text-emerald-400 font-semibold block mt-1">
@@ -433,7 +457,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                       step="0.01"
                       value={advanceRent}
                       onChange={(e) => setAdvanceRent(e.target.value)}
-                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-emerald-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
+                      className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-emerald-400 font-bold font-mono-num focus:border-amber-500 focus:outline-none"
                     />
                   </div>
                 </>
@@ -441,14 +465,14 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Tenant Profile & Mandatory 1–10 Due Date */}
+          {/* Section 3: Tenant Profile, Landlord Safety & Tenant Privacy Consent */}
           {status === 'occupied' && (
-            <div className="pt-3 border-t border-[#222C3F]">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5 mb-3">
+            <div className="pt-4 border-t border-[#222E44] space-y-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
                 <User className="w-3.5 h-3.5" />
-                Tenant Profile & Auto Next-Month Payment Schedule (Day 1 to 10)
+                Tenant Profile, Safety Verification & Payment Window (Day 1–10)
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-start">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
                 <div className="flex flex-col">
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Tenant Full Name *
@@ -459,7 +483,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     placeholder="e.g., Juan Dela Cruz"
                     value={tenantName}
                     onChange={(e) => setTenantName(e.target.value)}
-                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
+                    className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white focus:border-amber-500 focus:outline-none"
                   />
                 </div>
                 <div className="flex flex-col">
@@ -473,7 +497,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     onChange={(e) =>
                       setTenantPhone(formatPhoneNumber(e.target.value))
                     }
-                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
+                    className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white font-mono-num focus:border-amber-500 focus:outline-none"
                   />
                 </div>
                 <div className="flex flex-col">
@@ -485,29 +509,41 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     placeholder="e.g., juandelacruz"
                     value={messengerUsername}
                     onChange={(e) => setMessengerUsername(e.target.value)}
-                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
+                    className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white focus:border-amber-500 focus:outline-none"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5 items-start">
+                <div className="flex flex-col">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Emergency Contact (Landlord Safety)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Name & Emergency Phone"
+                    value={emergencyContact}
+                    onChange={(e) => setEmergencyContact(e.target.value)}
+                    className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:col-span-2">
                   <div className="flex flex-col">
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                       Move-In Date
                     </label>
                     <input
                       type="date"
                       value={moveInDate}
                       onChange={(e) => handleMoveInDateChange(e.target.value)}
-                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                      className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-3.5 text-xs text-white focus:border-amber-500 focus:outline-none"
                     />
                   </div>
                   <div className="flex flex-col">
-                    <label className="block text-xs font-bold text-amber-400 mb-1.5 whitespace-nowrap">
+                    <label className="block text-xs font-bold text-amber-400 mb-1.5">
                       Pay Day (Day 1 to 10) *
                     </label>
                     <select
                       value={dueDayOfMonth}
                       onChange={(e) => setDueDayOfMonth(e.target.value)}
-                      className="w-full h-10 rounded-xl bg-[#0E131C] border border-amber-500/40 px-2.5 text-xs font-bold text-amber-400 focus:border-amber-500 focus:outline-none"
+                      className="w-full h-11 rounded-2xl bg-[#0D121B] border border-amber-500/40 px-3.5 text-xs font-bold text-amber-400 focus:border-amber-500 focus:outline-none"
                     >
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
                         <option key={d} value={d}>
@@ -519,9 +555,52 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 </div>
               </div>
 
-              <div className="mt-3 rounded-xl bg-[#0E131C] border border-amber-500/30 px-3.5 py-2.5 flex items-center justify-between text-xs">
-                <span className="text-slate-300 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+              {/* Landlord Safety & Tenant Privacy Checkboxes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setValidIdVerified((v) => !v)}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-3 transition cursor-pointer ${
+                    validIdVerified
+                      ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-300'
+                      : 'bg-[#0D121B] border-[#253148] text-slate-400'
+                  }`}
+                >
+                  <CheckSquare className="w-4 h-4 shrink-0" />
+                  <div className="text-xs">
+                    <span className="font-bold block">
+                      Tenant Valid ID Verified
+                    </span>
+                    <span className="text-[10px] opacity-80">
+                      Landlord safety identity check
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPrivacyConsentSigned((v) => !v)}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-3 transition cursor-pointer ${
+                    privacyConsentSigned
+                      ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-300'
+                      : 'bg-[#0D121B] border-[#253148] text-slate-400'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <div className="text-xs">
+                    <span className="font-bold block">
+                      Data Privacy & Lease Consent
+                    </span>
+                    <span className="text-[10px] opacity-80">
+                      RA 10173 tenant data protection
+                    </span>
+                  </div>
+                </button>
+              </div>
+
+              <div className="rounded-2xl bg-[#0D121B] border border-amber-500/30 px-4 py-3 flex items-center justify-between text-xs">
+                <span className="text-slate-300 flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-amber-400" />
                   Auto-Scheduled Next Month Payment Due Date (1 to 10 Window):
                 </span>
                 <span className="font-bold text-amber-400">
@@ -531,17 +610,17 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#222C3F]">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#222E44]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl bg-[#1C2434] hover:bg-[#242E42] text-slate-300 font-semibold text-sm cursor-pointer"
+              className="px-5 py-3 rounded-2xl bg-[#1C2434] hover:bg-[#242E42] text-slate-300 font-semibold text-sm cursor-pointer btn-fluid"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-bold text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer"
+              className="px-6 py-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer btn-fluid"
             >
               <Save className="w-4 h-4" />
               <span>{initialRoom ? 'Save Changes' : 'Create Room'}</span>

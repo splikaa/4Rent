@@ -5,6 +5,8 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Eye,
+  EyeOff,
   Loader2,
   MessageCircle,
   Moon,
@@ -19,6 +21,8 @@ import { AppSettings, BillRecord } from '../../types/rental';
 import {
   formatMessengerBillSummary,
   formatPeso,
+  generateReceiptVerificationCode,
+  maskPhoneNumber,
 } from '../../utils/billingCalculator';
 import { generateSimulatedSubMeterDataUrl } from '../../services/ocrService';
 
@@ -35,6 +39,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 }) => {
   const receiptRef = useRef<HTMLDivElement | null>(null);
   const [receiptTheme, setReceiptTheme] = useState<'dark' | 'light'>('dark');
+  const [maskContactsOnReceipt, setMaskContactsOnReceipt] = useState<boolean>(
+    () => settings.maskReceiptContacts ?? true
+  );
   const [isExporting, setIsExporting] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
@@ -57,6 +64,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   }, [bill?.meterPhotoDataUrl, bill?.currReading]);
 
   if (!bill) return null;
+
+  const verificationSeal = generateReceiptVerificationCode(
+    bill.receiptNo,
+    bill.roomName,
+    bill.totalAmountDue
+  );
 
   const generateReceiptPngDataUrl = async (): Promise<string | null> => {
     if (!receiptRef.current) return null;
@@ -170,9 +183,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-xl rounded-3xl bg-[#131924] border border-[#263147] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[95vh]">
+      <div className="w-full max-w-xl rounded-3xl bg-[#131924] border border-[#263147] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[95vh] animate-modal-pop">
         {/* Top Action Header */}
-        <div className="no-print flex items-center justify-between gap-2 px-4 sm:px-5 py-3 bg-[#18202F] border-b border-[#263147] shrink-0">
+        <div className="no-print flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3.5 bg-[#18202F] border-b border-[#263147] shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-sm sm:text-base font-extrabold text-white">
               Official Printable Receipt
@@ -183,6 +196,25 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMaskContactsOnReceipt((prev) => !prev)}
+              className="px-2.5 py-1.5 rounded-xl bg-[#0F141E] hover:bg-[#1E2738] border border-[#28334A] text-xs font-semibold text-emerald-300 flex items-center gap-1.5 transition cursor-pointer"
+              title="Toggle Tenant Contact Privacy Masking on Receipt"
+            >
+              {maskContactsOnReceipt ? (
+                <>
+                  <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="hidden sm:inline">Privacy Redacted</span>
+                </>
+              ) : (
+                <>
+                  <Eye className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Full Contact</span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={() =>
@@ -247,7 +279,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       isDark ? 'text-white' : 'text-slate-900'
                     }`}
                   >
-                    {settings.apartmentName}
+                    {settings.apartmentName || '4Rent Management System'}
                   </h2>
                   <p
                     className={`text-[11px] font-semibold ${
@@ -306,6 +338,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <strong className="text-xs sm:text-sm font-bold truncate block">
                   {bill.tenantName}
                 </strong>
+                {bill.tenantPhone && (
+                  <span className="text-[10px] font-mono-num opacity-75 block">
+                    {maskPhoneNumber(bill.tenantPhone, maskContactsOnReceipt)}
+                  </span>
+                )}
               </div>
               <div>
                 <span
@@ -529,14 +566,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               )}
             </div>
 
-            {/* 6. Footer & Payment Schedule Notice */}
+            {/* 6. Footer, Verification Seal & Privacy Notice */}
             <div className="pt-2.5 text-[10px] space-y-1 opacity-85">
-              <div className="font-semibold text-amber-500">
-                Payment Policy: Tenants are required to pay between the 1st and
-                10th of every month.
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-amber-500">
+                  Payment Window: Every 1st to 10th of the month.
+                </span>
+                <span className="font-mono-num font-bold text-emerald-500">
+                  {verificationSeal}
+                </span>
               </div>
               <div className="pt-1 flex items-center justify-between text-[9px] opacity-70 font-mono-num">
-                <span>4Rent Official Receipt • Developed by splikaa</span>
+                <span>4Rent Management System v1.0.0 • by splikaa</span>
                 <span>{new Date(bill.createdAt).toLocaleString('en-PH')}</span>
               </div>
             </div>
@@ -544,12 +585,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         </div>
 
         {/* Bottom Export, Print & Messenger Integration Bar */}
-        <div className="no-print px-4 sm:px-5 py-3 bg-[#18202F] border-t border-[#263147] flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="no-print px-4 sm:px-5 py-3.5 bg-[#18202F] border-t border-[#263147] flex flex-wrap items-center justify-between gap-2 shrink-0">
           <button
             type="button"
             onClick={handleShareToMessenger}
             disabled={isExporting}
-            className="flex-1 min-w-[180px] py-2.5 px-4 rounded-xl bg-[#0084FF] hover:bg-[#1890FF] text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition cursor-pointer"
+            className="flex-1 min-w-[180px] py-2.5 px-4 rounded-xl bg-[#0084FF] hover:bg-[#1890FF] text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition cursor-pointer btn-fluid"
           >
             {isExporting ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -565,7 +606,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               type="button"
               onClick={handleDownloadPng}
               disabled={isExporting}
-              className="py-2.5 px-3.5 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              className="py-2.5 px-3.5 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Download PNG</span>
@@ -574,7 +615,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <button
               type="button"
               onClick={handleCopySummary}
-              className="py-2.5 px-3 rounded-xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-slate-200 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              className="py-2.5 px-3 rounded-xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-slate-200 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
             >
               {copiedText ? (
                 <>
@@ -592,7 +633,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <button
               type="button"
               onClick={() => window.print()}
-              className="py-2.5 px-3 rounded-xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+              className="py-2.5 px-3 rounded-xl bg-[#10151F] hover:bg-[#1E2738] border border-[#28334A] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
             >
               <Printer className="w-3.5 h-3.5 text-amber-400" />
               <span>Print / PDF</span>

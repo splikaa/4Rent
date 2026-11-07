@@ -4,6 +4,7 @@ import {
   BillRecord,
   Room,
   RoomInquiryBooking,
+  SecurityAuditEntry,
   TenantHistoryEntry,
 } from '../types/rental';
 import { saveSnapshotToIndexedDb } from './idbDatabase';
@@ -17,6 +18,7 @@ const STORAGE_KEYS = {
   INQUIRIES: '4rent_db_inquiries',
   HISTORY: '4rent_db_tenant_history',
   SETTINGS: '4rent_db_settings',
+  AUDIT_LOG: '4rent_db_audit_log',
 };
 
 // Safe runtime decoder so raw credentials and project endpoints are never exposed in git tracking
@@ -41,7 +43,7 @@ const DEV_SUPABASE_ANON_KEY =
 const DEV_PROPERTY_CODE = viteEnv.VITE_PROPERTY_CODE || '4RENT-MAIN';
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  apartmentName: '4Rent',
+  apartmentName: '4Rent Management System',
   landlordName: 'Property Administrator',
   landlordPhone: '0917-000-0000',
   landlordMessenger: '',
@@ -52,11 +54,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   remindersPromptShown: false,
   remindersEnabled: false,
   receiptPrintFormat: 'standard',
+  privacyMaskEnabled: false,
+  maskReceiptContacts: true,
   security: {
     isSetupComplete: false,
     lockEnabled: false,
     authMethod: 'none',
     pinCode: '1234',
+    autoLockMinutes: 15,
+    requirePinForSensitiveActions: true,
   },
   cloudSync: {
     enabled: Boolean(DEV_SUPABASE_URL && DEV_SUPABASE_ANON_KEY),
@@ -74,13 +80,24 @@ export function loadSettings(): AppSettings {
       localStorage.getItem('4rent_settings_v1');
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw);
+    const normalizedName =
+      !parsed.apartmentName || parsed.apartmentName === '4Rent'
+        ? '4Rent Management System'
+        : parsed.apartmentName;
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
+      apartmentName: normalizedName,
       security: {
         ...DEFAULT_SETTINGS.security,
         ...(parsed.security || {}),
         pinCode: parsed.security?.pinCode || '1234',
+        autoLockMinutes:
+          typeof parsed.security?.autoLockMinutes === 'number'
+            ? parsed.security.autoLockMinutes
+            : 15,
+        requirePinForSensitiveActions:
+          parsed.security?.requirePinForSensitiveActions ?? true,
       },
       cloudSync: {
         ...DEFAULT_SETTINGS.cloudSync,
@@ -193,9 +210,38 @@ export function saveTenantHistory(history: TenantHistoryEntry[]): void {
   persistMasterIndexedDb();
 }
 
+export function loadAuditLogs(): SecurityAuditEntry[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.AUDIT_LOG);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function appendAuditLog(
+  action: string,
+  details: string,
+  category: SecurityAuditEntry['category'] = 'security'
+): SecurityAuditEntry[] {
+  const existing = loadAuditLogs();
+  const next: SecurityAuditEntry[] = [
+    {
+      id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      action,
+      details,
+      category,
+      createdAt: new Date().toISOString(),
+    },
+    ...existing,
+  ].slice(0, 60);
+  localStorage.setItem(STORAGE_KEYS.AUDIT_LOG, JSON.stringify(next));
+  return next;
+}
+
 export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
   return {
-    version: '1.3.0',
+    version: '1.0.0',
     exportedAt: new Date().toISOString(),
     rooms: loadRooms(),
     bills: loadBills(),

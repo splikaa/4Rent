@@ -7,7 +7,10 @@ import {
   clampDueDayOneToTen,
   extractMeterDigitsFromOcrText,
   formatPeso,
+  formatPesoPrivacy,
   formatPhoneNumber,
+  maskPhoneNumber,
+  generateReceiptVerificationCode,
   getBillingPeriodOptions,
   getNextDueDateInOneToTenWindow,
 } from './billingCalculator';
@@ -134,5 +137,21 @@ describe('4Rent Sub-Meter OCR & Billing Engine', () => {
   it('returns selectable billing period options for OCR reader dropdown', () => {
     const options = getBillingPeriodOptions();
     expect(options.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('masks tenant mobile numbers and landlord revenue when privacy shield is enabled', () => {
+    expect(maskPhoneNumber('0917-555-0101')).toBe('0917-•••-••01');
+    expect(maskPhoneNumber('0917-555-0101', false)).toBe('0917-555-0101');
+    expect(formatPesoPrivacy(18500, false)).toBe('₱18,500.00');
+    expect(formatPesoPrivacy(18500, true)).toBe('₱••,•••.••');
+  });
+
+  it('generates a deterministic anti-tamper receipt verification seal', () => {
+    const seal1 = generateReceiptVerificationCode('4R-202611-001', 'Room 101', 4600);
+    const seal2 = generateReceiptVerificationCode('4R-202611-001', 'Room 101', 4600);
+    const sealTampered = generateReceiptVerificationCode('4R-202611-001', 'Room 101', 2600);
+    expect(seal1).toMatch(/^4R-SEAL-[A-Z0-9]{6}$/);
+    expect(seal1).toBe(seal2);
+    expect(seal1).not.toBe(sealTampered);
   });
 });
