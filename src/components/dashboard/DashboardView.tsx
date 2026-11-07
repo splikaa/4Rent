@@ -16,6 +16,7 @@ import {
   ReceiptText,
   Settings,
   ShieldCheck,
+  Sparkles,
   TrendingUp,
   User,
   Wallet,
@@ -39,6 +40,7 @@ interface DashboardViewProps {
   globalElectricRate: number;
   privacyMaskEnabled?: boolean;
   onTogglePrivacyMask?: () => void;
+  onOpenWalkthrough?: () => void;
   onOpenDrawer: () => void;
   onNavigate: (tab: NavigationTab) => void;
   onOpenAddRoom: () => void;
@@ -55,6 +57,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   globalElectricRate,
   privacyMaskEnabled = false,
   onTogglePrivacyMask,
+  onOpenWalkthrough,
   onOpenDrawer,
   onNavigate,
   onOpenAddRoom,
@@ -157,6 +160,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {onOpenWalkthrough && (
+            <button
+              type="button"
+              onClick={onOpenWalkthrough}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-amber-500/12 hover:bg-amber-500/20 border border-amber-500/35 text-amber-300 text-xs font-extrabold transition cursor-pointer btn-fluid"
+              title="Open 4Rent Easy Go-Through Guide"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Easy Guide</span>
+            </button>
+          )}
+
           {onTogglePrivacyMask && (
             <button
               type="button"

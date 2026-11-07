@@ -70,6 +70,44 @@
   }
 }
 
+@keyframes feedbackToastEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(-18px) scale(0.95);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(3px) scale(1.01);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes feedbackIconPop {
+  0% {
+    transform: scale(0.6) rotate(-10deg);
+  }
+  70% {
+    transform: scale(1.14) rotate(4deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes interactionRippleExpand {
+  0% {
+    transform: translate(-50%, -50%) scale(0.15);
+    opacity: 0.65;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.6);
+    opacity: 0;
+  }
+}
+
 .animate-view-enter {
   animation: viewEnter 0.42s var(--spring-ease) both;
 }
@@ -80,6 +118,60 @@
 
 .animate-card-in {
   animation: cardFloatIn 0.45s var(--spring-ease) both;
+}
+
+.animate-feedback-toast {
+  animation: feedbackToastEnter 0.38s var(--spring-ease) both;
+}
+
+.animate-feedback-icon {
+  animation: feedbackIconPop 0.42s var(--spring-ease) both;
+}
+
+.interaction-ripple-dot {
+  position: fixed;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  pointer-events: none;
+  z-index: 9999;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.45) 0%, rgba(245, 158, 11, 0) 72%);
+  border: 1.5px solid rgba(245, 158, 11, 0.55);
+  animation: interactionRippleExpand 0.48s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Universal Interactive Feedback for All Buttons, Links & Controls Across Devices */
+button:not(:disabled),
+a[href],
+[role="button"] {
+  transition:
+    transform 0.22s var(--spring-ease),
+    background-color 0.22s var(--spring-ease),
+    border-color 0.22s var(--spring-ease),
+    box-shadow 0.22s var(--spring-ease),
+    opacity 0.22s var(--spring-ease);
+  touch-action: manipulation;
+}
+
+button:not(:disabled):active,
+a[href]:active,
+[role="button"]:active {
+  transform: scale(0.96);
+}
+
+input,
+select,
+textarea {
+  transition:
+    border-color 0.22s var(--spring-ease),
+    box-shadow 0.22s var(--spring-ease),
+    background-color 0.22s var(--spring-ease);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
 }
 
 /* Fluid Interactive Surface & Button Classes */
@@ -103,6 +195,10 @@
     0 20px 38px -14px rgba(0, 0, 0, 0.65),
     0 0 24px -6px rgba(245, 158, 11, 0.14),
     inset 0 1px 0 0 rgba(255, 255, 255, 0.09);
+}
+
+.surface-card-interactive:active {
+  transform: scale(0.985);
 }
 
 .btn-fluid {

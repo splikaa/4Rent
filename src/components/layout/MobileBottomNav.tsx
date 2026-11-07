@@ -22,7 +22,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   return (
     <nav
       aria-label="Mobile bottom navigation"
-      className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[#101622]/95 backdrop-blur-xl border-t border-[#243047] px-3 py-2 shadow-[0_-10px_30px_rgba(0,0,0,0.6)]"
+      className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[#101622]/95 backdrop-blur-xl border-t border-[#243047] px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-10px_30px_rgba(0,0,0,0.6)]"
     >
       <div className="max-w-md mx-auto grid grid-cols-5 items-center gap-1">
         <button

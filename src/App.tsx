@@ -38,6 +38,12 @@ import {
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
 import { LockScreen } from './components/security/LockScreen';
 import { LoadingSplashScreen } from './components/common/LoadingSplashScreen';
+import {
+  FeedbackNotification,
+  FeedbackToastBar,
+  FeedbackVariant,
+} from './components/common/FeedbackToastBar';
+import { EasyWalkthroughModal } from './components/common/EasyWalkthroughModal';
 import { EnableRemindersModal } from './components/modals/EnableRemindersModal';
 import { PinAuthModal } from './components/modals/PinAuthModal';
 import { AdvanceBalanceModal } from './components/modals/AdvanceBalanceModal';
@@ -100,6 +106,89 @@ export function App() {
   // Occupied Room Archive Guard State (Prevents accidental direct archive of occupied rooms)
   const [roomPendingOccupiedArchive, setRoomPendingOccupiedArchive] =
     useState<Room | null>(null);
+
+  // Interactive Feedback Toast + Easy Go-Through Walkthrough State
+  const [feedbackToast, setFeedbackToast] =
+    useState<FeedbackNotification | null>(null);
+  const [isWalkthroughOpen, setIsWalkthroughOpen] = useState<boolean>(false);
+
+  const triggerFeedback = (
+    title: string,
+    message: string,
+    variant: FeedbackVariant = 'success',
+    actionLabel?: string,
+    onAction?: () => void
+  ) => {
+    setFeedbackToast({
+      id: `fb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title,
+      message,
+      variant,
+      actionLabel,
+      onAction,
+    });
+  };
+
+  // Universal Tactile Ripple Animation on Every Interactive Click/Tap + Global Runtime Error Catch
+  useEffect(() => {
+    const handlePointerDownRipple = (e: PointerEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        if (!target) return;
+        const interactiveEl = target.closest(
+          'button, a, [role="button"], .surface-card-interactive, input[type="checkbox"], select'
+        );
+        if (!interactiveEl) return;
+
+        const dot = document.createElement('span');
+        dot.className = 'interaction-ripple-dot';
+        dot.style.left = `${e.clientX}px`;
+        dot.style.top = `${e.clientY}px`;
+        document.body.appendChild(dot);
+        setTimeout(() => {
+          dot.remove();
+        }, 560);
+      } catch {
+        // Non-critical visual effect guard
+      }
+    };
+
+    const handleGlobalError = (event: ErrorEvent) => {
+      try {
+        console.error('[4Rent Caught Runtime Error]:', event.error || event.message);
+        appendAuditLog(
+          'Runtime Error Caught',
+          String(event.message || 'Handled unexpected runtime error'),
+          'security'
+        );
+      } catch {
+        // Ignore secondary logging error
+      }
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      try {
+        console.warn('[4Rent Caught Async Rejection]:', event.reason);
+      } catch {
+        // Ignore secondary logging error
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDownRipple, {
+      passive: true,
+    });
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDownRipple);
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener(
+        'unhandledrejection',
+        handleUnhandledRejection
+      );
+    };
+  }, []);
 
   // PWA Install Prompt Reference
   const deferredInstallPromptRef = useRef<any>(null);
@@ -288,8 +377,12 @@ export function App() {
   };
 
   const handleTogglePrivacyMask = () => {
-    setSettings((prev) => {
-      const nextMask = !prev.privacyMaskEnabled;
+    try {
+      const nextMask = !settings.privacyMaskEnabled;
+      setSettings((prev) => ({
+        ...prev,
+        privacyMaskEnabled: nextMask,
+      }));
       appendAuditLog(
         'Privacy Shield',
         nextMask
@@ -297,31 +390,57 @@ export function App() {
           : 'Disabled screen privacy masking',
         'privacy'
       );
-      return {
-        ...prev,
-        privacyMaskEnabled: nextMask,
-      };
-    });
+      triggerFeedback(
+        nextMask ? 'Privacy Shield Activated' : 'Privacy Shield Disabled',
+        nextMask
+          ? 'Tenant phone numbers & revenue figures are now masked on screen.'
+          : 'Full tenant contact & revenue figures are now visible.',
+        'info',
+        'Security Settings',
+        () => setActiveTab('settings')
+      );
+    } catch (err) {
+      triggerFeedback(
+        'Privacy Toggle Error',
+        String(err instanceof Error ? err.message : 'Unable to toggle Privacy Shield.'),
+        'error'
+      );
+    }
   };
 
   const handleCompleteSecuritySetup = (secConfig: SecurityConfig) => {
-    const updated: AppSettings = {
-      ...settings,
-      security: {
-        ...secConfig,
-        isSetupComplete: true,
-        lockEnabled: true,
-      },
-    };
-    setSettings(updated);
-    setShowSecuritySetup(false);
-    setIsLocked(false);
-    setShowUnlockSplash(true);
-    appendAuditLog(
-      'Security Configured',
-      `Passcode PIN & security preferences updated.`,
-      'security'
-    );
+    try {
+      const updated: AppSettings = {
+        ...settings,
+        security: {
+          ...secConfig,
+          isSetupComplete: true,
+          lockEnabled: true,
+        },
+      };
+      setSettings(updated);
+      setShowSecuritySetup(false);
+      setIsLocked(false);
+      setShowUnlockSplash(true);
+      appendAuditLog(
+        'Security Configured',
+        `Passcode PIN & security preferences updated.`,
+        'security'
+      );
+      triggerFeedback(
+        'Security Authenticated',
+        'Landlord protection is active. Tap Easy Guide anytime to explore.',
+        'success',
+        'Open Easy Guide',
+        () => setIsWalkthroughOpen(true)
+      );
+    } catch (err) {
+      triggerFeedback(
+        'Security Setup Error',
+        String(err instanceof Error ? err.message : 'Failed to save security configuration.'),
+        'error'
+      );
+    }
   };
 
   const handleAllowReminders = async () => {
@@ -337,6 +456,13 @@ export function App() {
       remindersPromptShown: true,
       remindersEnabled: true,
     }));
+    triggerFeedback(
+      'Due-Window Reminders Enabled',
+      'System will notify you of unpaid bills from Day 1 to Day 10.',
+      'success',
+      'View Payments',
+      () => setActiveTab('payments')
+    );
   };
 
   const handleDenyReminders = () => {
@@ -345,6 +471,13 @@ export function App() {
       remindersPromptShown: true,
       remindersEnabled: false,
     }));
+    triggerFeedback(
+      'Reminders Muted',
+      'You can re-enable Day 1–10 notifications anytime in Settings.',
+      'info',
+      'Open Settings',
+      () => setActiveTab('settings')
+    );
   };
 
   // Save Room (and if an occupied room is switched to vacant, automatically log tenant to Previous Tenant History!)
@@ -353,110 +486,257 @@ export function App() {
     existingId?: string,
     vacatedReason?: string
   ) => {
-    const nowIso = new Date().toISOString();
-    if (existingId) {
-      const prevRoom = rooms.find((r) => r.id === existingId);
-      if (
-        prevRoom &&
-        prevRoom.status === 'occupied' &&
-        prevRoom.tenant &&
-        roomData.status === 'vacant'
-      ) {
-        const entry: TenantHistoryEntry = {
-          id: `hist-${Date.now()}`,
-          roomId: prevRoom.id,
-          roomName: prevRoom.name,
-          tenantName: prevRoom.tenant.fullName,
-          phone: prevRoom.tenant.phone,
-          messengerUsername: prevRoom.tenant.messengerUsername,
-          moveInDate: prevRoom.tenant.moveInDate,
-          moveOutDate: nowIso.slice(0, 10),
-          reason: vacatedReason || 'Stopped Paying Rent / Vacated',
-          finalMeterReading: roomData.lastMeterReading,
-          depositHeld: prevRoom.securityDeposit,
-          unpaidBalanceAtMoveOut: prevRoom.unpaidBalance,
+    try {
+      const nowIso = new Date().toISOString();
+      if (existingId) {
+        const prevRoom = rooms.find((r) => r.id === existingId);
+        if (
+          prevRoom &&
+          prevRoom.status === 'occupied' &&
+          prevRoom.tenant &&
+          roomData.status === 'vacant'
+        ) {
+          const entry: TenantHistoryEntry = {
+            id: `hist-${Date.now()}`,
+            roomId: prevRoom.id,
+            roomName: prevRoom.name,
+            tenantName: prevRoom.tenant.fullName,
+            phone: prevRoom.tenant.phone,
+            messengerUsername: prevRoom.tenant.messengerUsername,
+            moveInDate: prevRoom.tenant.moveInDate,
+            moveOutDate: nowIso.slice(0, 10),
+            reason: vacatedReason || 'Stopped Paying Rent / Vacated',
+            finalMeterReading: roomData.lastMeterReading,
+            depositHeld: prevRoom.securityDeposit,
+            unpaidBalanceAtMoveOut: prevRoom.unpaidBalance,
+          };
+          setTenantHistory((prev) => [entry, ...prev]);
+        }
+
+        setRooms((prev) =>
+          prev.map((r) =>
+            r.id === existingId
+              ? { ...roomData, id: existingId, updatedAt: nowIso }
+              : r
+          )
+        );
+        appendAuditLog(
+          'Room Updated',
+          `${roomData.name} (${roomData.status}) saved.`,
+          'tenant'
+        );
+        triggerFeedback(
+          `${roomData.name} Updated`,
+          `Status: ${roomData.status.toUpperCase()} • Sub-meter baseline: ${roomData.lastMeterReading.toFixed(1)} kWh.`,
+          'success',
+          'Open Room Details',
+          () => setSelectedRoomDetailsId(existingId)
+        );
+      } else {
+        const createdId = `room-${Date.now()}`;
+        const newRoom: Room = {
+          ...roomData,
+          id: createdId,
+          updatedAt: nowIso,
         };
-        setTenantHistory((prev) => [entry, ...prev]);
+        setRooms((prev) => [...prev, newRoom]);
+        appendAuditLog(
+          'Room Created',
+          `${roomData.name} added to system.`,
+          'tenant'
+        );
+        triggerFeedback(
+          `${roomData.name} Added`,
+          `Ready for dual sub-meter billing (${roomData.lastMeterReading.toFixed(1)} kWh baseline).`,
+          'success',
+          'Scan Sub-Meter',
+          () => {
+            setScannerTargetRoom(newRoom);
+            setIsScannerOpen(true);
+          }
+        );
+      }
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Failed to Save Room',
+        String(err instanceof Error ? err.message : 'Please verify room details and try again.'),
+        'error'
+      );
+    }
+  };
+
+  const handleConfirmDeleteRoomAfterPin = () => {
+    try {
+      if (!roomPendingPinDelete) return;
+      const targetId = roomPendingPinDelete.id;
+      const targetName = roomPendingPinDelete.name;
+      setRooms((prev) => prev.filter((r) => r.id !== targetId));
+      setRoomPendingPinDelete(null);
+      appendAuditLog(
+        'Room Removed (PIN Verified)',
+        `${targetName} permanently removed.`,
+        'security'
+      );
+      triggerFeedback(
+        `${targetName} Removed`,
+        'Room was permanently deleted after Passcode PIN verification.',
+        'warning',
+        'View All Rooms',
+        () => setActiveTab('rooms')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Room Removal Failed',
+        String(err instanceof Error ? err.message : 'Unable to delete room.'),
+        'error'
+      );
+    }
+  };
+
+  const handleArchiveRoom = (roomId: string) => {
+    try {
+      const targetRoom = rooms.find((r) => r.id === roomId);
+      if (!targetRoom) return;
+
+      // Guard: If the room is currently Occupied, block direct archive and open the notification/reason modal
+      if (targetRoom.status === 'occupied') {
+        setRoomPendingOccupiedArchive(targetRoom);
+        triggerFeedback(
+          'Occupied Room Guard Active',
+          `${targetRoom.name} is currently occupied by ${targetRoom.tenant?.fullName || 'a tenant'}. Provide an override reason to archive.`,
+          'warning',
+          'View Room Ledger',
+          () => setSelectedRoomDetailsId(targetRoom.id)
+        );
+        return;
       }
 
       setRooms((prev) =>
         prev.map((r) =>
-          r.id === existingId
-            ? { ...roomData, id: existingId, updatedAt: nowIso }
+          r.id === roomId
+            ? {
+                ...r,
+                isArchived: true,
+                archivedAt: new Date().toISOString(),
+              }
             : r
         )
       );
       appendAuditLog(
-        'Room Updated',
-        `${roomData.name} (${roomData.status}) saved.`,
+        'Vacant Room Archived',
+        `${targetRoom.name} moved to Archive Center.`,
         'tenant'
       );
-    } else {
-      const newRoom: Room = {
-        ...roomData,
-        id: `room-${Date.now()}`,
-        updatedAt: nowIso,
-      };
-      setRooms((prev) => [...prev, newRoom]);
-      appendAuditLog(
-        'Room Created',
-        `${roomData.name} added to system.`,
-        'tenant'
+      triggerFeedback(
+        `${targetRoom.name} Archived`,
+        'Room moved safely to Archive & History Center.',
+        'info',
+        'Open Archive',
+        () => setActiveTab('archive')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Archive Action Failed',
+        String(err instanceof Error ? err.message : 'Could not archive room.'),
+        'error'
       );
     }
-    triggerOptionalCloudSync();
-  };
-
-  const handleConfirmDeleteRoomAfterPin = () => {
-    if (!roomPendingPinDelete) return;
-    const targetId = roomPendingPinDelete.id;
-    const targetName = roomPendingPinDelete.name;
-    setRooms((prev) => prev.filter((r) => r.id !== targetId));
-    setRoomPendingPinDelete(null);
-    appendAuditLog(
-      'Room Removed (PIN Verified)',
-      `${targetName} permanently removed.`,
-      'security'
-    );
-    triggerOptionalCloudSync();
-  };
-
-  const handleArchiveRoom = (roomId: string) => {
-    const targetRoom = rooms.find((r) => r.id === roomId);
-    if (!targetRoom) return;
-
-    // Guard: If the room is currently Occupied, block direct archive and open the notification/reason modal
-    if (targetRoom.status === 'occupied') {
-      setRoomPendingOccupiedArchive(targetRoom);
-      return;
-    }
-
-    setRooms((prev) =>
-      prev.map((r) =>
-        r.id === roomId
-          ? {
-              ...r,
-              isArchived: true,
-              archivedAt: new Date().toISOString(),
-            }
-          : r
-      )
-    );
-    appendAuditLog(
-      'Vacant Room Archived',
-      `${targetRoom.name} moved to Archive Center.`,
-      'tenant'
-    );
-    triggerOptionalCloudSync();
   };
 
   const handleConfirmOccupiedArchiveWithReason = (
     room: Room,
     reason: string
   ) => {
-    const nowIso = new Date().toISOString();
+    try {
+      const nowIso = new Date().toISOString();
 
-    if (room.tenant) {
+      if (room.tenant) {
+        const entry: TenantHistoryEntry = {
+          id: `hist-${Date.now()}`,
+          roomId: room.id,
+          roomName: room.name,
+          tenantName: room.tenant.fullName,
+          phone: room.tenant.phone,
+          messengerUsername: room.tenant.messengerUsername,
+          moveInDate: room.tenant.moveInDate,
+          moveOutDate: nowIso.slice(0, 10),
+          reason: `Archived while occupied: ${reason}`,
+          finalMeterReading: room.lastMeterReading,
+          depositHeld: room.securityDeposit,
+          unpaidBalanceAtMoveOut: room.unpaidBalance,
+        };
+        setTenantHistory((prev) => [entry, ...prev]);
+      }
+
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === room.id
+            ? {
+                ...r,
+                isArchived: true,
+                archivedAt: nowIso,
+              }
+            : r
+        )
+      );
+      setRoomPendingOccupiedArchive(null);
+      appendAuditLog(
+        'Occupied Room Archived (Override)',
+        `${room.name} (${room.tenant?.fullName || 'Occupied'}) archived — Reason: ${reason}`,
+        'tenant'
+      );
+      triggerFeedback(
+        `${room.name} Archived with Reason`,
+        `Recorded reason: "${reason}". Tenant history logged in Archive.`,
+        'warning',
+        'Go to Archive',
+        () => setActiveTab('archive')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Occupied Archive Error',
+        String(err instanceof Error ? err.message : 'Unable to archive occupied room.'),
+        'error'
+      );
+    }
+  };
+
+  const handleRestoreRoom = (roomId: string) => {
+    try {
+      const target = rooms.find((r) => r.id === roomId);
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === roomId
+            ? { ...r, isArchived: false, archivedAt: undefined }
+            : r
+        )
+      );
+      triggerFeedback(
+        `${target?.name || 'Room'} Restored`,
+        'Room is back in your active rooms list.',
+        'success',
+        'Go to Rooms',
+        () => setActiveTab('rooms')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Restore Error',
+        String(err instanceof Error ? err.message : 'Could not restore room.'),
+        'error'
+      );
+    }
+  };
+
+  // Move out tenant -> Goes to Previous Tenant History AND preserves continuous kWh meter reading
+  const handleMoveOutTenant = (room: Room, reason: string) => {
+    try {
+      if (!room.tenant) return;
+      const tenantName = room.tenant.fullName;
       const entry: TenantHistoryEntry = {
         id: `hist-${Date.now()}`,
         roomId: room.id,
@@ -465,85 +745,48 @@ export function App() {
         phone: room.tenant.phone,
         messengerUsername: room.tenant.messengerUsername,
         moveInDate: room.tenant.moveInDate,
-        moveOutDate: nowIso.slice(0, 10),
-        reason: `Archived while occupied: ${reason}`,
+        moveOutDate: new Date().toISOString().slice(0, 10),
+        reason,
         finalMeterReading: room.lastMeterReading,
         depositHeld: room.securityDeposit,
         unpaidBalanceAtMoveOut: room.unpaidBalance,
       };
       setTenantHistory((prev) => [entry, ...prev]);
+
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === room.id
+            ? {
+                ...r,
+                status: 'vacant',
+                tenant: undefined,
+                unpaidBalance: 0,
+                advanceRent: 0,
+                updatedAt: new Date().toISOString(),
+              }
+            : r
+        )
+      );
+      appendAuditLog(
+        'Tenant Vacated',
+        `${tenantName} moved out of ${room.name}.`,
+        'tenant'
+      );
+      triggerFeedback(
+        `${tenantName} Moved Out`,
+        `${room.name} is now Vacant (Sub-Meter preserved at ${room.lastMeterReading.toFixed(1)} kWh).`,
+        'info',
+        'View Tenant History',
+        () => setActiveTab('archive')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Move-Out Error',
+        String(err instanceof Error ? err.message : 'Unable to complete move-out.'),
+        'error'
+      );
     }
-
-    setRooms((prev) =>
-      prev.map((r) =>
-        r.id === room.id
-          ? {
-              ...r,
-              isArchived: true,
-              archivedAt: nowIso,
-            }
-          : r
-      )
-    );
-    setRoomPendingOccupiedArchive(null);
-    appendAuditLog(
-      'Occupied Room Archived (Override)',
-      `${room.name} (${room.tenant?.fullName || 'Occupied'}) archived — Reason: ${reason}`,
-      'tenant'
-    );
-    triggerOptionalCloudSync();
-  };
-
-  const handleRestoreRoom = (roomId: string) => {
-    setRooms((prev) =>
-      prev.map((r) =>
-        r.id === roomId
-          ? { ...r, isArchived: false, archivedAt: undefined }
-          : r
-      )
-    );
-    triggerOptionalCloudSync();
-  };
-
-  // Move out tenant -> Goes to Previous Tenant History AND preserves continuous kWh meter reading
-  const handleMoveOutTenant = (room: Room, reason: string) => {
-    if (!room.tenant) return;
-    const entry: TenantHistoryEntry = {
-      id: `hist-${Date.now()}`,
-      roomId: room.id,
-      roomName: room.name,
-      tenantName: room.tenant.fullName,
-      phone: room.tenant.phone,
-      messengerUsername: room.tenant.messengerUsername,
-      moveInDate: room.tenant.moveInDate,
-      moveOutDate: new Date().toISOString().slice(0, 10),
-      reason,
-      finalMeterReading: room.lastMeterReading,
-      depositHeld: room.securityDeposit,
-      unpaidBalanceAtMoveOut: room.unpaidBalance,
-    };
-    setTenantHistory((prev) => [entry, ...prev]);
-
-    setRooms((prev) =>
-      prev.map((r) =>
-        r.id === room.id
-          ? {
-              ...r,
-              status: 'vacant',
-              tenant: undefined,
-              unpaidBalance: 0,
-              advanceRent: 0,
-              updatedAt: new Date().toISOString(),
-            }
-          : r
-      )
-    );
-    appendAuditLog(
-      'Tenant Vacated',
-      `${room.tenant.fullName} moved out of ${room.name}.`,
-      'tenant'
-    );
-    triggerOptionalCloudSync();
   };
 
   // Generate Bill -> Enforces 1 Active Receipt per Room (archives previous receipts for this room)
@@ -555,74 +798,89 @@ export function App() {
     overpaymentAddedToAdvance: number,
     advanceDeductedFromRoom: number
   ) => {
-    setBills((prev) => {
-      const archivedOlderForSameRoom = prev.map((b) =>
-        b.roomId === newBill.roomId && !b.isArchived
-          ? {
-              ...b,
-              isArchived: true,
-              archivedAt: newBill.createdAt,
-            }
-          : b
-      );
-      return [newBill, ...archivedOlderForSameRoom];
-    });
-
-    setRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== newBill.roomId) return r;
-        const currentAdv = r.advanceRent || 0;
-        const nextAdv = Math.max(
-          0,
-          Math.round(
-            (currentAdv -
-              advanceDeductedFromRoom +
-              overpaymentAddedToAdvance) *
-              100
-          ) / 100
+    try {
+      setBills((prev) => {
+        const archivedOlderForSameRoom = prev.map((b) =>
+          b.roomId === newBill.roomId && !b.isArchived
+            ? {
+                ...b,
+                isArchived: true,
+                archivedAt: newBill.createdAt,
+              }
+            : b
         );
+        return [newBill, ...archivedOlderForSameRoom];
+      });
 
-        const newAdvEntries = [...(r.advanceHistory || [])];
-        if (advanceDeductedFromRoom > 0) {
-          newAdvEntries.unshift({
-            id: `adv-use-${Date.now()}`,
-            type: 'applied_to_bill',
-            amount: advanceDeductedFromRoom,
-            createdAt: newBill.createdAt,
-            note: `Applied to Receipt #${newBill.receiptNo}`,
-          });
-        }
-        if (overpaymentAddedToAdvance > 0) {
-          newAdvEntries.unshift({
-            id: `adv-over-${Date.now()}`,
-            type: 'overpayment_credit',
-            amount: overpaymentAddedToAdvance,
-            createdAt: newBill.createdAt,
-            note: `Overpayment from Receipt #${newBill.receiptNo}`,
-          });
-        }
+      setRooms((prev) =>
+        prev.map((r) => {
+          if (r.id !== newBill.roomId) return r;
+          const currentAdv = r.advanceRent || 0;
+          const nextAdv = Math.max(
+            0,
+            Math.round(
+              (currentAdv -
+                advanceDeductedFromRoom +
+                overpaymentAddedToAdvance) *
+                100
+            ) / 100
+          );
 
-        return {
-          ...r,
-          lastMeterReading: updatedRoomLastReading,
-          lastMeterPhotoDataUrl: updatedRoomLastPhotoUrl,
-          lastReadingDate: newBill.createdAt,
-          unpaidBalance: updatedRoomUnpaidBalance,
-          advanceRent: nextAdv,
-          advanceHistory: newAdvEntries,
-          activeReceiptId: newBill.id,
-          updatedAt: newBill.createdAt,
-        };
-      })
-    );
+          const newAdvEntries = [...(r.advanceHistory || [])];
+          if (advanceDeductedFromRoom > 0) {
+            newAdvEntries.unshift({
+              id: `adv-use-${Date.now()}`,
+              type: 'applied_to_bill',
+              amount: advanceDeductedFromRoom,
+              createdAt: newBill.createdAt,
+              note: `Applied to Receipt #${newBill.receiptNo}`,
+            });
+          }
+          if (overpaymentAddedToAdvance > 0) {
+            newAdvEntries.unshift({
+              id: `adv-over-${Date.now()}`,
+              type: 'overpayment_credit',
+              amount: overpaymentAddedToAdvance,
+              createdAt: newBill.createdAt,
+              note: `Overpayment from Receipt #${newBill.receiptNo}`,
+            });
+          }
 
-    appendAuditLog(
-      'Official Receipt Generated',
-      `Receipt #${newBill.receiptNo} issued for ${newBill.roomName}.`,
-      'billing'
-    );
-    setActiveReceiptBill(newBill);
-    triggerOptionalCloudSync();
+          return {
+            ...r,
+            lastMeterReading: updatedRoomLastReading,
+            lastMeterPhotoDataUrl: updatedRoomLastPhotoUrl,
+            lastReadingDate: newBill.createdAt,
+            unpaidBalance: updatedRoomUnpaidBalance,
+            advanceRent: nextAdv,
+            advanceHistory: newAdvEntries,
+            activeReceiptId: newBill.id,
+            updatedAt: newBill.createdAt,
+          };
+        })
+      );
+
+      appendAuditLog(
+        'Official Receipt Generated',
+        `Receipt #${newBill.receiptNo} issued for ${newBill.roomName}.`,
+        'billing'
+      );
+      setActiveReceiptBill(newBill);
+      triggerFeedback(
+        `Receipt #${newBill.receiptNo} Generated`,
+        `${newBill.roomName}: ${newBill.consumptionKwh.toFixed(1)} kWh used • Net Due ₱${newBill.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+        'success',
+        'Open Receipt',
+        () => setActiveReceiptBill(newBill)
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Bill Generation Error',
+        String(err instanceof Error ? err.message : 'Unable to generate receipt.'),
+        'error'
+      );
+    }
   };
 
   // Record Payment -> Automatically credits any overpayment to the room's Withdrawable Advance Payment Balance
@@ -632,104 +890,141 @@ export function App() {
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
     referenceNo?: string
   ) => {
-    let targetRoomId = '';
-    let newRoomRemaining = 0;
-    let overpaymentCredited = 0;
-    let receiptNo = '';
+    try {
+      let targetRoomId = '';
+      let newRoomRemaining = 0;
+      let overpaymentCredited = 0;
+      let receiptNo = '';
+      let updatedReceiptObj: BillRecord | null = null;
 
-    setBills((prev) =>
-      prev.map((b) => {
-        if (b.id !== billId) return b;
-        const outcome = applyPaymentWithOverpayment(
-          b,
-          amount,
-          method,
-          referenceNo
-        );
-        targetRoomId = outcome.updatedBill.roomId;
-        newRoomRemaining = outcome.updatedBill.remainingBalance;
-        overpaymentCredited = outcome.overpaymentCredited;
-        receiptNo = outcome.updatedBill.receiptNo;
-        return outcome.updatedBill;
-      })
-    );
-
-    if (targetRoomId) {
-      setRooms((prev) =>
-        prev.map((r) => {
-          if (r.id !== targetRoomId) return r;
-          const nextAdv =
-            Math.round(((r.advanceRent || 0) + overpaymentCredited) * 100) /
-            100;
-          const nextHistory =
-            overpaymentCredited > 0
-              ? [
-                  {
-                    id: `adv-${Date.now()}`,
-                    type: 'overpayment_credit' as const,
-                    amount: overpaymentCredited,
-                    createdAt: new Date().toISOString(),
-                    note: `Excess payment from Receipt #${receiptNo} credited to Advance Balance`,
-                  },
-                  ...(r.advanceHistory || []),
-                ]
-              : r.advanceHistory;
-
-          return {
-            ...r,
-            unpaidBalance: newRoomRemaining,
-            advanceRent: nextAdv,
-            advanceHistory: nextHistory,
-            updatedAt: new Date().toISOString(),
-          };
+      setBills((prev) =>
+        prev.map((b) => {
+          if (b.id !== billId) return b;
+          const outcome = applyPaymentWithOverpayment(
+            b,
+            amount,
+            method,
+            referenceNo
+          );
+          targetRoomId = outcome.updatedBill.roomId;
+          newRoomRemaining = outcome.updatedBill.remainingBalance;
+          overpaymentCredited = outcome.overpaymentCredited;
+          receiptNo = outcome.updatedBill.receiptNo;
+          updatedReceiptObj = outcome.updatedBill;
+          return outcome.updatedBill;
         })
       );
+
+      if (targetRoomId) {
+        setRooms((prev) =>
+          prev.map((r) => {
+            if (r.id !== targetRoomId) return r;
+            const nextAdv =
+              Math.round(((r.advanceRent || 0) + overpaymentCredited) * 100) /
+              100;
+            const nextHistory =
+              overpaymentCredited > 0
+                ? [
+                    {
+                      id: `adv-${Date.now()}`,
+                      type: 'overpayment_credit' as const,
+                      amount: overpaymentCredited,
+                      createdAt: new Date().toISOString(),
+                      note: `Excess payment from Receipt #${receiptNo} credited to Advance Balance`,
+                    },
+                    ...(r.advanceHistory || []),
+                  ]
+                : r.advanceHistory;
+
+            return {
+              ...r,
+              unpaidBalance: newRoomRemaining,
+              advanceRent: nextAdv,
+              advanceHistory: nextHistory,
+              updatedAt: new Date().toISOString(),
+            };
+          })
+        );
+      }
+      appendAuditLog(
+        'Payment Recorded',
+        `₱${amount.toFixed(2)} via ${method} for Receipt #${receiptNo}.`,
+        'billing'
+      );
+      triggerFeedback(
+        `Payment Recorded (₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
+        overpaymentCredited > 0
+          ? `Paid via ${method}. Excess ₱${overpaymentCredited.toFixed(2)} auto-credited to Advance Balance!`
+          : `Paid via ${method} for Receipt #${receiptNo}. Remaining: ₱${newRoomRemaining.toFixed(2)}.`,
+        'success',
+        'View Official Receipt',
+        () => {
+          if (updatedReceiptObj) setActiveReceiptBill(updatedReceiptObj);
+        }
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Payment Recording Error',
+        String(err instanceof Error ? err.message : 'Could not record payment.'),
+        'error'
+      );
     }
-    appendAuditLog(
-      'Payment Recorded',
-      `₱${amount.toFixed(2)} via ${method} for Receipt #${receiptNo}.`,
-      'billing'
-    );
-    triggerOptionalCloudSync();
   };
 
-  // Advance Balance Withdraw / Add / Apply Handlers
+  // Advance Balance Withdraw / Add Handlers
   const handleWithdrawAdvance = (
     roomId: string,
     amount: number,
     note: string
   ) => {
-    const nowIso = new Date().toISOString();
-    setRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== roomId) return r;
-        const nextAdv = Math.max(
-          0,
-          Math.round(((r.advanceRent || 0) - amount) * 100) / 100
-        );
-        return {
-          ...r,
-          advanceRent: nextAdv,
-          advanceHistory: [
-            {
-              id: `adv-w-${Date.now()}`,
-              type: 'withdrawal',
-              amount,
-              createdAt: nowIso,
-              note,
-            },
-            ...(r.advanceHistory || []),
-          ],
-          updatedAt: nowIso,
-        };
-      })
-    );
-    appendAuditLog(
-      'Advance Balance Withdrawn',
-      `₱${amount.toFixed(2)} withdrawn from room advance balance.`,
-      'billing'
-    );
-    triggerOptionalCloudSync();
+    try {
+      const nowIso = new Date().toISOString();
+      const targetRoom = rooms.find((r) => r.id === roomId);
+      setRooms((prev) =>
+        prev.map((r) => {
+          if (r.id !== roomId) return r;
+          const nextAdv = Math.max(
+            0,
+            Math.round(((r.advanceRent || 0) - amount) * 100) / 100
+          );
+          return {
+            ...r,
+            advanceRent: nextAdv,
+            advanceHistory: [
+              {
+                id: `adv-w-${Date.now()}`,
+                type: 'withdrawal',
+                amount,
+                createdAt: nowIso,
+                note,
+              },
+              ...(r.advanceHistory || []),
+            ],
+            updatedAt: nowIso,
+          };
+        })
+      );
+      appendAuditLog(
+        'Advance Balance Withdrawn',
+        `₱${amount.toFixed(2)} withdrawn from room advance balance.`,
+        'billing'
+      );
+      triggerFeedback(
+        `Withdrew ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+        `Advance balance updated for ${targetRoom?.name || 'Room'}.`,
+        'info',
+        'Open Room Ledger',
+        () => setSelectedRoomDetailsId(roomId)
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Advance Withdrawal Error',
+        String(err instanceof Error ? err.message : 'Unable to withdraw advance balance.'),
+        'error'
+      );
+    }
   };
 
   const handleAddAdvanceDeposit = (
@@ -737,248 +1032,357 @@ export function App() {
     amount: number,
     note: string
   ) => {
-    const nowIso = new Date().toISOString();
-    const targetRoom = rooms.find((r) => r.id === roomId);
-    const currentUnpaid = targetRoom?.unpaidBalance || 0;
-    const autoAppliedToBill =
-      currentUnpaid > 0
-        ? Math.round(Math.min(amount, currentUnpaid) * 100) / 100
-        : 0;
-    const remainingToAdvance =
-      Math.round(Math.max(0, amount - autoAppliedToBill) * 100) / 100;
+    try {
+      const nowIso = new Date().toISOString();
+      const targetRoom = rooms.find((r) => r.id === roomId);
+      const currentUnpaid = targetRoom?.unpaidBalance || 0;
+      const autoAppliedToBill =
+        currentUnpaid > 0
+          ? Math.round(Math.min(amount, currentUnpaid) * 100) / 100
+          : 0;
+      const remainingToAdvance =
+        Math.round(Math.max(0, amount - autoAppliedToBill) * 100) / 100;
 
-    if (autoAppliedToBill > 0) {
-      setBills((prev) =>
-        prev.map((b) => {
-          const isTargetActiveBill =
-            (targetRoom?.activeReceiptId &&
-              b.id === targetRoom.activeReceiptId) ||
-            (b.roomId === roomId && !b.isArchived && b.remainingBalance > 0);
-          if (!isTargetActiveBill) return b;
+      if (autoAppliedToBill > 0) {
+        setBills((prev) =>
+          prev.map((b) => {
+            const isTargetActiveBill =
+              (targetRoom?.activeReceiptId &&
+                b.id === targetRoom.activeReceiptId) ||
+              (b.roomId === roomId && !b.isArchived && b.remainingBalance > 0);
+            if (!isTargetActiveBill) return b;
 
-          const nextDepositApplied =
-            Math.round(((b.depositApplied || 0) + autoAppliedToBill) * 100) /
-            100;
-          const nextTotalDue = Math.max(
+            const nextDepositApplied =
+              Math.round(((b.depositApplied || 0) + autoAppliedToBill) * 100) /
+              100;
+            const nextTotalDue = Math.max(
+              0,
+              Math.round((b.totalAmountDue - autoAppliedToBill) * 100) / 100
+            );
+            const nextRemaining = Math.max(
+              0,
+              Math.round((b.remainingBalance - autoAppliedToBill) * 100) / 100
+            );
+            const nextStatus: BillRecord['status'] =
+              nextRemaining <= 0
+                ? 'paid'
+                : b.amountPaid > 0 || nextDepositApplied > 0
+                  ? 'partial'
+                  : 'unpaid';
+
+            return {
+              ...b,
+              depositApplied: nextDepositApplied,
+              totalAmountDue: nextTotalDue,
+              remainingBalance: nextRemaining,
+              status: nextStatus,
+              paidAt: nextRemaining <= 0 ? nowIso : b.paidAt,
+            };
+          })
+        );
+      }
+
+      setRooms((prev) =>
+        prev.map((r) => {
+          if (r.id !== roomId) return r;
+          const nextAdv =
+            Math.round(((r.advanceRent || 0) + remainingToAdvance) * 100) / 100;
+          const nextUnpaid = Math.max(
             0,
-            Math.round((b.totalAmountDue - autoAppliedToBill) * 100) / 100
+            Math.round(((r.unpaidBalance || 0) - autoAppliedToBill) * 100) / 100
           );
-          const nextRemaining = Math.max(
-            0,
-            Math.round((b.remainingBalance - autoAppliedToBill) * 100) / 100
-          );
-          const nextStatus: BillRecord['status'] =
-            nextRemaining <= 0
-              ? 'paid'
-              : b.amountPaid > 0 || nextDepositApplied > 0
-                ? 'partial'
-                : 'unpaid';
-
+          const historyEntries: AdvanceBalanceTransaction[] = [
+            {
+              id: `adv-d-${Date.now()}`,
+              type: 'manual_deposit',
+              amount,
+              createdAt: nowIso,
+              note,
+            },
+          ];
+          if (autoAppliedToBill > 0) {
+            historyEntries.unshift({
+              id: `adv-auto-${Date.now() + 1}`,
+              type: 'applied_to_bill',
+              amount: autoAppliedToBill,
+              createdAt: nowIso,
+              note: 'Automatically deducted toward active room bill',
+            });
+          }
           return {
-            ...b,
-            depositApplied: nextDepositApplied,
-            totalAmountDue: nextTotalDue,
-            remainingBalance: nextRemaining,
-            status: nextStatus,
-            paidAt: nextRemaining <= 0 ? nowIso : b.paidAt,
+            ...r,
+            advanceRent: nextAdv,
+            unpaidBalance: nextUnpaid,
+            advanceHistory: [...historyEntries, ...(r.advanceHistory || [])],
+            updatedAt: nowIso,
           };
         })
       );
+
+      appendAuditLog(
+        'Advance Payment Added',
+        autoAppliedToBill > 0
+          ? `₱${amount.toFixed(2)} added (₱${autoAppliedToBill.toFixed(2)} auto-deducted from active bill).`
+          : `₱${amount.toFixed(2)} added to Advance Balance (will auto-deduct on billing day).`,
+        'billing'
+      );
+      triggerFeedback(
+        `Advance Added (+₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
+        autoAppliedToBill > 0
+          ? `₱${autoAppliedToBill.toFixed(2)} auto-deducted from current bill; ₱${remainingToAdvance.toFixed(2)} stored for next cycle.`
+          : `Stored in ${targetRoom?.name || 'Room'} Advance Balance — will auto-deduct on billing day.`,
+        'success',
+        'View Room Ledger',
+        () => setSelectedRoomDetailsId(roomId)
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Add Advance Error',
+        String(err instanceof Error ? err.message : 'Unable to add advance deposit.'),
+        'error'
+      );
     }
-
-    setRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== roomId) return r;
-        const nextAdv =
-          Math.round(((r.advanceRent || 0) + remainingToAdvance) * 100) / 100;
-        const nextUnpaid = Math.max(
-          0,
-          Math.round(((r.unpaidBalance || 0) - autoAppliedToBill) * 100) / 100
-        );
-        const historyEntries: AdvanceBalanceTransaction[] = [
-          {
-            id: `adv-d-${Date.now()}`,
-            type: 'manual_deposit',
-            amount,
-            createdAt: nowIso,
-            note,
-          },
-        ];
-        if (autoAppliedToBill > 0) {
-          historyEntries.unshift({
-            id: `adv-auto-${Date.now() + 1}`,
-            type: 'applied_to_bill',
-            amount: autoAppliedToBill,
-            createdAt: nowIso,
-            note: 'Automatically deducted toward active room bill',
-          });
-        }
-        return {
-          ...r,
-          advanceRent: nextAdv,
-          unpaidBalance: nextUnpaid,
-          advanceHistory: [...historyEntries, ...(r.advanceHistory || [])],
-          updatedAt: nowIso,
-        };
-      })
-    );
-
-    appendAuditLog(
-      'Advance Payment Added',
-      autoAppliedToBill > 0
-        ? `₱${amount.toFixed(2)} added (₱${autoAppliedToBill.toFixed(2)} auto-deducted from active bill).`
-        : `₱${amount.toFixed(2)} added to Advance Balance (will auto-deduct on billing day).`,
-      'billing'
-    );
-    triggerOptionalCloudSync();
   };
 
   // Inquiries & Room Bookings Handlers
   const handleCreateInquiry = (
     data: Omit<RoomInquiryBooking, 'id' | 'createdAt'>
   ) => {
-    const newInq: RoomInquiryBooking = {
-      ...data,
-      id: `inq-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-    };
-    setInquiries((prev) => [newInq, ...prev]);
-    triggerOptionalCloudSync();
+    try {
+      const newInq: RoomInquiryBooking = {
+        ...data,
+        id: `inq-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      };
+      setInquiries((prev) => [newInq, ...prev]);
+      triggerFeedback(
+        `Inquiry Logged: ${data.prospectName}`,
+        `Target unit: ${data.roomName} • Move-in: ${data.targetMoveInDate}.`,
+        'success',
+        'View Inquiries',
+        () => setActiveTab('inquiries')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Inquiry Save Error',
+        String(err instanceof Error ? err.message : 'Unable to save inquiry.'),
+        'error'
+      );
+    }
   };
 
   const handleApproveBookingMoveIn = (inquiry: RoomInquiryBooking) => {
-    const nowIso = new Date().toISOString();
-    const targetRoom = rooms.find((r) => r.id === inquiry.roomId);
+    try {
+      const nowIso = new Date().toISOString();
+      const targetRoom = rooms.find((r) => r.id === inquiry.roomId);
 
-    if (targetRoom && targetRoom.status === 'occupied' && targetRoom.tenant) {
-      const entry: TenantHistoryEntry = {
-        id: `hist-${Date.now()}`,
-        roomId: targetRoom.id,
-        roomName: targetRoom.name,
-        tenantName: targetRoom.tenant.fullName,
-        phone: targetRoom.tenant.phone,
-        messengerUsername: targetRoom.tenant.messengerUsername,
-        moveInDate: targetRoom.tenant.moveInDate,
-        moveOutDate: nowIso.slice(0, 10),
-        reason: 'Replaced by New Booked Tenant',
-        finalMeterReading: targetRoom.lastMeterReading,
-        depositHeld: targetRoom.securityDeposit,
-        unpaidBalanceAtMoveOut: targetRoom.unpaidBalance,
-      };
-      setTenantHistory((prev) => [entry, ...prev]);
-    }
-
-    setRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== inquiry.roomId) return r;
-        const reqDep = r.securityDeposit || settings.defaultMonthlyRent;
-        const excessAdvance =
-          inquiry.reservationFee > reqDep
-            ? Math.round((inquiry.reservationFee - reqDep) * 100) / 100
-            : inquiry.reservationFee;
-
-        const moveInDay = clampDueDayOneToTen(
-          new Date(inquiry.targetMoveInDate).getDate() || 5
-        );
-
-        return {
-          ...r,
-          status: 'occupied',
-          securityDeposit: reqDep,
-          advanceRent:
-            Math.round(((r.advanceRent || 0) + excessAdvance) * 100) / 100,
-          tenant: {
-            id: `ten-${Date.now()}`,
-            fullName: inquiry.prospectName,
-            phone: inquiry.phone,
-            messengerUsername: inquiry.messengerUsername,
-            validIdVerified: true,
-            privacyConsentSigned: true,
-            moveInDate: inquiry.targetMoveInDate,
-            dueDayOfMonth: moveInDay,
-          },
-          updatedAt: nowIso,
+      if (targetRoom && targetRoom.status === 'occupied' && targetRoom.tenant) {
+        const entry: TenantHistoryEntry = {
+          id: `hist-${Date.now()}`,
+          roomId: targetRoom.id,
+          roomName: targetRoom.name,
+          tenantName: targetRoom.tenant.fullName,
+          phone: targetRoom.tenant.phone,
+          messengerUsername: targetRoom.tenant.messengerUsername,
+          moveInDate: targetRoom.tenant.moveInDate,
+          moveOutDate: nowIso.slice(0, 10),
+          reason: 'Replaced by New Booked Tenant',
+          finalMeterReading: targetRoom.lastMeterReading,
+          depositHeld: targetRoom.securityDeposit,
+          unpaidBalanceAtMoveOut: targetRoom.unpaidBalance,
         };
-      })
-    );
+        setTenantHistory((prev) => [entry, ...prev]);
+      }
 
-    setInquiries((prev) =>
-      prev.map((i) =>
-        i.id === inquiry.id ? { ...i, status: 'converted' } : i
-      )
-    );
-    setActiveTab('rooms');
-    triggerOptionalCloudSync();
+      setRooms((prev) =>
+        prev.map((r) => {
+          if (r.id !== inquiry.roomId) return r;
+          const reqDep = r.securityDeposit || settings.defaultMonthlyRent;
+          const excessAdvance =
+            inquiry.reservationFee > reqDep
+              ? Math.round((inquiry.reservationFee - reqDep) * 100) / 100
+              : inquiry.reservationFee;
+
+          const moveInDay = clampDueDayOneToTen(
+            new Date(inquiry.targetMoveInDate).getDate() || 5
+          );
+
+          return {
+            ...r,
+            status: 'occupied',
+            securityDeposit: reqDep,
+            advanceRent:
+              Math.round(((r.advanceRent || 0) + excessAdvance) * 100) / 100,
+            tenant: {
+              id: `ten-${Date.now()}`,
+              fullName: inquiry.prospectName,
+              phone: inquiry.phone,
+              messengerUsername: inquiry.messengerUsername,
+              validIdVerified: true,
+              privacyConsentSigned: true,
+              moveInDate: inquiry.targetMoveInDate,
+              dueDayOfMonth: moveInDay,
+            },
+            updatedAt: nowIso,
+          };
+        })
+      );
+
+      setInquiries((prev) =>
+        prev.map((i) =>
+          i.id === inquiry.id ? { ...i, status: 'converted' } : i
+        )
+      );
+      setActiveTab('rooms');
+      triggerFeedback(
+        `${inquiry.prospectName} Moved In!`,
+        `${inquiry.roomName} is now Occupied with verified ID & lease consent.`,
+        'success',
+        'Open Room Details',
+        () => setSelectedRoomDetailsId(inquiry.roomId)
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Move-In Approval Error',
+        String(err instanceof Error ? err.message : 'Unable to approve move-in.'),
+        'error'
+      );
+    }
   };
 
   const handleArchiveBill = (billId: string) => {
-    setBills((prev) =>
-      prev.map((b) =>
-        b.id === billId
-          ? { ...b, isArchived: true, archivedAt: new Date().toISOString() }
-          : b
-      )
-    );
-    triggerOptionalCloudSync();
+    try {
+      const targetBill = bills.find((b) => b.id === billId);
+      setBills((prev) =>
+        prev.map((b) =>
+          b.id === billId
+            ? { ...b, isArchived: true, archivedAt: new Date().toISOString() }
+            : b
+        )
+      );
+      triggerFeedback(
+        `Receipt #${targetBill?.receiptNo || ''} Archived`,
+        'Moved to Archive & History Center.',
+        'info',
+        'View Archive',
+        () => setActiveTab('archive')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Bill Archive Error',
+        String(err instanceof Error ? err.message : 'Unable to archive receipt.'),
+        'error'
+      );
+    }
   };
 
   const handleRestoreBill = (billId: string) => {
-    setBills((prev) =>
-      prev.map((b) =>
-        b.id === billId
-          ? { ...b, isArchived: false, archivedAt: undefined }
-          : b
-      )
-    );
-    triggerOptionalCloudSync();
+    try {
+      const targetBill = bills.find((b) => b.id === billId);
+      setBills((prev) =>
+        prev.map((b) =>
+          b.id === billId
+            ? { ...b, isArchived: false, archivedAt: undefined }
+            : b
+        )
+      );
+      triggerFeedback(
+        `Receipt #${targetBill?.receiptNo || ''} Restored`,
+        'Restored to active Payment History.',
+        'success',
+        'View Payments',
+        () => setActiveTab('payments')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Bill Restore Error',
+        String(err instanceof Error ? err.message : 'Unable to restore receipt.'),
+        'error'
+      );
+    }
   };
 
   const handleReloadAllData = () => {
-    setRooms(loadRooms());
-    setBills(loadBills());
-    setInquiries(loadInquiries());
-    setTenantHistory(loadTenantHistory());
-    setSettings(loadSettings());
+    try {
+      setRooms(loadRooms());
+      setBills(loadBills());
+      setInquiries(loadInquiries());
+      setTenantHistory(loadTenantHistory());
+      setSettings(loadSettings());
+      triggerFeedback(
+        'Database Synchronized',
+        'All rooms, sub-meter readings, and receipts have been refreshed.',
+        'success',
+        'Go to Dashboard',
+        () => setActiveTab('dashboard')
+      );
+    } catch (err) {
+      triggerFeedback(
+        'Database Reload Error',
+        String(err instanceof Error ? err.message : 'Failed to reload database snapshot.'),
+        'error'
+      );
+    }
   };
 
   // Whenever global Electric Rate is updated in Settings, reflect it across active unpaid bills
   const handleUpdateSettings = (nextSettings: AppSettings) => {
-    const rateChanged =
-      nextSettings.defaultElectricRate !== settings.defaultElectricRate;
-    setSettings(nextSettings);
+    try {
+      const rateChanged =
+        nextSettings.defaultElectricRate !== settings.defaultElectricRate;
+      setSettings(nextSettings);
 
-    if (rateChanged) {
-      const newRate = nextSettings.defaultElectricRate;
-      setBills((prev) =>
-        prev.map((b) => {
-          if (b.status === 'paid' || b.isArchived) return b;
-          const newElecTotal =
-            Math.round(b.consumptionKwh * newRate * 100) / 100;
-          const newTotalDue = Math.max(
-            0,
-            Math.round(
-              (b.baseRent +
-                newElecTotal +
-                b.previousBalanceCarryOver -
-                b.depositApplied) *
-                100
-            ) / 100
-          );
-          const newRemaining = Math.max(
-            0,
-            Math.round((newTotalDue - b.amountPaid) * 100) / 100
-          );
-          return {
-            ...b,
-            electricRate: newRate,
-            electricTotal: newElecTotal,
-            totalAmountDue: newTotalDue,
-            remainingBalance: newRemaining,
-          };
-        })
+      if (rateChanged) {
+        const newRate = nextSettings.defaultElectricRate;
+        setBills((prev) =>
+          prev.map((b) => {
+            if (b.status === 'paid' || b.isArchived) return b;
+            const newElecTotal =
+              Math.round(b.consumptionKwh * newRate * 100) / 100;
+            const newTotalDue = Math.max(
+              0,
+              Math.round(
+                (b.baseRent +
+                  newElecTotal +
+                  b.previousBalanceCarryOver -
+                  b.depositApplied) *
+                  100
+              ) / 100
+            );
+            const newRemaining = Math.max(
+              0,
+              Math.round((newTotalDue - b.amountPaid) * 100) / 100
+            );
+            return {
+              ...b,
+              electricRate: newRate,
+              electricTotal: newElecTotal,
+              totalAmountDue: newTotalDue,
+              remainingBalance: newRemaining,
+            };
+          })
+        );
+      }
+      triggerFeedback(
+        'System Settings Saved',
+        `Electric Rate: ₱${nextSettings.defaultElectricRate.toFixed(2)}/kWh • Default Rent: ₱${nextSettings.defaultMonthlyRent.toLocaleString('en-PH')}.`,
+        'success',
+        'Back to Dashboard',
+        () => setActiveTab('dashboard')
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Settings Update Error',
+        String(err instanceof Error ? err.message : 'Unable to save settings.'),
+        'error'
       );
     }
-    triggerOptionalCloudSync();
   };
 
   const handleOpenScanForRoom = (room?: Room) => {
@@ -986,6 +1390,11 @@ export function App() {
     if (activeRooms.length === 0) {
       setEditingRoom(null);
       setIsRoomModalOpen(true);
+      triggerFeedback(
+        'Add Your First Room',
+        'Create a room with an initial sub-meter reading before scanning.',
+        'info'
+      );
       return;
     }
     setScannerTargetRoom(room || activeRooms[0]);
@@ -1073,6 +1482,7 @@ export function App() {
               setAdvanceModalRoomId(room.id)
             }
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
+            onOpenWalkthrough={() => setIsWalkthroughOpen(true)}
           />
         )}
 
@@ -1267,6 +1677,24 @@ export function App() {
         security={settings.security}
         onClose={() => setRoomPendingPinDelete(null)}
         onAuthorized={handleConfirmDeleteRoomAfterPin}
+      />
+
+      {/* Interactive Easy Go-Through Guide Modal */}
+      <EasyWalkthroughModal
+        isOpen={isWalkthroughOpen}
+        onClose={() => setIsWalkthroughOpen(false)}
+        onOpenAddRoom={() => {
+          setEditingRoom(null);
+          setIsRoomModalOpen(true);
+        }}
+        onOpenScanner={() => handleOpenScanForRoom()}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+      />
+
+      {/* Global Interactive Feedback Toast Bar with Easy Go-Through Quick Action */}
+      <FeedbackToastBar
+        notification={feedbackToast}
+        onDismiss={() => setFeedbackToast(null)}
       />
     </div>
   );
