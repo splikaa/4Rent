@@ -1,8 +1,8 @@
 {
-  "name": "4Rent Apartment & Sub-Meter System",
+  "name": "4Rent Management System",
   "short_name": "4Rent",
-  "description": "Desktop and Mobile Apartment Rental Management System with OCR Sub-Meter Reader, Printable Receipts, and Messenger Integration by splikaa",
-  "start_url": "./",
+  "description": "4Rent Management System (v1.0.0) — Desktop & Mobile Property, Tenant Privacy, and Sub-Meter Management System by splikaa",
+  "start_url": "./?app=1",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0B0E14",
