@@ -7,24 +7,28 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_RESULT_CODE = 1001;
-    private static final String VIRTUAL_HOST = "appassets.4rent.local";
+    private static final String APP_HOST = "splikaa.github.io";
+    private static final String LOCAL_HOST = "appassets.androidplatform.net";
+    private static final String START_URL = "https://splikaa.github.io/4Rent/?mobile=1";
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
@@ -62,34 +66,40 @@ public class MainActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri url = request.getUrl();
-                if (url != null && VIRTUAL_HOST.equalsIgnoreCase(url.getHost())) {
-                    String path = url.getPath();
-                    if (path == null || path.isEmpty() || "/".equals(path)) {
-                        path = "index.html";
-                    } else {
-                        if (path.startsWith("/4Rent/")) {
-                            path = path.substring("/4Rent/".length());
-                        } else if (path.startsWith("/")) {
-                            path = path.substring(1);
-                        }
-                        if (path.isEmpty()) {
+                if (url != null) {
+                    String host = url.getHost();
+                    if (APP_HOST.equalsIgnoreCase(host) || LOCAL_HOST.equalsIgnoreCase(host)) {
+                        String path = url.getPath();
+                        if (path == null || path.isEmpty() || "/".equals(path) || "/4Rent".equals(path) || "/4Rent/".equals(path)) {
                             path = "index.html";
+                        } else {
+                            if (path.startsWith("/4Rent/")) {
+                                path = path.substring("/4Rent/".length());
+                            } else if (path.startsWith("/")) {
+                                path = path.substring(1);
+                            }
+                            if (path.isEmpty()) {
+                                path = "index.html";
+                            }
                         }
-                    }
 
-                    try {
-                        InputStream is = getAssets().open("www/" + path);
-                        String mime = guessMimeType(path);
-                        WebResourceResponse response = new WebResourceResponse(mime, "UTF-8", is);
-                        Map<String, String> headers = new HashMap<String, String>();
-                        headers.put("Access-Control-Allow-Origin", "*");
-                        response.setResponseHeaders(headers);
-                        return response;
-                    } catch (Exception e) {
+                        if ("sw.js".equalsIgnoreCase(path) || "registerSW.js".equalsIgnoreCase(path)) {
+                            InputStream emptyJs = new ByteArrayInputStream("// native APK mode".getBytes(StandardCharsets.UTF_8));
+                            return createCorsResponse("application/javascript", emptyJs);
+                        }
+
                         try {
-                            InputStream fallback = getAssets().open("www/index.html");
-                            return new WebResourceResponse("text/html", "UTF-8", fallback);
-                        } catch (Exception ignored) {
+                            InputStream is = getAssets().open("www/" + path);
+                            String mime = guessMimeType(path);
+                            return createCorsResponse(mime, is);
+                        } catch (Exception e) {
+                            if (!path.contains(".")) {
+                                try {
+                                    InputStream fallback = getAssets().open("www/index.html");
+                                    return createCorsResponse("text/html", fallback);
+                                } catch (Exception ignored) {
+                                }
+                            }
                         }
                     }
                 }
@@ -97,11 +107,18 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request != null && request.isForMainFrame()) {
+                    loadEmbeddedHtmlFallback(view);
+                }
+            }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 if (uri == null) return false;
                 String host = uri.getHost();
-                if (VIRTUAL_HOST.equalsIgnoreCase(host)) {
+                if (APP_HOST.equalsIgnoreCase(host) || LOCAL_HOST.equalsIgnoreCase(host)) {
                     return false;
                 }
                 String scheme = uri.getScheme();
@@ -147,7 +164,30 @@ public class MainActivity extends Activity {
         });
 
         setContentView(webView);
-        webView.loadUrl("https://" + VIRTUAL_HOST + "/index.html?mobile=1");
+        webView.loadUrl(START_URL);
+    }
+
+    private void loadEmbeddedHtmlFallback(WebView view) {
+        try {
+            InputStream is = getAssets().open("www/index.html");
+            byte[] buffer = new byte[is.available()];
+            is.read(buffer);
+            is.close();
+            String html = new String(buffer, StandardCharsets.UTF_8);
+            view.loadDataWithBaseURL("https://" + LOCAL_HOST + "/4Rent/", html, "text/html", "UTF-8", null);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private WebResourceResponse createCorsResponse(String mime, InputStream is) {
+        WebResourceResponse response = new WebResourceResponse(mime, "UTF-8", is);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            Map<String, String> headers = new HashMap<String, String>();
+            headers.put("Access-Control-Allow-Origin", "*");
+            headers.put("Cache-Control", "no-cache");
+            response.setResponseHeaders(headers);
+        }
+        return response;
     }
 
     private String guessMimeType(String path) {

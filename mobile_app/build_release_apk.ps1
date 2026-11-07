@@ -36,11 +36,10 @@ Remove-Item "$workDir\assets\www\*.apk" -Force -ErrorAction SilentlyContinue
 & $aapt2 compile --dir "$srcDir\res" -o "$workDir\compiled_res.zip"
 if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
 
-# 3. Link resources, AndroidManifest.xml, and assets/www into unaligned APK + R.java
+# 3. Link resources and AndroidManifest.xml into unaligned APK + R.java
 & $aapt2 link -o "$workDir\unaligned.apk" `
   -I "$androidJar" `
   --manifest "$srcDir\AndroidManifest.xml" `
-  -A "$workDir\assets" `
   --java "$workDir\gen" `
   "$workDir\compiled_res.zip" `
   --auto-add-overlay
@@ -65,11 +64,18 @@ $classFiles = Get-ChildItem -Path "$workDir\classes" -Recurse -Filter "*.class" 
   $classFiles
 if ($LASTEXITCODE -ne 0) { throw "D8 dexing failed" }
 
-# 6. Inject classes.dex into unaligned.apk
+# 6. Inject classes.dex AND POSIX forward-slash assets/www/* into unaligned.apk
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open("$workDir\unaligned.apk", [System.IO.Compression.ZipArchiveMode]::Update)
 [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$workDir\dex\classes.dex", "classes.dex", [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+
+$wwwRoot = (Resolve-Path "$workDir\assets\www").Path
+Get-ChildItem -Path $wwwRoot -Recurse -File | ForEach-Object {
+  $rel = $_.FullName.Substring($wwwRoot.Length).TrimStart('\', '/').Replace('\', '/')
+  $entryName = "assets/www/$rel"
+  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+}
 $zip.Dispose()
 
 # 7. Align APK on 4-byte boundaries using zipalign
@@ -107,9 +113,12 @@ $finalApk = "$outDir\app-release.apk"
   "$workDir\aligned.apk"
 if ($LASTEXITCODE -ne 0) { throw "apksigner failed" }
 
-# 10. Copy to project root and public/ for 1-click download
+# 10. Copy to project root, public/, and dist/ for 1-click download
 Copy-Item "$finalApk" "$rootDir\4Rent-v1.0.0-release.apk" -Force
 Copy-Item "$finalApk" "$rootDir\public\4Rent-v1.0.0-release.apk" -Force
+if (Test-Path "$rootDir\dist") {
+  Copy-Item "$finalApk" "$rootDir\dist\4Rent-v1.0.0-release.apk" -Force
+}
 
 $sizeMB = [math]::Round((Get-Item $finalApk).Length / 1MB, 2)
 Write-Host "Built build\app\outputs\flutter-apk\app-release.apk ($sizeMB MB)." -ForegroundColor Green
