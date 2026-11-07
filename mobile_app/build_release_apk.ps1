@@ -70,7 +70,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open("$workDir\unaligned.apk", [System.IO.Compression.ZipArchiveMode]::Update)
 [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$workDir\dex\classes.dex", "classes.dex", [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
 
-$wwwRoot = (Resolve-Path "$workDir\assets\www").Path
+$wwwRoot = (Get-Item "$workDir\assets\www").FullName
 Get-ChildItem -Path $wwwRoot -Recurse -File | ForEach-Object {
   $rel = $_.FullName.Substring($wwwRoot.Length).TrimStart('\', '/').Replace('\', '/')
   $entryName = "assets/www/$rel"
