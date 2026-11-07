@@ -114,8 +114,12 @@ export function loadSettings(): AppSettings {
 }
 
 export function saveSettings(settings: AppSettings): void {
-  localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
-  persistMasterIndexedDb();
+  const nextRaw = JSON.stringify(settings);
+  if (localStorage.getItem(STORAGE_KEYS.SETTINGS) !== nextRaw) {
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, nextRaw);
+    persistMasterIndexedDb();
+    broadcastLocalChange(STORAGE_KEYS.SETTINGS);
+  }
 }
 
 export function loadRooms(): Room[] {
@@ -156,8 +160,12 @@ export function saveRooms(rooms: Room[]): void {
       activeReceiptId: isVacant ? undefined : r.activeReceiptId,
     };
   });
-  localStorage.setItem(STORAGE_KEYS.ROOMS, JSON.stringify(sanitized));
-  persistMasterIndexedDb();
+  const nextRaw = JSON.stringify(sanitized);
+  if (localStorage.getItem(STORAGE_KEYS.ROOMS) !== nextRaw) {
+    localStorage.setItem(STORAGE_KEYS.ROOMS, nextRaw);
+    persistMasterIndexedDb();
+    broadcastLocalChange(STORAGE_KEYS.ROOMS);
+  }
 }
 
 export function loadBills(): BillRecord[] {
@@ -173,8 +181,12 @@ export function loadBills(): BillRecord[] {
 }
 
 export function saveBills(bills: BillRecord[]): void {
-  localStorage.setItem(STORAGE_KEYS.BILLS, JSON.stringify(bills));
-  persistMasterIndexedDb();
+  const nextRaw = JSON.stringify(bills);
+  if (localStorage.getItem(STORAGE_KEYS.BILLS) !== nextRaw) {
+    localStorage.setItem(STORAGE_KEYS.BILLS, nextRaw);
+    persistMasterIndexedDb();
+    broadcastLocalChange(STORAGE_KEYS.BILLS);
+  }
 }
 
 export function loadInquiries(): RoomInquiryBooking[] {
@@ -189,8 +201,12 @@ export function loadInquiries(): RoomInquiryBooking[] {
 }
 
 export function saveInquiries(inquiries: RoomInquiryBooking[]): void {
-  localStorage.setItem(STORAGE_KEYS.INQUIRIES, JSON.stringify(inquiries));
-  persistMasterIndexedDb();
+  const nextRaw = JSON.stringify(inquiries);
+  if (localStorage.getItem(STORAGE_KEYS.INQUIRIES) !== nextRaw) {
+    localStorage.setItem(STORAGE_KEYS.INQUIRIES, nextRaw);
+    persistMasterIndexedDb();
+    broadcastLocalChange(STORAGE_KEYS.INQUIRIES);
+  }
 }
 
 export function loadTenantHistory(): TenantHistoryEntry[] {
@@ -206,8 +222,12 @@ export function loadTenantHistory(): TenantHistoryEntry[] {
 }
 
 export function saveTenantHistory(history: TenantHistoryEntry[]): void {
-  localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
-  persistMasterIndexedDb();
+  const nextRaw = JSON.stringify(history);
+  if (localStorage.getItem(STORAGE_KEYS.HISTORY) !== nextRaw) {
+    localStorage.setItem(STORAGE_KEYS.HISTORY, nextRaw);
+    persistMasterIndexedDb();
+    broadcastLocalChange(STORAGE_KEYS.HISTORY);
+  }
 }
 
 export function loadAuditLogs(): SecurityAuditEntry[] {
@@ -272,4 +292,57 @@ export function importDatabaseSnapshot(snapshot: AppDatabaseSnapshot): void {
   if (snapshot.settings) {
     saveSettings(snapshot.settings);
   }
+}
+
+const SYNC_CHANNEL_NAME = '4rent_realtime_sync_channel';
+const WINDOW_INSTANCE_ID = Math.random().toString(36).slice(2, 10);
+
+function broadcastLocalChange(key: string): void {
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const ch = new BroadcastChannel(SYNC_CHANNEL_NAME);
+      ch.postMessage({
+        senderId: WINDOW_INSTANCE_ID,
+        key,
+        updatedAt: Date.now(),
+      });
+      ch.close();
+    }
+  } catch {
+    // ignore BroadcastChannel errors on older WebViews
+  }
+}
+
+export function subscribeToLocalCrossWindowSync(onSync: () => void): () => void {
+  let ch: BroadcastChannel | null = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      ch = new BroadcastChannel(SYNC_CHANNEL_NAME);
+      ch.onmessage = (event) => {
+        if (event.data && event.data.senderId !== WINDOW_INSTANCE_ID) {
+          onSync();
+        }
+      };
+    }
+  } catch {
+    // ignore
+  }
+
+  const handleStorageEvent = (e: StorageEvent) => {
+    if (
+      e.key &&
+      Object.values(STORAGE_KEYS).includes(e.key)
+    ) {
+      onSync();
+    }
+  };
+
+  window.addEventListener('storage', handleStorageEvent);
+
+  return () => {
+    if (ch) {
+      ch.close();
+    }
+    window.removeEventListener('storage', handleStorageEvent);
+  };
 }

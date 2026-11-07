@@ -661,7 +661,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   )}
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const mobileUrl = `${window.location.origin}${window.location.pathname}?mobile=1`;
+                    window.open(
+                      mobileUrl,
+                      '4RentMobileApp',
+                      'width=412,height=860,menubar=no,toolbar=no,location=no,status=no'
+                    );
+                  }}
+                  className="py-3 px-3.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer btn-fluid"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Open Mobile App (Live Sync)</span>
+                </button>
                 <button
                   type="button"
                   onClick={handlePushCloud}

@@ -9,10 +9,8 @@ import {
   EyeOff,
   Loader2,
   MessageCircle,
-  Moon,
   Printer,
   ShieldCheck,
-  Sun,
   X,
   Zap,
 } from 'lucide-react';
@@ -38,7 +36,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   onClose,
 }) => {
   const receiptRef = useRef<HTMLDivElement | null>(null);
-  const [receiptTheme, setReceiptTheme] = useState<'dark' | 'light'>('dark');
   const [maskContactsOnReceipt, setMaskContactsOnReceipt] = useState<boolean>(
     () => settings.maskReceiptContacts ?? true
   );
@@ -78,7 +75,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       const dataUrl = await toPng(receiptRef.current, {
         cacheBust: true,
         pixelRatio: 2.5,
-        backgroundColor: receiptTheme === 'dark' ? '#0D121B' : '#FFFFFF',
+        backgroundColor: '#FFFFFF',
       });
       return dataUrl;
     } catch {
@@ -96,12 +93,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       return;
     }
     const link = document.createElement('a');
-    link.download = `4Rent-Receipt-${bill.roomName.replace(/\s+/g, '-')}-${
-      bill.receiptNo
-    }.png`;
+    link.download = `4Rent-Official-Receipt-${bill.roomName.replace(
+      /\s+/g,
+      '-'
+    )}-${bill.receiptNo}.png`;
     link.href = dataUrl;
     link.click();
-    setShareFeedback('Official Receipt PNG downloaded!');
+    setShareFeedback('Official White-Paper Receipt PNG downloaded!');
   };
 
   const handleCopySummary = async () => {
@@ -164,7 +162,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
     if (dataUrl) {
       const link = document.createElement('a');
-      link.download = `4Rent-Receipt-${bill.receiptNo}.png`;
+      link.download = `4Rent-Official-Receipt-${bill.receiptNo}.png`;
       link.href = dataUrl;
       link.click();
     }
@@ -175,20 +173,33 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
     window.open(messengerTarget, '_blank', 'noopener,noreferrer');
     setShareFeedback(
-      'Receipt PNG downloaded & Bill Summary copied! Paste (Ctrl+V / Cmd+V) and attach the image in Messenger.'
+      'Official Receipt PNG downloaded & Summary copied! Paste and attach in Messenger.'
     );
   };
 
-  const isDark = receiptTheme === 'dark';
+  const formattedIssueDate = new Date(bill.createdAt).toLocaleDateString(
+    'en-PH',
+    {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }
+  );
+
+  const formattedDueDate = new Date(bill.dueDate).toLocaleDateString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-xl rounded-3xl bg-[#131924] border border-[#263147] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[95vh] animate-modal-pop">
-        {/* Top Action Header */}
-        <div className="no-print flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3.5 bg-[#18202F] border-b border-[#263147] shrink-0">
-          <div className="flex items-center gap-2">
+    <div className="receipt-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
+      <div className="receipt-print-shell w-full max-w-2xl rounded-3xl bg-[#131924] border border-[#263147] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[95vh] animate-modal-pop">
+        {/* Top Action Header (Hidden during print) */}
+        <div className="no-print flex flex-wrap items-center justify-between gap-2 px-5 py-3.5 bg-[#18202F] border-b border-[#263147] shrink-0">
+          <div className="flex items-center gap-2.5">
             <span className="text-sm sm:text-base font-extrabold text-white">
-              Official Printable Receipt
+              Formal Official Statement & Receipt
             </span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-mono-num font-bold">
               {bill.receiptNo}
@@ -199,38 +210,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <button
               type="button"
               onClick={() => setMaskContactsOnReceipt((prev) => !prev)}
-              className="px-2.5 py-1.5 rounded-xl bg-[#0F141E] hover:bg-[#1E2738] border border-[#28334A] text-xs font-semibold text-emerald-300 flex items-center gap-1.5 transition cursor-pointer"
+              className="px-3 py-1.5 rounded-xl bg-[#0F141E] hover:bg-[#1E2738] border border-[#28334A] text-xs font-semibold text-emerald-300 flex items-center gap-1.5 transition cursor-pointer"
               title="Toggle Tenant Contact Privacy Masking on Receipt"
             >
               {maskContactsOnReceipt ? (
                 <>
                   <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden sm:inline">Privacy Redacted</span>
+                  <span>Contact Redacted</span>
                 </>
               ) : (
                 <>
                   <Eye className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden sm:inline">Full Contact</span>
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                setReceiptTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
-              }
-              className="px-2.5 py-1.5 rounded-xl bg-[#0F141E] hover:bg-[#1E2738] border border-[#28334A] text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
-            >
-              {isDark ? (
-                <>
-                  <Sun className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Paper White</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="w-3.5 h-3.5 text-blue-400" />
-                  <span>4Rent Dark</span>
+                  <span>Full Contact</span>
                 </>
               )}
             </button>
@@ -246,7 +237,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         </div>
 
         {shareFeedback && (
-          <div className="no-print mx-4 mt-2.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 flex items-center justify-between shrink-0">
+          <div className="no-print mx-5 mt-2.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 flex items-center justify-between shrink-0">
             <span>{shareFeedback}</span>
             <button
               type="button"
@@ -258,157 +249,119 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         )}
 
-        {/* Scrollable Receipt Body • Organized & Perfectly Proportioned */}
-        <div className="p-3 sm:p-5 overflow-y-auto flex-1 flex justify-center">
+        {/* Scrollable Receipt Body — Strictly Formal White Bond Paper (#FFFFFF) */}
+        <div className="p-3 sm:p-5 overflow-y-auto flex-1 flex justify-center bg-[#0E131D] print:bg-white print:p-0">
           <div
             id="printable-receipt-area"
             ref={receiptRef}
-            className={`w-full rounded-2xl p-4 sm:p-5 border shadow-xl transition my-auto ${
-              isDark
-                ? 'bg-[#0D121B] text-slate-100 border-[#253148]'
-                : 'bg-white text-slate-900 border-slate-300'
-            }`}
+            className="w-full bg-white text-slate-900 rounded-xl p-5 sm:p-7 border-2 border-slate-800 shadow-2xl my-auto"
           >
-            {/* 1. Brand & Status Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-dashed border-amber-500/40">
-              <div className="flex items-center gap-2.5">
+            {/* 1. FORMAL DOCUMENT HEADER */}
+            <div className="flex items-start justify-between gap-4 pb-3.5 border-b-2 border-slate-900">
+              <div className="flex items-center gap-3">
                 <BrandLogo size="sm" />
                 <div>
-                  <h2
-                    className={`text-base sm:text-lg font-black tracking-tight leading-tight ${
-                      isDark ? 'text-white' : 'text-slate-900'
-                    }`}
-                  >
+                  <h2 className="text-lg sm:text-xl font-black tracking-tight text-slate-950 uppercase leading-tight">
                     {settings.apartmentName || '4Rent Management System'}
                   </h2>
-                  <p
-                    className={`text-[11px] font-semibold ${
-                      isDark ? 'text-amber-400' : 'text-amber-700'
-                    }`}
-                  >
-                    Official Room & Dual Sub-Meter Statement
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-slate-600 mt-0.5">
+                    Official Statement of Account & Sub-Meter Billing Receipt
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Property Admin: {settings.landlordName || 'Landlord'} • Contact:{' '}
+                    {settings.landlordPhone || 'On File'}
                   </p>
                 </div>
               </div>
 
-              <div className="text-right">
-                <span
-                  className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-extrabold uppercase tracking-wider ${
-                    bill.status === 'paid'
-                      ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/40'
-                      : bill.status === 'partial'
-                      ? 'bg-amber-500/20 text-amber-500 border border-amber-500/40'
-                      : 'bg-red-500/20 text-red-500 border border-red-500/40'
-                  }`}
-                >
-                  {bill.status}
-                </span>
+              <div className="text-right shrink-0">
                 <div
-                  className={`text-[10px] font-mono-num mt-0.5 ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
+                  className={`inline-block px-3 py-1 rounded border-2 text-xs font-black uppercase tracking-wider ${
+                    bill.status === 'paid'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-700'
+                      : bill.status === 'partial'
+                      ? 'bg-amber-50 text-amber-800 border-amber-700'
+                      : 'bg-red-50 text-red-800 border-red-700'
                   }`}
                 >
-                  Receipt #{bill.receiptNo}
+                  {bill.status === 'paid'
+                    ? 'OFFICIAL PAID'
+                    : bill.status === 'partial'
+                    ? 'PARTIAL PAYMENT'
+                    : 'STATEMENT DUE'}
+                </div>
+                <div className="text-[11px] font-mono-num font-bold text-slate-800 mt-1">
+                  OR No: {bill.receiptNo}
+                </div>
+                <div className="text-[10px] font-mono-num text-slate-500">
+                  Issued: {formattedIssueDate}
                 </div>
               </div>
             </div>
 
-            {/* 2. Room, Tenant & 1st-10th Payment Schedule Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-2.5 text-xs border-b border-dashed border-slate-500/30">
-              <div>
-                <span
-                  className={`block text-[10px] uppercase ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  Apartment Unit
-                </span>
-                <strong className="text-xs sm:text-sm font-extrabold">
-                  {bill.roomName}
-                </strong>
-              </div>
-              <div>
-                <span
-                  className={`block text-[10px] uppercase ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  Tenant Name
-                </span>
-                <strong className="text-xs sm:text-sm font-bold truncate block">
-                  {bill.tenantName}
-                </strong>
-                {bill.tenantPhone && (
-                  <span className="text-[10px] font-mono-num opacity-75 block">
-                    {maskPhoneNumber(bill.tenantPhone, maskContactsOnReceipt)}
+            {/* 2. TENANT & UNIT PARTICULARS TABLE */}
+            <div className="mt-3.5 border border-slate-400 rounded-lg overflow-hidden text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-300 bg-slate-50">
+                <div className="p-2.5">
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                    Unit / Room No.
                   </span>
-                )}
-              </div>
-              <div>
-                <span
-                  className={`block text-[10px] uppercase ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  Billing Period
-                </span>
-                <span className="font-semibold">{bill.billingPeriod}</span>
-              </div>
-              <div className="sm:text-right">
-                <span
-                  className={`block text-[10px] uppercase ${
-                    isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  Next Due (Day 1 to 10)
-                </span>
-                <span className="font-bold font-mono-num text-amber-500">
-                  {new Date(bill.dueDate).toLocaleDateString('en-PH', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
-                </span>
+                  <strong className="text-sm font-black text-slate-950">
+                    {bill.roomName}
+                  </strong>
+                </div>
+                <div className="p-2.5">
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                    Registered Tenant
+                  </span>
+                  <strong className="text-xs font-extrabold text-slate-900 block truncate">
+                    {bill.tenantName}
+                  </strong>
+                  {bill.tenantPhone && (
+                    <span className="text-[10px] font-mono-num text-slate-600 block">
+                      {maskPhoneNumber(bill.tenantPhone, maskContactsOnReceipt)}
+                    </span>
+                  )}
+                </div>
+                <div className="p-2.5">
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                    Billing Cycle
+                  </span>
+                  <strong className="text-xs font-extrabold text-slate-900">
+                    {bill.billingPeriod}
+                  </strong>
+                </div>
+                <div className="p-2.5 sm:text-right">
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                    Due Date (1st–10th)
+                  </span>
+                  <strong className="text-xs font-black font-mono-num text-slate-950">
+                    {formattedDueDate}
+                  </strong>
+                </div>
               </div>
             </div>
 
-            {/* 3. DUAL SUB-METER VERIFICATION PROOF (2 Sub-Meters Side-by-Side) */}
-            <div
-              className={`my-3 rounded-xl p-3 border ${
-                isDark
-                  ? 'bg-[#141C2B] border-amber-500/35'
-                  : 'bg-amber-50/75 border-amber-300'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span
-                  className={`text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1 ${
-                    isDark ? 'text-amber-400' : 'text-amber-800'
-                  }`}
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                  Dual Electric Sub-Meter Proof & Difference
+            {/* 3. DUAL ELECTRIC SUB-METER COMPUTATION & PHOTO PROOFS */}
+            <div className="mt-3.5 border border-slate-400 rounded-lg p-3 bg-slate-50/60">
+              <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-300">
+                <span className="text-[11px] font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-600" />
+                  Section I • Electric Sub-Meter Reading & Photo Verification
                 </span>
-                <span className="text-[11px] font-mono-num font-bold">
-                  Rate: {formatPeso(bill.electricRate)} / kWh
+                <span className="text-[11px] font-mono-num font-bold text-slate-800">
+                  Approved Rate: {formatPeso(bill.electricRate)} / kWh
                 </span>
               </div>
 
-              {/* 2 Sub-Meter Boxes Side-by-Side */}
-              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+              <div className="grid grid-cols-2 gap-3 mb-2.5">
                 {/* Sub-Meter #1: Previous Reading Proof */}
-                <div
-                  className={`rounded-lg p-2 border ${
-                    isDark
-                      ? 'bg-[#0C111A] border-[#25324B]'
-                      : 'bg-white border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[10px] mb-1">
-                    <span className="font-bold uppercase opacity-75">
-                      1. Previous Meter
+                <div className="rounded border border-slate-300 bg-white p-2">
+                  <div className="flex items-center justify-between text-[10px] mb-1 pb-1 border-b border-slate-200">
+                    <span className="font-bold uppercase text-slate-600">
+                      1. Previous Reading
                     </span>
-                    <span className="font-mono-num font-extrabold text-xs">
+                    <span className="font-mono-num font-black text-xs text-slate-900">
                       {bill.prevReading.toFixed(1)} kWh
                     </span>
                   </div>
@@ -416,32 +369,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <img
                       src={prevMeterProofImg}
                       alt="Previous Sub-Meter Proof"
-                      className="w-full h-12 object-contain rounded bg-white border border-slate-400/30"
+                      className="w-full h-14 object-contain rounded bg-slate-100 border border-slate-200"
                     />
                   )}
                 </div>
 
                 {/* Sub-Meter #2: Current Reading Proof */}
-                <div
-                  className={`rounded-lg p-2 border ${
-                    isDark
-                      ? 'bg-[#0C111A] border-amber-500/50'
-                      : 'bg-white border-amber-500'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[10px] mb-1">
-                    <span
-                      className={`font-bold uppercase ${
-                        isDark ? 'text-amber-400' : 'text-amber-700'
-                      }`}
-                    >
-                      2. Current Meter
+                <div className="rounded border border-slate-400 bg-white p-2">
+                  <div className="flex items-center justify-between text-[10px] mb-1 pb-1 border-b border-slate-200">
+                    <span className="font-bold uppercase text-slate-800">
+                      2. Current Reading
                     </span>
-                    <span
-                      className={`font-mono-num font-extrabold text-xs ${
-                        isDark ? 'text-amber-400' : 'text-amber-700'
-                      }`}
-                    >
+                    <span className="font-mono-num font-black text-xs text-slate-950">
                       {bill.currReading.toFixed(1)} kWh
                     </span>
                   </div>
@@ -449,143 +388,157 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <img
                       src={currMeterProofImg}
                       alt="Current Sub-Meter Proof"
-                      className="w-full h-12 object-contain rounded bg-white border border-amber-500/40"
+                      className="w-full h-14 object-contain rounded bg-slate-100 border border-slate-200"
                     />
                   )}
                 </div>
               </div>
 
-              {/* Difference & Total Computation Bar */}
-              <div className="pt-2 border-t border-slate-500/25 flex flex-wrap items-center justify-between gap-1 text-xs">
-                <span className="font-medium">
-                  Difference:{' '}
-                  <strong className="font-mono-num">
-                    {bill.currReading.toFixed(1)} -{' '}
-                    {bill.prevReading.toFixed(1)} ={' '}
+              <div className="pt-2 border-t border-slate-300 flex flex-wrap items-center justify-between gap-1 text-xs text-slate-800">
+                <span>
+                  Consumption Computation:{' '}
+                  <strong className="font-mono-num text-slate-950">
+                    {bill.currReading.toFixed(1)} kWh −{' '}
+                    {bill.prevReading.toFixed(1)} kWh ={' '}
                     {bill.consumptionKwh.toFixed(1)} kWh
                   </strong>{' '}
-                  × {formatPeso(bill.electricRate)}
+                  × {formatPeso(bill.electricRate)}/kWh
                 </span>
-                <span
-                  className={`font-mono-num text-sm font-black ${
-                    isDark ? 'text-amber-400' : 'text-amber-800'
-                  }`}
-                >
+                <span className="font-mono-num text-sm font-black text-slate-950">
                   = {formatPeso(bill.electricTotal)}
                 </span>
               </div>
             </div>
 
-            {/* 4. Itemized Financial Summary */}
-            <div className="space-y-1.5 text-xs pb-2.5 border-b border-dashed border-slate-500/30">
-              <div className="flex justify-between">
-                <span>Monthly Apartment Base Rent</span>
-                <span className="font-mono-num font-bold">
-                  {formatPeso(bill.baseRent)}
-                </span>
+            {/* 4. ITEMIZED STATEMENT OF CHARGES TABLE */}
+            <div className="mt-3.5 border border-slate-400 rounded-lg overflow-hidden">
+              <div className="bg-slate-100 px-3 py-1.5 border-b border-slate-300 flex justify-between text-[10px] font-black uppercase tracking-wider text-slate-700">
+                <span>Section II • Particular Description of Charges</span>
+                <span>Amount (PHP)</span>
               </div>
-              <div className="flex justify-between">
-                <span>
-                  Electric Sub-Meter Bill ({bill.consumptionKwh.toFixed(1)} kWh)
-                </span>
-                <span className="font-mono-num font-bold">
-                  {formatPeso(bill.electricTotal)}
-                </span>
+              <div className="divide-y divide-slate-200 text-xs">
+                <div className="px-3 py-2 flex justify-between text-slate-800">
+                  <span>1. Monthly Apartment Unit Base Rent</span>
+                  <span className="font-mono-num font-bold text-slate-950">
+                    {formatPeso(bill.baseRent)}
+                  </span>
+                </div>
+                <div className="px-3 py-2 flex justify-between text-slate-800">
+                  <span>
+                    2. Electric Sub-Meter Consumption ({bill.consumptionKwh.toFixed(1)}{' '}
+                    kWh @ {formatPeso(bill.electricRate)}/kWh)
+                  </span>
+                  <span className="font-mono-num font-bold text-slate-950">
+                    {formatPeso(bill.electricTotal)}
+                  </span>
+                </div>
+                {bill.previousBalanceCarryOver > 0 && (
+                  <div className="px-3 py-2 flex justify-between text-red-700 font-semibold">
+                    <span>3. Previous Unpaid Balance (Carried Over)</span>
+                    <span className="font-mono-num">
+                      {formatPeso(bill.previousBalanceCarryOver)}
+                    </span>
+                  </div>
+                )}
+                {bill.depositApplied > 0 && (
+                  <div className="px-3 py-2 flex justify-between text-emerald-700 font-semibold bg-emerald-50/50">
+                    <span>
+                      Less: Automatic Advance Payment Balance Applied
+                    </span>
+                    <span className="font-mono-num">
+                      −{formatPeso(bill.depositApplied)}
+                    </span>
+                  </div>
+                )}
+                {bill.securityDepositRequired > 0 && (
+                  <div className="px-3 py-1.5 flex justify-between text-[11px] text-slate-500 bg-slate-50/70">
+                    <span className="inline-flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      Security Deposit Held on File (Non-Deductible Reference)
+                    </span>
+                    <span className="font-mono-num font-semibold">
+                      {formatPeso(bill.securityDepositRequired)}
+                    </span>
+                  </div>
+                )}
               </div>
-              {bill.securityDepositRequired > 0 && (
-                <div className="flex justify-between opacity-80">
-                  <span className="inline-flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                    Required Room Security Deposit (On File)
+
+              {/* 5. GRAND TOTAL & PAYMENT SETTLEMENT SUMMARY */}
+              <div className="bg-slate-100 border-t-2 border-slate-900 px-3 py-2.5 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs sm:text-sm font-black uppercase text-slate-950">
+                    Total Amount Due
                   </span>
-                  <span className="font-mono-num font-semibold">
-                    {formatPeso(bill.securityDepositRequired)}
-                  </span>
-                </div>
-              )}
-              {bill.previousBalanceCarryOver > 0 && (
-                <div className="flex justify-between text-red-400 font-semibold">
-                  <span>Previous Unpaid Balance (Carry-Over)</span>
-                  <span className="font-mono-num">
-                    {formatPeso(bill.previousBalanceCarryOver)}
+                  <span className="text-lg sm:text-xl font-black font-mono-num text-slate-950">
+                    {formatPeso(bill.totalAmountDue)}
                   </span>
                 </div>
-              )}
-              {bill.depositApplied > 0 && (
-                <div className="flex justify-between text-emerald-400 font-semibold">
-                  <span>Less Advance / Deposit Credit Applied</span>
-                  <span className="font-mono-num">
-                    -{formatPeso(bill.depositApplied)}
+                <div className="flex justify-between text-xs text-slate-700">
+                  <span>Amount Paid / Tendered</span>
+                  <span className="font-mono-num font-bold text-emerald-700">
+                    {formatPeso(bill.amountPaid)}
                   </span>
                 </div>
-              )}
+                <div className="flex justify-between text-xs font-extrabold text-slate-900">
+                  <span>Remaining Balance Due</span>
+                  <span
+                    className={`font-mono-num ${
+                      bill.remainingBalance > 0
+                        ? 'text-red-700'
+                        : 'text-emerald-700'
+                    }`}
+                  >
+                    {formatPeso(bill.remainingBalance)}
+                  </span>
+                </div>
+                {bill.overpaymentToAdvance > 0 && (
+                  <div className="flex justify-between text-xs font-bold text-emerald-700 pt-0.5">
+                    <span>
+                      Excess Payment Credited to Room Advance Balance
+                    </span>
+                    <span className="font-mono-num">
+                      +{formatPeso(bill.overpaymentToAdvance)}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* 5. Grand Total, Amount Paid & Advance Overpayment Credit */}
-            <div className="py-2.5 space-y-1 border-b border-dashed border-slate-500/30">
-              <div className="flex items-center justify-between">
-                <span className="text-xs sm:text-sm font-extrabold uppercase">
-                  Total Amount Due
-                </span>
-                <span
-                  className={`text-lg sm:text-xl font-black font-mono-num ${
-                    isDark ? 'text-amber-400' : 'text-slate-900'
-                  }`}
-                >
-                  {formatPeso(bill.totalAmountDue)}
-                </span>
+            {/* 6. FORMAL SIGNATURES & ANTI-TAMPER SEAL */}
+            <div className="mt-5 pt-3 border-t border-slate-300 grid grid-cols-2 gap-6 text-[10px] text-slate-700">
+              <div>
+                <div className="border-b border-slate-500 h-6 mb-1" />
+                <p className="font-bold text-slate-900 uppercase">
+                  {settings.landlordName || 'Authorized Landlord / Admin'}
+                </p>
+                <p className="text-slate-500">
+                  Prepared & Verified By (Signature)
+                </p>
               </div>
-
-              <div className="flex justify-between text-xs">
-                <span>Amount Paid</span>
-                <span className="font-mono-num font-bold text-emerald-500">
-                  {formatPeso(bill.amountPaid)}
-                </span>
+              <div>
+                <div className="border-b border-slate-500 h-6 mb-1" />
+                <p className="font-bold text-slate-900 uppercase">
+                  {bill.tenantName}
+                </p>
+                <p className="text-slate-500">
+                  Tenant Acknowledgment & Date Received
+                </p>
               </div>
-
-              <div className="flex justify-between text-xs font-bold">
-                <span>Remaining Balance Due</span>
-                <span
-                  className={`font-mono-num ${
-                    bill.remainingBalance > 0
-                      ? 'text-red-400'
-                      : 'text-emerald-500'
-                  }`}
-                >
-                  {formatPeso(bill.remainingBalance)}
-                </span>
-              </div>
-
-              {bill.overpaymentToAdvance > 0 && (
-                <div className="flex justify-between text-xs font-bold text-emerald-400 pt-0.5">
-                  <span>Excess Credited to Withdrawable Advance Balance</span>
-                  <span className="font-mono-num">
-                    +{formatPeso(bill.overpaymentToAdvance)}
-                  </span>
-                </div>
-              )}
             </div>
 
-            {/* 6. Footer, Verification Seal & Privacy Notice */}
-            <div className="pt-2.5 text-[10px] space-y-1 opacity-85">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-amber-500">
-                  Payment Window: Every 1st to 10th of the month.
-                </span>
-                <span className="font-mono-num font-bold text-emerald-500">
-                  {verificationSeal}
-                </span>
-              </div>
-              <div className="pt-1 flex items-center justify-between text-[9px] opacity-70 font-mono-num">
-                <span>4Rent Management System v1.0.0 • by splikaa</span>
-                <span>{new Date(bill.createdAt).toLocaleString('en-PH')}</span>
-              </div>
+            <div className="mt-3 pt-2 border-t border-dashed border-slate-300 flex flex-wrap items-center justify-between gap-2 text-[9px] text-slate-500 font-mono-num">
+              <span>
+                Payment Window: Every 1st–10th of the Month • 4Rent Management System v1.0.0
+              </span>
+              <span className="font-bold text-slate-800">
+                Verification Seal: {verificationSeal}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Bottom Export, Print & Messenger Integration Bar */}
-        <div className="no-print px-4 sm:px-5 py-3.5 bg-[#18202F] border-t border-[#263147] flex flex-wrap items-center justify-between gap-2 shrink-0">
+        {/* Bottom Export, Print & Messenger Integration Bar (Hidden during print) */}
+        <div className="no-print px-5 py-3.5 bg-[#18202F] border-t border-[#263147] flex flex-wrap items-center justify-between gap-2 shrink-0">
           <button
             type="button"
             onClick={handleShareToMessenger}

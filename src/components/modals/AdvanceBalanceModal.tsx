@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  CheckCircle2,
+  CalendarClock,
   History,
   Wallet,
   X,
@@ -15,7 +15,7 @@ interface AdvanceBalanceModalProps {
   onClose: () => void;
   onWithdrawAdvance: (roomId: string, amount: number, note: string) => void;
   onAddAdvanceDeposit: (roomId: string, amount: number, note: string) => void;
-  onApplyAdvanceToUnpaid: (roomId: string, amount: number) => void;
+  onApplyAdvanceToUnpaid?: (roomId: string, amount: number) => void;
 }
 
 export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
@@ -23,11 +23,8 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
   onClose,
   onWithdrawAdvance,
   onAddAdvanceDeposit,
-  onApplyAdvanceToUnpaid,
 }) => {
-  const [actionType, setActionType] = useState<'withdraw' | 'add' | 'apply'>(
-    'withdraw'
-  );
+  const [actionType, setActionType] = useState<'add' | 'withdraw'>('add');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -61,23 +58,14 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
       );
       setAmount('');
       onClose();
-    } else if (actionType === 'add') {
+    } else {
       onAddAdvanceDeposit(
         room.id,
         val,
-        'Added Deposit / Advance Payment Balance'
+        currentUnpaid > 0
+          ? 'Added Advance Payment (Auto-applied to active bill & future billing)'
+          : 'Added Advance Payment (Auto-deducts on next billing cycle)'
       );
-      setAmount('');
-      onClose();
-    } else {
-      const maxApplicable = Math.min(currentAdvance, currentUnpaid);
-      if (val > maxApplicable) {
-        setError(
-          `Maximum applicable amount is ${formatPeso(maxApplicable)}.`
-        );
-        return;
-      }
-      onApplyAdvanceToUnpaid(room.id, val);
       setAmount('');
       onClose();
     }
@@ -96,7 +84,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
                 Advance Payment Balance • {room.name}
               </h3>
               <p className="text-xs text-slate-400">
-                Manage withdrawable advance balance and security deposit credits
+                Automatically deducts from room bills when the billing day arrives
               </p>
             </div>
           </div>
@@ -114,7 +102,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl bg-[#0E131C] border border-emerald-500/30 p-4">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Withdrawable Advance Balance
+                Available Advance Balance
               </span>
               <span className="text-2xl font-black text-emerald-400 font-mono-num mt-1 block">
                 {formatPeso(currentAdvance)}
@@ -130,25 +118,27 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
             </div>
           </div>
 
-          {/* Action Selector */}
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setActionType('withdraw');
-                setAmount(currentAdvance > 0 ? String(currentAdvance) : '');
-                setError(null);
-              }}
-              className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                actionType === 'withdraw'
-                  ? 'bg-amber-500 text-slate-950 border-amber-500'
-                  : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
-              }`}
-            >
-              <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>Withdraw Balance</span>
-            </button>
+          {/* Automatic Bill Deduction Info Banner */}
+          <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/25 p-3.5 flex items-start gap-2.5 text-xs text-emerald-200">
+            <CalendarClock className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <div>
+              <strong className="text-white block">
+                Automatic Billing Deduction Active
+              </strong>
+              <span className="text-slate-300 text-[11px] leading-relaxed">
+                Any Advance Balance added here will automatically deduct from{' '}
+                {room.name}&apos;s bill when the monthly billing cycle arrives
+                {currentUnpaid > 0
+                  ? ` (and immediately settles up to ${formatPeso(
+                      currentUnpaid
+                    )} of the current unpaid balance).`
+                  : '.'}
+              </span>
+            </div>
+          </div>
 
+          {/* 2-Tab Action Selector (Add Advance vs Withdraw Balance) */}
+          <div className="grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={() => {
@@ -163,26 +153,24 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
               }`}
             >
               <ArrowDownLeft className="w-3.5 h-3.5" />
-              <span>Add Advance</span>
+              <span>Add Advance Payment</span>
             </button>
 
             <button
               type="button"
               onClick={() => {
-                setActionType('apply');
-                setAmount(
-                  String(Math.min(currentAdvance, currentUnpaid) || '')
-                );
+                setActionType('withdraw');
+                setAmount(currentAdvance > 0 ? String(currentAdvance) : '');
                 setError(null);
               }}
               className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                actionType === 'apply'
-                  ? 'bg-blue-500 text-white border-blue-500'
+                actionType === 'withdraw'
+                  ? 'bg-amber-500 text-slate-950 border-amber-500'
                   : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
               }`}
             >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Apply to Bill</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              <span>Withdraw / Refund</span>
             </button>
           </div>
 
@@ -195,13 +183,9 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                {actionType === 'withdraw'
-                  ? 'Withdrawal Amount to Release to Tenant (₱) *'
-                  : actionType === 'add'
-                  ? 'Excess Payment / Advance Deposit Amount (₱) *'
-                  : `Amount to Deduct from Unpaid Balance (${formatPeso(
-                      currentUnpaid
-                    )}) *`}
+                {actionType === 'add'
+                  ? 'Advance Payment Amount to Credit (₱) *'
+                  : 'Withdrawal Amount to Release to Tenant (₱) *'}
               </label>
               <input
                 type="number"
@@ -218,11 +202,9 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
               type="submit"
               className="w-full py-3 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm transition cursor-pointer"
             >
-              {actionType === 'withdraw'
-                ? 'Confirm Tenant Advance Withdrawal'
-                : actionType === 'add'
-                ? 'Credit to Advance Payment Balance'
-                : 'Apply Advance Balance to Unpaid Bill'}
+              {actionType === 'add'
+                ? 'Save Advance Payment (Auto-Deducts on Bill)'
+                : 'Confirm Tenant Advance Withdrawal'}
             </button>
           </form>
 

@@ -151,30 +151,63 @@
   background: #f59e0b;
 }
 
-/* Print Stylesheet for Printable Receipt (Thermal 80mm / A4 PDF) */
+/* Single-Sheet Formal White Print Stylesheet */
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
 @media print {
-  body * {
-    visibility: hidden !important;
+  html,
+  body {
+    background: #ffffff !important;
+    background-image: none !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
-  #printable-receipt-area,
-  #printable-receipt-area * {
-    visibility: visible !important;
+
+  aside,
+  main,
+  nav,
+  .no-print {
+    display: none !important;
   }
+
+  .receipt-print-backdrop {
+    position: static !important;
+    display: block !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  .receipt-print-shell {
+    max-width: 100% !important;
+    max-height: none !important;
+    background: #ffffff !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
   #printable-receipt-area {
-    position: fixed !important;
-    left: 0 !important;
-    top: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
-    padding: 16px !important;
+    padding: 20px !important;
     background: #ffffff !important;
     color: #0f172a !important;
+    border: 1.5px solid #0f172a !important;
     box-shadow: none !important;
-    border: none !important;
-    z-index: 99999 !important;
-  }
-  .no-print {
-    display: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }

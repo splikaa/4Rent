@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AdvanceBalanceTransaction,
   AppSettings,
   BillRecord,
   NavigationTab,
@@ -22,6 +23,7 @@ import {
   saveRooms,
   saveSettings,
   saveTenantHistory,
+  subscribeToLocalCrossWindowSync,
 } from './services/storageService';
 import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
@@ -38,6 +40,7 @@ import { LockScreen } from './components/security/LockScreen';
 import { EnableRemindersModal } from './components/modals/EnableRemindersModal';
 import { PinAuthModal } from './components/modals/PinAuthModal';
 import { AdvanceBalanceModal } from './components/modals/AdvanceBalanceModal';
+import { OccupiedArchiveGuardModal } from './components/modals/OccupiedArchiveGuardModal';
 import { NavigationDrawer } from './components/layout/NavigationDrawer';
 import { MobileBottomNav } from './components/layout/MobileBottomNav';
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -90,6 +93,10 @@ export function App() {
   const [roomPendingPinDelete, setRoomPendingPinDelete] = useState<Room | null>(
     null
   );
+
+  // Occupied Room Archive Guard State (Prevents accidental direct archive of occupied rooms)
+  const [roomPendingOccupiedArchive, setRoomPendingOccupiedArchive] =
+    useState<Room | null>(null);
 
   // PWA Install Prompt Reference
   const deferredInstallPromptRef = useRef<any>(null);
@@ -159,7 +166,20 @@ export function App() {
     };
   }, []);
 
-  // Live Instant Realtime sync across Desktop & Mobile devices
+  // Live Instant Realtime sync across Desktop & Mobile devices (Local BroadcastChannel + Storage + Supabase Cloud)
+  useEffect(() => {
+    const unsubscribeLocal = subscribeToLocalCrossWindowSync(() => {
+      setRooms(loadRooms());
+      setBills(loadBills());
+      setInquiries(loadInquiries());
+      setTenantHistory(loadTenantHistory());
+      setSettings(loadSettings());
+    });
+    return () => {
+      unsubscribeLocal();
+    };
+  }, []);
+
   useEffect(() => {
     if (
       settings.cloudSync.enabled &&
@@ -394,6 +414,15 @@ export function App() {
   };
 
   const handleArchiveRoom = (roomId: string) => {
+    const targetRoom = rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+
+    // Guard: If the room is currently Occupied, block direct archive and open the notification/reason modal
+    if (targetRoom.status === 'occupied') {
+      setRoomPendingOccupiedArchive(targetRoom);
+      return;
+    }
+
     setRooms((prev) =>
       prev.map((r) =>
         r.id === roomId
@@ -404,6 +433,55 @@ export function App() {
             }
           : r
       )
+    );
+    appendAuditLog(
+      'Vacant Room Archived',
+      `${targetRoom.name} moved to Archive Center.`,
+      'tenant'
+    );
+    triggerOptionalCloudSync();
+  };
+
+  const handleConfirmOccupiedArchiveWithReason = (
+    room: Room,
+    reason: string
+  ) => {
+    const nowIso = new Date().toISOString();
+
+    if (room.tenant) {
+      const entry: TenantHistoryEntry = {
+        id: `hist-${Date.now()}`,
+        roomId: room.id,
+        roomName: room.name,
+        tenantName: room.tenant.fullName,
+        phone: room.tenant.phone,
+        messengerUsername: room.tenant.messengerUsername,
+        moveInDate: room.tenant.moveInDate,
+        moveOutDate: nowIso.slice(0, 10),
+        reason: `Archived while occupied: ${reason}`,
+        finalMeterReading: room.lastMeterReading,
+        depositHeld: room.securityDeposit,
+        unpaidBalanceAtMoveOut: room.unpaidBalance,
+      };
+      setTenantHistory((prev) => [entry, ...prev]);
+    }
+
+    setRooms((prev) =>
+      prev.map((r) =>
+        r.id === room.id
+          ? {
+              ...r,
+              isArchived: true,
+              archivedAt: nowIso,
+            }
+          : r
+      )
+    );
+    setRoomPendingOccupiedArchive(null);
+    appendAuditLog(
+      'Occupied Room Archived (Override)',
+      `${room.name} (${room.tenant?.fullName || 'Occupied'}) archived — Reason: ${reason}`,
+      'tenant'
     );
     triggerOptionalCloudSync();
   };
@@ -652,61 +730,97 @@ export function App() {
     note: string
   ) => {
     const nowIso = new Date().toISOString();
+    const targetRoom = rooms.find((r) => r.id === roomId);
+    const currentUnpaid = targetRoom?.unpaidBalance || 0;
+    const autoAppliedToBill =
+      currentUnpaid > 0
+        ? Math.round(Math.min(amount, currentUnpaid) * 100) / 100
+        : 0;
+    const remainingToAdvance =
+      Math.round(Math.max(0, amount - autoAppliedToBill) * 100) / 100;
+
+    if (autoAppliedToBill > 0) {
+      setBills((prev) =>
+        prev.map((b) => {
+          const isTargetActiveBill =
+            (targetRoom?.activeReceiptId &&
+              b.id === targetRoom.activeReceiptId) ||
+            (b.roomId === roomId && !b.isArchived && b.remainingBalance > 0);
+          if (!isTargetActiveBill) return b;
+
+          const nextDepositApplied =
+            Math.round(((b.depositApplied || 0) + autoAppliedToBill) * 100) /
+            100;
+          const nextTotalDue = Math.max(
+            0,
+            Math.round((b.totalAmountDue - autoAppliedToBill) * 100) / 100
+          );
+          const nextRemaining = Math.max(
+            0,
+            Math.round((b.remainingBalance - autoAppliedToBill) * 100) / 100
+          );
+          const nextStatus: BillRecord['status'] =
+            nextRemaining <= 0
+              ? 'paid'
+              : b.amountPaid > 0 || nextDepositApplied > 0
+                ? 'partial'
+                : 'unpaid';
+
+          return {
+            ...b,
+            depositApplied: nextDepositApplied,
+            totalAmountDue: nextTotalDue,
+            remainingBalance: nextRemaining,
+            status: nextStatus,
+            paidAt: nextRemaining <= 0 ? nowIso : b.paidAt,
+          };
+        })
+      );
+    }
+
     setRooms((prev) =>
       prev.map((r) => {
         if (r.id !== roomId) return r;
         const nextAdv =
-          Math.round(((r.advanceRent || 0) + amount) * 100) / 100;
-        return {
-          ...r,
-          advanceRent: nextAdv,
-          advanceHistory: [
-            {
-              id: `adv-d-${Date.now()}`,
-              type: 'manual_deposit',
-              amount,
-              createdAt: nowIso,
-              note,
-            },
-            ...(r.advanceHistory || []),
-          ],
-          updatedAt: nowIso,
-        };
-      })
-    );
-    triggerOptionalCloudSync();
-  };
-
-  const handleApplyAdvanceToUnpaid = (roomId: string, amount: number) => {
-    const nowIso = new Date().toISOString();
-    setRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== roomId) return r;
-        const nextAdv = Math.max(
-          0,
-          Math.round(((r.advanceRent || 0) - amount) * 100) / 100
-        );
+          Math.round(((r.advanceRent || 0) + remainingToAdvance) * 100) / 100;
         const nextUnpaid = Math.max(
           0,
-          Math.round(((r.unpaidBalance || 0) - amount) * 100) / 100
+          Math.round(((r.unpaidBalance || 0) - autoAppliedToBill) * 100) / 100
         );
+        const historyEntries: AdvanceBalanceTransaction[] = [
+          {
+            id: `adv-d-${Date.now()}`,
+            type: 'manual_deposit',
+            amount,
+            createdAt: nowIso,
+            note,
+          },
+        ];
+        if (autoAppliedToBill > 0) {
+          historyEntries.unshift({
+            id: `adv-auto-${Date.now() + 1}`,
+            type: 'applied_to_bill',
+            amount: autoAppliedToBill,
+            createdAt: nowIso,
+            note: 'Automatically deducted toward active room bill',
+          });
+        }
         return {
           ...r,
           advanceRent: nextAdv,
           unpaidBalance: nextUnpaid,
-          advanceHistory: [
-            {
-              id: `adv-a-${Date.now()}`,
-              type: 'applied_to_bill',
-              amount,
-              createdAt: nowIso,
-              note: 'Applied Advance Balance toward room unpaid balance',
-            },
-            ...(r.advanceHistory || []),
-          ],
+          advanceHistory: [...historyEntries, ...(r.advanceHistory || [])],
           updatedAt: nowIso,
         };
       })
+    );
+
+    appendAuditLog(
+      'Advance Payment Added',
+      autoAppliedToBill > 0
+        ? `₱${amount.toFixed(2)} added (₱${autoAppliedToBill.toFixed(2)} auto-deducted from active bill).`
+        : `₱${amount.toFixed(2)} added to Advance Balance (will auto-deduct on billing day).`,
+      'billing'
     );
     triggerOptionalCloudSync();
   };
@@ -1103,7 +1217,13 @@ export function App() {
         onClose={() => setAdvanceModalRoomId(null)}
         onWithdrawAdvance={handleWithdrawAdvance}
         onAddAdvanceDeposit={handleAddAdvanceDeposit}
-        onApplyAdvanceToUnpaid={handleApplyAdvanceToUnpaid}
+      />
+
+      {/* Occupied Room Archive Guard & Notification Modal */}
+      <OccupiedArchiveGuardModal
+        room={roomPendingOccupiedArchive}
+        onClose={() => setRoomPendingOccupiedArchive(null)}
+        onConfirmArchiveWithReason={handleConfirmOccupiedArchiveWithReason}
       />
 
       {/* PIN Authentication Modal for Removing a Room */}

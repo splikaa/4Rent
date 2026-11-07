@@ -116,7 +116,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       setCurrReading(String(prev));
       setBaseRent(String(selectedRoom.monthlyRent || 0));
       setCarryOverBalance(String(selectedRoom.unpaidBalance || 0));
-      setDepositApplied('0');
+      // Automatically apply available Advance Balance when generating the monthly bill
+      setDepositApplied(String(selectedRoom.advanceRent || 0));
       setDueDayOneToTen(
         String(clampDueDayOneToTen(selectedRoom.tenant?.dueDayOfMonth || 5))
       );
