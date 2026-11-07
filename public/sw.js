@@ -1,4 +1,4 @@
-const CACHE_NAME = '4rent-management-system-v1.0.0';
+const CACHE_NAME = '4rent-management-system-v1.0.0-clean';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -37,12 +37,14 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          if (event.request.url.startsWith(self.location.origin)) {
-            cache.put(event.request, clone);
-          }
-        }).catch(() => {});
+        if (response && response.status === 200) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            if (event.request.url.startsWith(self.location.origin)) {
+              cache.put(event.request, clone);
+            }
+          }).catch(() => {});
+        }
         return response;
       })
       .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))

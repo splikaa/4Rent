@@ -58,8 +58,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maskReceiptContacts: true,
   security: {
     isSetupComplete: false,
-    lockEnabled: false,
-    authMethod: 'none',
+    lockEnabled: true,
+    authMethod: 'pin',
     pinCode: '1234',
     autoLockMinutes: 15,
     requirePinForSensitiveActions: true,
@@ -84,6 +84,11 @@ export function loadSettings(): AppSettings {
       !parsed.apartmentName || parsed.apartmentName === '4Rent'
         ? '4Rent Management System'
         : parsed.apartmentName;
+    const rawAuthMethod = parsed.security?.authMethod;
+    const hasValidAuth =
+      Boolean(parsed.security?.isSetupComplete) &&
+      rawAuthMethod !== 'none';
+
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
@@ -91,6 +96,10 @@ export function loadSettings(): AppSettings {
       security: {
         ...DEFAULT_SETTINGS.security,
         ...(parsed.security || {}),
+        isSetupComplete: hasValidAuth,
+        lockEnabled: true,
+        authMethod:
+          rawAuthMethod === 'fingerprint' ? 'fingerprint' : 'pin',
         pinCode: parsed.security?.pinCode || '1234',
         autoLockMinutes:
           typeof parsed.security?.autoLockMinutes === 'number'

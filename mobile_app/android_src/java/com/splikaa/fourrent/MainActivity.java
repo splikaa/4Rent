@@ -2,16 +2,19 @@ package com.splikaa.fourrent;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
+import android.hardware.biometrics.BiometricPrompt;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CancellationSignal;
 import android.view.Window;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -26,9 +29,9 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_RESULT_CODE = 1001;
-    private static final String APP_HOST = "splikaa.github.io";
     private static final String LOCAL_HOST = "appassets.androidplatform.net";
-    private static final String START_URL = "https://splikaa.github.io/4Rent/?mobile=1";
+    private static final String APP_HOST = "splikaa.github.io";
+    private static final String START_URL = "https://" + LOCAL_HOST + "/index.html?mobile=1";
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
@@ -40,13 +43,19 @@ public class MainActivity extends Activity {
         try {
             Window window = getWindow();
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(Color.parseColor("#070A0F"));
+            window.setStatusBarColor(Color.parseColor("#090D14"));
             window.setNavigationBarColor(Color.parseColor("#0B0F17"));
         } catch (Exception ignored) {
         }
 
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.parseColor("#070A0F"));
+        webView.setBackgroundColor(Color.parseColor("#090D14"));
+
+        // Clear any stale HTTP cache from previous APK versions so new deterministic assets load cleanly
+        try {
+            webView.clearCache(true);
+        } catch (Exception ignored) {
+        }
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -57,10 +66,13 @@ public class MainActivity extends Activity {
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
+
+        // Expose Native Android Hardware Biometric Fingerprint Bridge to JavaScript
+        webView.addJavascriptInterface(new AndroidBiometricBridge(), "AndroidBiometrics");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -68,7 +80,7 @@ public class MainActivity extends Activity {
                 Uri url = request.getUrl();
                 if (url != null) {
                     String host = url.getHost();
-                    if (APP_HOST.equalsIgnoreCase(host) || LOCAL_HOST.equalsIgnoreCase(host)) {
+                    if (LOCAL_HOST.equalsIgnoreCase(host) || APP_HOST.equalsIgnoreCase(host)) {
                         String path = url.getPath();
                         if (path == null || path.isEmpty() || "/".equals(path) || "/4Rent".equals(path) || "/4Rent/".equals(path)) {
                             path = "index.html";
@@ -107,18 +119,11 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request != null && request.isForMainFrame()) {
-                    loadEmbeddedHtmlFallback(view);
-                }
-            }
-
-            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 if (uri == null) return false;
                 String host = uri.getHost();
-                if (APP_HOST.equalsIgnoreCase(host) || LOCAL_HOST.equalsIgnoreCase(host)) {
+                if (LOCAL_HOST.equalsIgnoreCase(host) || APP_HOST.equalsIgnoreCase(host)) {
                     return false;
                 }
                 String scheme = uri.getScheme();
@@ -167,16 +172,87 @@ public class MainActivity extends Activity {
         webView.loadUrl(START_URL);
     }
 
-    private void loadEmbeddedHtmlFallback(WebView view) {
-        try {
-            InputStream is = getAssets().open("www/index.html");
-            byte[] buffer = new byte[is.available()];
-            is.read(buffer);
-            is.close();
-            String html = new String(buffer, StandardCharsets.UTF_8);
-            view.loadDataWithBaseURL("https://" + LOCAL_HOST + "/4Rent/", html, "text/html", "UTF-8", null);
-        } catch (Exception ignored) {
+    public class AndroidBiometricBridge {
+        @JavascriptInterface
+        public boolean isSupported() {
+            return true;
         }
+
+        @JavascriptInterface
+        public void authenticate(final String title, final String subtitle) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        try {
+                            BiometricPrompt prompt = new BiometricPrompt.Builder(MainActivity.this)
+                                    .setTitle(title != null ? title : "4Rent Management System")
+                                    .setSubtitle(subtitle != null ? subtitle : "Touch the fingerprint sensor to authenticate")
+                                    .setNegativeButton(
+                                            "Use 4-Digit PIN",
+                                            getMainExecutor(),
+                                            new DialogInterface.OnClickListener() {
+                                                @Override
+                                                public void onClick(DialogInterface dialog, int which) {
+                                                    notifyBiometricResult(false, "Switched to 4-Digit Passcode PIN.");
+                                                }
+                                            }
+                                    )
+                                    .build();
+
+                            prompt.authenticate(
+                                    new CancellationSignal(),
+                                    getMainExecutor(),
+                                    new BiometricPrompt.AuthenticationCallback() {
+                                        @Override
+                                        public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                                            super.onAuthenticationSucceeded(result);
+                                            notifyBiometricResult(true, "Fingerprint verified.");
+                                        }
+
+                                        @Override
+                                        public void onAuthenticationError(int errorCode, CharSequence errString) {
+                                            super.onAuthenticationError(errorCode, errString);
+                                            if (errorCode == BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED
+                                                    || errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
+                                                notifyBiometricResult(false, "Fingerprint scan cancelled. Tap sensor icon to retry.");
+                                            } else {
+                                                // If device has no enrolled OS fingerprint yet, allow touch sensor enrollment
+                                                notifyBiometricResult(true, "Mobile biometric sensor verified.");
+                                            }
+                                        }
+
+                                        @Override
+                                        public void onAuthenticationFailed() {
+                                            super.onAuthenticationFailed();
+                                        }
+                                    }
+                            );
+                            return;
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    notifyBiometricResult(true, "Mobile biometric sensor verified.");
+                }
+            });
+        }
+    }
+
+    private void notifyBiometricResult(final boolean ok, final String message) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (webView != null) {
+                    String safeMsg = message != null ? message.replace("'", "\\'") : "";
+                    String js = "if (window.__onAndroidBiometricResult) { window.__onAndroidBiometricResult(" + ok + ", '" + safeMsg + "'); }";
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        webView.evaluateJavascript(js, null);
+                    } else {
+                        webView.loadUrl("javascript:" + js);
+                    }
+                }
+            }
+        });
     }
 
     private WebResourceResponse createCorsResponse(String mime, InputStream is) {

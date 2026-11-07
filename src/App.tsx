@@ -37,6 +37,7 @@ import {
 } from './utils/billingCalculator';
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
 import { LockScreen } from './components/security/LockScreen';
+import { LoadingSplashScreen } from './components/common/LoadingSplashScreen';
 import { EnableRemindersModal } from './components/modals/EnableRemindersModal';
 import { PinAuthModal } from './components/modals/PinAuthModal';
 import { AdvanceBalanceModal } from './components/modals/AdvanceBalanceModal';
@@ -67,8 +68,10 @@ export function App() {
 
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [showBootSplash, setShowBootSplash] = useState<boolean>(true);
+  const [showUnlockSplash, setShowUnlockSplash] = useState<boolean>(false);
   const [isLocked, setIsLocked] = useState<boolean>(
-    () => loadSettings().security.lockEnabled
+    () => loadSettings().security.isSetupComplete
   );
   const [showSecuritySetup, setShowSecuritySetup] = useState<boolean>(
     () => !loadSettings().security.isSetupComplete
@@ -304,11 +307,16 @@ export function App() {
   const handleCompleteSecuritySetup = (secConfig: SecurityConfig) => {
     const updated: AppSettings = {
       ...settings,
-      security: secConfig,
+      security: {
+        ...secConfig,
+        isSetupComplete: true,
+        lockEnabled: true,
+      },
     };
     setSettings(updated);
     setShowSecuritySetup(false);
     setIsLocked(false);
+    setShowUnlockSplash(true);
     appendAuditLog(
       'Security Configured',
       `Passcode PIN & security preferences updated.`,
@@ -990,17 +998,42 @@ export function App() {
   const selectedRoomForDetails =
     rooms.find((r) => r.id === selectedRoomDetailsId) || null;
 
-  // 1. Setup Security Screen
+  // 0. Initial System Boot Loading Screen
+  if (showBootSplash) {
+    return (
+      <LoadingSplashScreen
+        mode="boot"
+        durationMs={1100}
+        onFinished={() => setShowBootSplash(false)}
+      />
+    );
+  }
+
+  // 1. Setup Security Screen (Mandatory Landlord Authentication)
   if (showSecuritySetup) {
     return <SecuritySetupScreen onComplete={handleCompleteSecuritySetup} />;
   }
 
-  // 2. Lock Screen
+  // 2. Lock Screen (Mandatory Landlord Authentication)
   if (isLocked) {
     return (
       <LockScreen
         security={settings.security}
-        onUnlock={() => setIsLocked(false)}
+        onUnlock={() => {
+          setIsLocked(false);
+          setShowUnlockSplash(true);
+        }}
+      />
+    );
+  }
+
+  // 2.5 Post-Authentication Workspace Loading Screen
+  if (showUnlockSplash) {
+    return (
+      <LoadingSplashScreen
+        mode="unlock"
+        durationMs={850}
+        onFinished={() => setShowUnlockSplash(false)}
       />
     );
   }
