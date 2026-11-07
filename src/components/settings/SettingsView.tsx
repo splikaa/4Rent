@@ -661,7 +661,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   )}
                 </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <a
+                  href="./4Rent-v1.0.0-release.apk"
+                  download="4Rent-v1.0.0-release.apk"
+                  className="py-3 px-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer btn-fluid"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download APK (Release)</span>
+                </a>
                 <button
                   type="button"
                   onClick={() => {

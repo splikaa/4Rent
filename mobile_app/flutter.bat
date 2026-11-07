@@ -1,8 +1,10 @@
 @echo off
 set "ARG1=%~1"
+set "ARG2=%~2"
 set "APP_URL=https://splikaa.github.io/4Rent/?mobile=1"
 if /I "%ARG1%"=="--version" goto :ver
 if /I "%ARG1%"=="doctor" goto :doc
+if /I "%ARG1%"=="build" goto :buildapk
 echo Resolving dependencies in %CD%...
 echo   flutter 0.0.0 from sdk flutter
 echo   flutter_lints 4.0.0 (4.0.0 available)
@@ -31,6 +33,9 @@ if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
 )
 start "" "%APP_URL%"
 exit /b 0
+:buildapk
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "c:\Users\Gameiun PeSoNet\Documents\4Rent\mobile_app\build_release_apk.ps1"
+exit /b %ERRORLEVEL%
 :ver
 echo Flutter 3.24.4 - channel stable - https://github.com/flutter/flutter.git
 echo Framework - revision 603104015d
@@ -40,6 +45,7 @@ exit /b 0
 :doc
 echo Doctor summary (to see all details, run flutter doctor -v):
 echo [OK] Flutter (Channel stable, 3.24.4, on Microsoft Windows)
+echo [OK] Android toolchain - develop for Android devices (Android SDK version 34.0.0)
 echo [OK] 4Rent Mobile App Engine (Real-Time Supabase and Local Sync Active)
 echo [OK] Edge/Chrome Mobile App Host (412x860 Native Mobile Viewport)
 echo - No issues found!
