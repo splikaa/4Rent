@@ -112,14 +112,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       setShareFeedback('Could not generate image. Use Print / PDF instead.');
       return;
     }
+    const safeTenant = (bill.tenantName || 'Tenant')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeRoom = bill.roomName.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `Receipt_${safeTenant}_${safeRoom}_${bill.receiptNo}.png`;
+
     const link = document.createElement('a');
-    link.download = `4Rent-Official-Receipt-${bill.roomName.replace(
-      /\s+/g,
-      '-'
-    )}-${bill.receiptNo}.png`;
+    link.download = filename;
     link.href = dataUrl;
     link.click();
-    setShareFeedback('Receipt PNG downloaded!');
+    setShareFeedback(`Receipt PNG downloaded: ${filename}`);
   };
 
   const handleCopySummary = async () => {
@@ -148,13 +151,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handleShareToMessenger = async () => {
     setShareFeedback(null);
     const summary = formatMessengerBillSummary(bill, settings.apartmentName);
-    const dataUrl = await generateReceiptPngDataUrl();
 
+    // Open Messenger directly without auto-downloading files
     const res = await openMessengerAppWithReceipt({
       textSummary: summary,
-      pngDataUrl: dataUrl || undefined,
       receiptNo: bill.receiptNo,
+      tenantName: bill.tenantName,
+      roomName: bill.roomName,
       messengerHandle: bill.tenantMessenger,
+      autoDownloadPng: false,
     });
     setShareFeedback(res.message);
   };
@@ -226,11 +231,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         )}
 
         {/* Printable White-Paper Sheet */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-5 bg-[#0B0F17] flex justify-center">
+        <div className="receipt-sheet-container flex-1 overflow-y-auto p-3 sm:p-5 bg-[#0B0F17] flex justify-center">
           <div
             ref={receiptRef}
-            className="receipt-white-sheet w-full max-w-xl bg-white text-slate-900 rounded-xl p-4 sm:p-6 shadow-2xl font-sans"
-            style={{ minHeight: '620px' }}
+            id="receipt-printable-sheet"
+            className="receipt-white-sheet w-full max-w-xl bg-white text-slate-900 rounded-xl p-5 sm:p-7 shadow-2xl font-sans"
           >
             {/* Header: Brand & OR Number */}
             <div className="flex items-start justify-between gap-3 border-b-2 border-slate-900 pb-3">

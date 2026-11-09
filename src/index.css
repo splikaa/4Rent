@@ -250,7 +250,7 @@ textarea:focus {
 /* Single-Sheet Formal White Print Stylesheet */
 @page {
   size: A4 portrait;
-  margin: 10mm;
+  margin: 10mm 12mm;
 }
 
 @media print {
@@ -261,6 +261,7 @@ textarea:focus {
     color: #0f172a !important;
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
     height: auto !important;
     overflow: visible !important;
     -webkit-print-color-adjust: exact !important;
@@ -281,9 +282,12 @@ textarea:focus {
     padding: 0 !important;
     margin: 0 !important;
     overflow: visible !important;
+    width: 100% !important;
+    height: auto !important;
   }
 
   .receipt-print-shell {
+    width: 100% !important;
     max-width: 100% !important;
     max-height: none !important;
     background: #ffffff !important;
@@ -292,17 +296,31 @@ textarea:focus {
     margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
+    border-radius: 0 !important;
   }
 
+  .receipt-sheet-container {
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  .receipt-white-sheet,
+  #receipt-printable-sheet,
   #printable-receipt-area {
     width: 100% !important;
     max-width: 100% !important;
+    min-height: 0 !important;
     margin: 0 !important;
-    padding: 20px !important;
+    padding: 0 !important;
     background: #ffffff !important;
     color: #0f172a !important;
-    border: 1.5px solid #0f172a !important;
+    border: none !important;
     box-shadow: none !important;
+    border-radius: 0 !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }

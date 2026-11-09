@@ -156,7 +156,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-                          {room.name}
+                          {/^\d+$/.test(room.name.trim()) ? `Room ${room.name.trim()}` : room.name}
                         </h2>
                         <p className="text-xs text-slate-400 mt-1">
                           Global Rate:{' '}

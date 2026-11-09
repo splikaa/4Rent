@@ -85,6 +85,11 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     'Cash' | 'GCash' | 'Maya' | 'Bank Transfer'
   >('GCash');
 
+  // Monthly electricity consumption rate (editable per bill cycle)
+  const [monthlyElectricRate, setMonthlyElectricRate] = useState<string>(() =>
+    String(globalElectricRate || 15.0)
+  );
+
   // Dual Sub-Meter Proofs: Slot 1 = Previous, Slot 2 = Current
   const [targetMeterSlot, setTargetMeterSlot] = useState<'prev' | 'curr'>('curr');
   const [prevMeterSnapshotUrl, setPrevMeterSnapshotUrl] = useState<string>('');
@@ -311,7 +316,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const prevNum = parseFloat(prevReading) || 0;
   const currNum = parseFloat(currReading) || 0;
-  const rateNum = globalElectricRate;
+  const rateNum = Math.max(0, parseFloat(monthlyElectricRate) || 0);
   const rentNum = parseFloat(baseRent) || 0;
   const carryNum = parseFloat(carryOverBalance) || 0;
   const depNum = Math.min(
@@ -475,7 +480,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 Sub-Meter OCR & Bill Generator
               </h2>
               <p className="text-xs text-slate-400">
-                Auto-reads meter drums & LCD • Rate: {formatPeso(globalElectricRate)}/kWh
+                Auto-reads meter drums & LCD • Rate: {formatPeso(rateNum)}/kWh
               </p>
             </div>
           </div>
@@ -880,13 +885,21 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   />
                 </div>
 
-                <div className="rounded-xl bg-[#0D1119]/80 border border-[#252F42] p-2.5">
-                  <label className="text-[10px] font-semibold text-slate-400 flex items-center gap-1 truncate">
-                    <Lock className="w-2.5 h-2.5 text-amber-400 shrink-0" />
-                    <span>Rate</span>
+                <div className="rounded-xl bg-[#0D1119] border border-amber-500/50 p-2.5">
+                  <label className="block text-[10px] font-bold text-amber-400">
+                    3. Rate (₱/kWh) *
                   </label>
-                  <div className="mt-0.5 text-xs sm:text-sm font-extrabold text-white font-mono-num truncate">
-                    {formatPeso(globalElectricRate)}/kWh
+                  <div className="flex items-center mt-0.5">
+                    <span className="text-xs font-bold text-amber-400 mr-0.5">₱</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={monthlyElectricRate}
+                      onChange={(e) => setMonthlyElectricRate(e.target.value)}
+                      className="w-full bg-transparent text-sm sm:text-base font-extrabold text-amber-400 font-mono-num focus:outline-none"
+                    />
                   </div>
                 </div>
               </div>

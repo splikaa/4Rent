@@ -1128,21 +1128,46 @@ export async function requestAndVerifyNotifications(): Promise<{
 
 /**
  * Opens the native Messenger application on Mobile (Android APK / iOS / Android Web) and Desktop
- * instead of redirecting to a generic web page.
+ * without forcing unwanted background file downloads.
  */
 export async function openMessengerAppWithReceipt(options: {
   textSummary: string;
   pngDataUrl?: string;
   receiptNo?: string;
+  tenantName?: string;
+  roomName?: string;
   messengerHandle?: string;
+  autoDownloadPng?: boolean;
 }): Promise<{ openedApp: boolean; message: string }> {
-  const { textSummary, pngDataUrl, receiptNo = 'Receipt', messengerHandle } = options;
+  const {
+    textSummary,
+    pngDataUrl,
+    receiptNo = 'Receipt',
+    tenantName,
+    roomName,
+    messengerHandle,
+    autoDownloadPng = false,
+  } = options;
 
   // Always copy text summary to clipboard first
   try {
-    await navigator.clipboard.writeText(textSummary);
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(textSummary);
+    }
   } catch {
-    // ignore clipboard fallback
+    // fallback clipboard
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = textSummary;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch {
+      // ignore
+    }
   }
 
   // Extract clean username/handle if provided
@@ -1151,6 +1176,14 @@ export async function openMessengerAppWithReceipt(options: {
     .replace(/^https?:\/\/(www\.)?(m\.me|messenger\.com\/t|facebook\.com)\//i, '')
     .replace(/^@/, '')
     .replace(/\/+$/, '');
+
+  const safeTenant = (tenantName || 'Tenant')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeRoom = (roomName || 'Room')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_');
+  const customFileName = `Receipt_${safeTenant}_${safeRoom}_${receiptNo}.png`;
 
   const win = window as unknown as {
     AndroidNative?: {
@@ -1163,7 +1196,7 @@ export async function openMessengerAppWithReceipt(options: {
     };
   };
 
-  // 1. Native Android APK Bridge -> Directly launches installed Messenger app (com.facebook.orca / mlite)
+  // 1. Native Android APK Bridge -> Directly launches installed Messenger app
   if (win.AndroidNative && typeof win.AndroidNative.shareToMessenger === 'function') {
     try {
       const launched = win.AndroidNative.shareToMessenger(
@@ -1187,40 +1220,20 @@ export async function openMessengerAppWithReceipt(options: {
   const isIOS = /iPhone|iPad|iPod/i.test(ua);
   const isMobile = isAndroid || isIOS;
 
-  // 2. Mobile Web Share API with PNG File (allows selecting Messenger app directly from native sheet)
-  if (isMobile && pngDataUrl && typeof navigator !== 'undefined' && navigator.share) {
-    try {
-      const res = await fetch(pngDataUrl);
-      const blob = await res.blob();
-      const file = new File([blob], `4Rent-${receiptNo}.png`, { type: 'image/png' });
-      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          title: `4Rent Official Receipt ${receiptNo}`,
-          text: textSummary,
-          files: [file],
-        });
-        return {
-          openedApp: true,
-          message: 'Shared receipt image & details via Messenger!',
-        };
-      }
-    } catch (err) {
-      const errName = err instanceof Error ? err.name : '';
-      if (errName === 'AbortError') {
-        return { openedApp: false, message: 'Share cancelled.' };
-      }
-    }
-  }
-
-  // 3. Mobile Deep Link to Native Messenger App (`fb-messenger://` or Android `intent://`)
+  // 2. Mobile Deep Link / Intent to Messenger App
   if (isAndroid) {
     const intentUrl = cleanHandle
       ? `intent://user/${encodeURIComponent(cleanHandle)}#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(`https://m.me/${cleanHandle}`)};end`
       : `intent://share/#Intent;scheme=fb-messenger;package=com.facebook.orca;end`;
+    
+    // Attempt deep link
     window.location.href = intentUrl;
+
     return {
       openedApp: true,
-      message: 'Opening Messenger app (Receipt copied to clipboard)...',
+      message: cleanHandle
+        ? `Bill summary copied! Opening Messenger chat with @${cleanHandle}...`
+        : 'Bill summary copied to clipboard! Opening Messenger...',
     };
   }
 
@@ -1231,21 +1244,29 @@ export async function openMessengerAppWithReceipt(options: {
     window.location.href = iosScheme;
     return {
       openedApp: true,
-      message: 'Opening Messenger app (Receipt copied to clipboard)...',
+      message: cleanHandle
+        ? `Bill summary copied! Opening Messenger chat with @${cleanHandle}...`
+        : 'Bill summary copied to clipboard! Opening Messenger...',
     };
   }
 
-  // 4. Desktop (Windows / macOS): Download PNG & launch Messenger Desktop App via `fb-messenger://` protocol
-  if (pngDataUrl) {
+  // 3. Desktop (Windows / macOS)
+  // Only download if explicitly asked (not during ordinary Messenger share)
+  if (autoDownloadPng && pngDataUrl) {
     try {
       const a = document.createElement('a');
       a.href = pngDataUrl;
-      a.download = `4Rent-Receipt-${receiptNo}.png`;
+      a.download = customFileName;
       a.click();
     } catch {
       // ignore
     }
   }
+
+  // Attempt desktop protocol or open web Messenger directly
+  const messengerUrl = cleanHandle
+    ? `https://m.me/${encodeURIComponent(cleanHandle)}`
+    : 'https://www.messenger.com';
 
   try {
     const desktopScheme = cleanHandle
@@ -1261,14 +1282,19 @@ export async function openMessengerAppWithReceipt(options: {
       } catch {
         // ignore
       }
-    }, 2500);
+    }, 2000);
   } catch {
     // ignore
   }
 
+  // Open web tab so user is guaranteed to land in Messenger
+  window.open(messengerUrl, '_blank', 'noopener,noreferrer');
+
   return {
     openedApp: true,
-    message: 'Receipt PNG downloaded & text copied! Opening Messenger app...',
+    message: cleanHandle
+      ? `Bill summary copied! Opening Messenger chat with @${cleanHandle}...`
+      : 'Bill summary copied! Opening Messenger in new tab...',
   };
 }
 

@@ -416,7 +416,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="space-y-4">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
-                        {room.name}
+                        {/^\d+$/.test(room.name.trim()) ? `Room ${room.name.trim()}` : room.name}
                       </span>
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-bold ${
@@ -472,20 +472,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </div>
 
                       <div
-                        className={`rounded-2xl bg-[#0D121B] border border-[#202B40] p-3 ${
+                        className={`rounded-2xl bg-[#0D121B] border border-[#202B40] p-3 flex flex-col justify-between ${
                           isOccupied ? '' : 'col-span-2'
                         }`}
                       >
-                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
+                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block truncate">
                           Continuous Sub-Meter
                         </span>
-                        <div className="flex items-center justify-between gap-1 mt-1">
-                          <span className="text-sm font-extrabold text-amber-400 font-mono-num">
-                            {room.lastMeterReading.toFixed(1)} kWh
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono-num">
+                        <div className="mt-1">
+                          <div className="text-sm font-extrabold text-amber-400 font-mono-num truncate leading-tight">
+                            {room.lastMeterReading.toFixed(1)}{' '}
+                            <span className="text-[11px] font-bold text-amber-400/80">
+                              kWh
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono-num mt-0.5 truncate">
                             @{formatPeso(globalElectricRate)}/kWh
-                          </span>
+                          </div>
                         </div>
                       </div>
 

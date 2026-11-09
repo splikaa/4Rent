@@ -79,6 +79,10 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   });
 
   const advanceHistory = isOccupied ? room.advanceHistory || [] : [];
+  const roomTitle = /^\d+$/.test(room.name.trim())
+    ? `Room ${room.name.trim()}`
+    : room.name;
+  const activeElectricRate = activeBill?.electricRate ?? globalElectricRate;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
@@ -92,7 +96,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             <div>
               <div className="flex items-center gap-2.5">
                 <h3 className="text-lg font-extrabold text-white leading-tight">
-                  {room.name}
+                  {roomTitle}
                 </h3>
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
@@ -105,7 +109,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Room Overview • Continuous Sub-Meter • Official Receipt & History
+                Room Details & Billing Summary
               </p>
             </div>
           </div>
@@ -134,11 +138,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 
         {/* Scrollable Content */}
         <div className="p-6 sm:p-7 overflow-y-auto space-y-6">
-          {/* Top Metrics Grid — 4 columns when Occupied, 3 columns when Vacant (No Advance Balance on Vacant Rooms) */}
+          {/* Top Metrics Grid — 4 columns when Occupied, 3 columns when Vacant */}
           <div
-            className={`grid grid-cols-1 ${
+            className={`grid grid-cols-2 ${
               isOccupied ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
-            } gap-4`}
+            } gap-3 sm:gap-4`}
           >
             <div className="bg-[#0B0F17] border border-[#1E2638] rounded-2xl p-4 flex flex-col justify-between">
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
@@ -231,7 +235,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                       )}
                       <span className="inline-flex items-center gap-1.5 text-[#F59E0B] font-bold font-mono-num">
                         <Zap className="w-3.5 h-3.5 shrink-0" />
-                        Rate: {formatPeso(globalElectricRate)}/kWh
+                        Rate: {formatPeso(activeElectricRate)}/kWh
                       </span>
                     </div>
                     {room.tenant.emergencyContact && (
