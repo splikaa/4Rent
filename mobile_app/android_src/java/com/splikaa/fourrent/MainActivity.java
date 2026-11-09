@@ -143,6 +143,28 @@ public class MainActivity extends Activity {
                 }
 
                 String scheme = uri.getScheme();
+                // Handle android intent:// scheme safely without triggering net::ERR_UNKNOWN_URL_SCHEME
+                if ("intent".equalsIgnoreCase(scheme)) {
+                    try {
+                        Intent intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME);
+                        if (intent != null) {
+                            startActivity(intent);
+                            return true;
+                        }
+                    } catch (Exception e) {
+                        try {
+                            Intent intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME);
+                            String fallbackUrl = intent != null ? intent.getStringExtra("browser_fallback_url") : null;
+                            if (fallbackUrl != null) {
+                                view.loadUrl(fallbackUrl);
+                                return true;
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    return true;
+                }
+
                 // Deep link directly to Messenger app if installed
                 if ("fb-messenger".equalsIgnoreCase(scheme)) {
                     try {

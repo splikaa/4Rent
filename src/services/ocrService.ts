@@ -438,53 +438,6 @@ export function buildVerifiedValueCropScreenshot(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, sx, sy, sw, sh, 4, headerH + 4, outW - 8, imgAreaH - 8);
 
-  // Apply contrast stretching and 3x3 unsharp sharpening filter to enhance blurry/dim photos
-  try {
-    const cropImageData = ctx.getImageData(4, headerH + 4, outW - 8, imgAreaH - 8);
-    const d = cropImageData.data;
-    const cw = outW - 8;
-    const ch = imgAreaH - 8;
-
-    // 1. Contrast stretch
-    let minLum = 255;
-    let maxLum = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-      if (lum < minLum) minLum = lum;
-      if (lum > maxLum) maxLum = lum;
-    }
-    const range = Math.max(30, maxLum - minLum);
-    for (let i = 0; i < d.length; i += 4) {
-      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-      const norm = ((lum - minLum) / range) * 255;
-      const c = Math.min(255, Math.max(0, (norm - 128) * 1.35 + 128));
-      const factor = c / Math.max(1, lum);
-      d[i] = Math.min(255, Math.max(0, d[i] * factor));
-      d[i + 1] = Math.min(255, Math.max(0, d[i + 1] * factor));
-      d[i + 2] = Math.min(255, Math.max(0, d[i + 2] * factor));
-    }
-
-    // 2. 3x3 unsharp mask sharpening
-    const copy = new Uint8ClampedArray(d);
-    for (let y = 1; y < ch - 1; y++) {
-      for (let x = 1; x < cw - 1; x++) {
-        const idx = (y * cw + x) * 4;
-        const top = ((y - 1) * cw + x) * 4;
-        const bot = ((y + 1) * cw + x) * 4;
-        const left = (y * cw + (x - 1)) * 4;
-        const right = (y * cw + (x + 1)) * 4;
-
-        for (let c = 0; c < 3; c++) {
-          const val = 5 * copy[idx + c] - copy[top + c] - copy[bot + c] - copy[left + c] - copy[right + c];
-          d[idx + c] = Math.max(0, Math.min(255, val));
-        }
-      }
-    }
-    ctx.putImageData(cropImageData, 4, headerH + 4);
-  } catch {
-    // If canvas is protected or restricted, keep clean drawImage
-  }
-
   // Highlight frame around the register digits
   ctx.strokeStyle = '#f59e0b';
   ctx.lineWidth = 2.5;
@@ -1286,19 +1239,51 @@ export async function openMessengerAppWithReceipt(options: {
     }
   }
 
+  // 2. Web Share API (Mobile Chrome, Safari, Android WebView) -> Opens system share sheet with Messenger
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({
+        title: `4Rent Official Receipt #${receiptNo}`,
+        text: textSummary,
+      });
+      return {
+        openedApp: true,
+        message: 'Receipt shared successfully! Summary copied to clipboard.',
+      };
+    } catch (err: unknown) {
+      if ((err as Error)?.name === 'AbortError') {
+        return {
+          openedApp: false,
+          message: 'Share cancelled.',
+        };
+      }
+      // If Web Share fails or is restricted, continue to fallback
+    }
+  }
+
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
   const isAndroid = /Android/i.test(ua);
   const isIOS = /iPhone|iPad|iPod/i.test(ua);
   const isMobile = isAndroid || isIOS;
 
-  // 2. Mobile Deep Link / Intent to Messenger App
+  // 3. Mobile Deep Link / Intent to Messenger App (Fallback)
+  const messengerUrl = cleanHandle
+    ? `https://m.me/${encodeURIComponent(cleanHandle)}`
+    : 'https://m.me';
+
   if (isAndroid) {
-    const intentUrl = cleanHandle
-      ? `intent://user/${encodeURIComponent(cleanHandle)}#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(`https://m.me/${cleanHandle}`)};end`
-      : `intent://share/#Intent;scheme=fb-messenger;package=com.facebook.orca;end`;
-    
-    // Attempt deep link
-    window.location.href = intentUrl;
+    // Safely attempt app launch without destroying the WebView page
+    try {
+      const a = document.createElement('a');
+      a.href = cleanHandle
+        ? `intent://user/${encodeURIComponent(cleanHandle)}#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(`https://m.me/${cleanHandle}`)};end`
+        : `intent://share/#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent('https://m.me')};end`;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.click();
+    } catch {
+      window.open(messengerUrl, '_blank', 'noopener,noreferrer');
+    }
 
     return {
       openedApp: true,
@@ -1312,7 +1297,11 @@ export async function openMessengerAppWithReceipt(options: {
     const iosScheme = cleanHandle
       ? `fb-messenger://user-thread/${encodeURIComponent(cleanHandle)}`
       : `fb-messenger://`;
-    window.location.href = iosScheme;
+    try {
+      window.location.href = iosScheme;
+    } catch {
+      window.open(messengerUrl, '_blank', 'noopener,noreferrer');
+    }
     return {
       openedApp: true,
       message: cleanHandle
@@ -1321,7 +1310,7 @@ export async function openMessengerAppWithReceipt(options: {
     };
   }
 
-  // 3. Desktop (Windows / macOS)
+  // 4. Desktop (Windows / macOS)
   // Only download if explicitly asked (not during ordinary Messenger share)
   if (autoDownloadPng && pngDataUrl) {
     try {
@@ -1335,7 +1324,7 @@ export async function openMessengerAppWithReceipt(options: {
   }
 
   // Attempt desktop protocol or open web Messenger directly
-  const messengerUrl = cleanHandle
+  const desktopWebUrl = cleanHandle
     ? `https://m.me/${encodeURIComponent(cleanHandle)}`
     : 'https://www.messenger.com';
 
@@ -1359,7 +1348,7 @@ export async function openMessengerAppWithReceipt(options: {
   }
 
   // Open web tab so user is guaranteed to land in Messenger
-  window.open(messengerUrl, '_blank', 'noopener,noreferrer');
+  window.open(desktopWebUrl, '_blank', 'noopener,noreferrer');
 
   return {
     openedApp: true,
