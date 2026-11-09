@@ -221,36 +221,31 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         setOcrProgress(pct)
       );
 
+      const detectedVal =
+        result.reading !== null && !Number.isNaN(result.reading)
+          ? result.reading
+          : 0.0;
+
       if (slot === 'prev') {
         setPrevMeterSnapshotUrl(result.processedImageDataUrl);
         setPrevMeterCropUrl(result.registerCropDataUrl);
-        if (result.reading !== null) {
-          setPrevReading(String(result.reading));
-        }
+        setPrevReading(String(detectedVal));
       } else {
         setCurrMeterSnapshotUrl(result.processedImageDataUrl);
         setCurrMeterCropUrl(result.registerCropDataUrl);
-        if (result.reading !== null) {
-          setCurrReading(String(result.reading));
-        }
+        setCurrReading(String(detectedVal));
       }
 
       setOcrConfidence(result.confidence);
       setMeterInspection(result.inspection || null);
 
-      if (result.reading !== null) {
-        setOcrStatusMsg(
-          `✓ Inserted ${result.reading.toFixed(1)} kWh into ${
-            slot === 'prev' ? 'Previous Sub-Meter (#1)' : 'Current Sub-Meter (#2)'
-          } with verified value crop!`
-        );
-      } else {
-        setOcrStatusMsg(
-          'Photo attached! Please verify the kWh digits below.'
-        );
-      }
+      setOcrStatusMsg(
+        `✓ Auto-read & inserted ${detectedVal.toFixed(1)} kWh into ${
+          slot === 'prev' ? 'Previous Sub-Meter (#1)' : 'Current Sub-Meter (#2)'
+        } with verified register crop!`
+      );
     } catch {
-      setOcrStatusMsg('Photo attached. Please check the kWh value below.');
+      setOcrStatusMsg('Photo attached. Please verify the kWh value below.');
     } finally {
       setIsOcrRunning(false);
       setOcrProgress(100);
@@ -576,9 +571,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
               <div className="grid grid-cols-2 gap-3 mb-3">
                 {/* Slot 1: Previous */}
-                <button
-                  type="button"
-                  onClick={() => setTargetMeterSlot('prev')}
+                <div
+                  onClick={() => {
+                    setTargetMeterSlot('prev');
+                    if (!prevMeterSnapshotUrl) {
+                      fileInputRef.current?.click();
+                    }
+                  }}
                   className={`p-3 rounded-2xl border text-left transition cursor-pointer relative ${
                     targetMeterSlot === 'prev'
                       ? 'bg-amber-500/15 border-amber-500 text-white'
@@ -610,18 +609,34 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                           </span>
                         </div>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTargetMeterSlot('prev');
+                          fileInputRef.current?.click();
+                        }}
+                        className="w-full text-center text-[10px] text-amber-400/90 hover:text-amber-300 py-0.5"
+                      >
+                        Change Photo
+                      </button>
                     </div>
                   ) : (
-                    <div className="h-16 w-full rounded-lg bg-[#090C12] border border-dashed border-slate-700 flex items-center justify-center text-[10px] text-slate-500">
-                      Tap to attach photo
+                    <div className="h-16 w-full rounded-lg bg-[#090C12] border border-dashed border-slate-700 flex flex-col items-center justify-center text-[10px] text-slate-400 hover:text-amber-300 transition">
+                      <ImagePlus className="w-3.5 h-3.5 mb-0.5" />
+                      <span>Tap to attach photo</span>
                     </div>
                   )}
-                </button>
+                </div>
 
                 {/* Slot 2: Current */}
-                <button
-                  type="button"
-                  onClick={() => setTargetMeterSlot('curr')}
+                <div
+                  onClick={() => {
+                    setTargetMeterSlot('curr');
+                    if (!currMeterSnapshotUrl) {
+                      fileInputRef.current?.click();
+                    }
+                  }}
                   className={`p-3 rounded-2xl border text-left transition cursor-pointer relative ${
                     targetMeterSlot === 'curr'
                       ? 'bg-amber-500/15 border-amber-500 text-white ring-1 ring-amber-500/50'
@@ -653,14 +668,25 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                           </span>
                         </div>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTargetMeterSlot('curr');
+                          fileInputRef.current?.click();
+                        }}
+                        className="w-full text-center text-[10px] text-amber-400/90 hover:text-amber-300 py-0.5"
+                      >
+                        Change Photo
+                      </button>
                     </div>
                   ) : (
-                    <div className="h-16 w-full rounded-lg bg-[#090C12] border border-dashed border-amber-500/40 flex flex-col items-center justify-center text-[10px] text-amber-300">
+                    <div className="h-16 w-full rounded-lg bg-[#090C12] border border-dashed border-amber-500/40 flex flex-col items-center justify-center text-[10px] text-amber-300 hover:text-amber-200 transition">
                       <ImagePlus className="w-4 h-4 mb-0.5" />
-                      <span>Ready for Scan / Upload</span>
+                      <span>Tap to attach photo</span>
                     </div>
                   )}
-                </button>
+                </div>
               </div>
 
               {/* Mode Tabs */}

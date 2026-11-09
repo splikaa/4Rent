@@ -9,31 +9,36 @@ import {
   X,
 } from 'lucide-react';
 
+export type FeedbackVariant = 'success' | 'info' | 'warning' | 'security' | 'error';
+
 export interface FeedbackNotification {
   id: string;
   title: string;
   message: string;
-  variant?: 'success' | 'info' | 'warning' | 'security';
+  variant?: FeedbackVariant;
   actionLabel?: string;
   onAction?: () => void;
   durationMs?: number;
 }
 
-interface FeedbackToastBarProps {
-  feedback: FeedbackNotification | null;
+export interface FeedbackToastBarProps {
+  feedback?: FeedbackNotification | null;
+  notification?: FeedbackNotification | null;
   onDismiss: () => void;
 }
 
 export const FeedbackToastBar: React.FC<FeedbackToastBarProps> = ({
   feedback,
+  notification,
   onDismiss,
 }) => {
+  const activeItem = feedback || notification || null;
   const [progress, setProgress] = useState(100);
 
   useEffect(() => {
-    if (!feedback) return;
+    if (!activeItem) return;
     setProgress(100);
-    const totalMs = feedback.durationMs || 3800;
+    const totalMs = activeItem.durationMs || 3800;
     const start = Date.now();
 
     const interval = setInterval(() => {
@@ -47,9 +52,9 @@ export const FeedbackToastBar: React.FC<FeedbackToastBarProps> = ({
     }, 40);
 
     return () => clearInterval(interval);
-  }, [feedback, onDismiss]);
+  }, [activeItem, onDismiss]);
 
-  if (!feedback) return null;
+  if (!activeItem) return null;
 
   const variantStyles = {
     success: {
@@ -88,7 +93,24 @@ export const FeedbackToastBar: React.FC<FeedbackToastBarProps> = ({
         'bg-blue-500 hover:bg-blue-400 text-white shadow-blue-500/20',
       icon: <ShieldCheck className="w-5 h-5" />,
     },
-  }[feedback.variant || 'success'];
+    error: {
+      border: 'border-red-500/55',
+      bg: 'from-[#281111]/95 via-[#161D2B]/95 to-[#111826]/95',
+      iconBg: 'bg-red-500/20 border-red-500/40 text-red-400',
+      bar: 'bg-gradient-to-r from-red-500 to-rose-400',
+      actionBtn:
+        'bg-red-500 hover:bg-red-400 text-white shadow-red-500/20',
+      icon: <AlertTriangle className="w-5 h-5" />,
+    },
+  }[activeItem.variant || 'success'] || {
+    border: 'border-emerald-500/45',
+    bg: 'from-[#11241E]/95 via-[#131C2B]/95 to-[#111826]/95',
+    iconBg: 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400',
+    bar: 'bg-gradient-to-r from-emerald-400 to-amber-400',
+    actionBtn:
+      'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20',
+    icon: <CheckCircle2 className="w-5 h-5" />,
+  };
 
   return (
     <div
@@ -97,7 +119,7 @@ export const FeedbackToastBar: React.FC<FeedbackToastBarProps> = ({
       className="fixed top-4 inset-x-0 z-[70] flex justify-center px-4 pointer-events-none no-print"
     >
       <div
-        key={feedback.id}
+        key={activeItem.id}
         className={`pointer-events-auto w-full max-w-lg rounded-2xl bg-gradient-to-r ${variantStyles.bg} border ${variantStyles.border} backdrop-blur-xl shadow-[0_18px_45px_rgba(0,0,0,0.65)] overflow-hidden animate-feedback-toast`}
       >
         <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3">
@@ -110,27 +132,27 @@ export const FeedbackToastBar: React.FC<FeedbackToastBarProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <h4 className="text-xs sm:text-sm font-extrabold text-white truncate">
-                  {feedback.title}
+                  {activeItem.title}
                 </h4>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-300 line-clamp-2 mt-0.5 leading-snug">
-                {feedback.message}
+                {activeItem.message}
               </p>
             </div>
           </div>
 
           {/* Easy Go-Through Quick Action + 1-Tap Pass-Through */}
           <div className="flex items-center gap-2 shrink-0">
-            {feedback.actionLabel && feedback.onAction && (
+            {activeItem.actionLabel && activeItem.onAction && (
               <button
                 type="button"
                 onClick={() => {
-                  feedback.onAction?.();
+                  activeItem.onAction?.();
                   onDismiss();
                 }}
                 className={`px-3 py-2 rounded-xl font-extrabold text-[11px] inline-flex items-center gap-1 shadow-md transition cursor-pointer btn-fluid ${variantStyles.actionBtn}`}
               >
-                <span>{feedback.actionLabel}</span>
+                <span>{activeItem.actionLabel}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             )}
