@@ -160,6 +160,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     return () => stopCamera();
   }, [isOpen]);
 
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [isCameraActive, scanTab]);
+
   const stopCamera = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -171,7 +178,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const startCamera = async () => {
     setOcrStatusMsg(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      nativeCameraInputRef.current?.click();
+      setOcrStatusMsg(
+        'Live stream unavailable in this browser. Please use Device Camera App below.'
+      );
       return;
     }
     try {
@@ -193,15 +202,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       setIsCameraActive(true);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
       }
     } catch {
-      // If browser/WebView denies getUserMedia stream, fallback smoothly to native camera capture
       setIsCameraActive(false);
-      setScanTab('upload');
       setOcrStatusMsg(
-        'Opening device camera. Please snap the sub-meter register.'
+        'Camera permission was denied or device camera is busy. You can snap a photo with your device camera app.'
       );
-      setTimeout(() => nativeCameraInputRef.current?.click(), 200);
     }
   };
 
@@ -216,7 +223,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     setIsOcrRunning(true);
     setOcrProgress(15);
     setOcrStatusMsg(
-      `Reading sub-meter value for ${
+      `Reading & enhancing sub-meter value for ${
         slot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'
       }...`
     );
@@ -235,6 +242,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         setPrevMeterSnapshotUrl(result.processedImageDataUrl);
         setPrevMeterCropUrl(result.registerCropDataUrl);
         setPrevReading(String(detectedVal));
+        // Automatically switch focus to Current slot for convenient next step
+        setTargetMeterSlot('curr');
       } else {
         setCurrMeterSnapshotUrl(result.processedImageDataUrl);
         setCurrMeterCropUrl(result.registerCropDataUrl);
@@ -245,9 +254,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       setMeterInspection(result.inspection || null);
 
       setOcrStatusMsg(
-        `✓ Auto-read & inserted ${detectedVal.toFixed(1)} kWh into ${
+        `✓ Enhanced & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
           slot === 'prev' ? 'Previous Sub-Meter (#1)' : 'Current Sub-Meter (#2)'
-        } with verified register crop!`
+        }! Bill calculations updated.`
       );
     } catch {
       setOcrStatusMsg('Photo attached. Please verify the kWh value below.');
@@ -748,37 +757,107 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   className="hidden"
                 />
 
-                {scanTab === 'camera' && isCameraActive ? (
-                  <div className="relative w-full">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-44 object-cover rounded-xl"
-                    />
-                    <div className="flex gap-2 mt-2.5">
-                      <button
-                        type="button"
-                        onClick={handleCaptureFromCamera}
-                        className="flex-1 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Camera className="w-4 h-4" />
-                        <span>
-                          Capture & Insert into{' '}
-                          {targetMeterSlot === 'prev' ? 'Slot #1' : 'Slot #2'}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => nativeCameraInputRef.current?.click()}
-                        className="px-3 py-2.5 rounded-xl bg-[#1B2333] border border-[#28364F] text-slate-300 text-xs font-bold flex items-center gap-1"
-                        title="Open device native camera app"
-                      >
-                        <span>Device App</span>
-                      </button>
+                {scanTab === 'camera' ? (
+                  isCameraActive ? (
+                    <div className="relative w-full">
+                      <div className="relative w-full h-48 sm:h-56 bg-black rounded-xl overflow-hidden border border-amber-500/40">
+                        <video
+                          ref={videoRef}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-full object-cover"
+                        />
+                        {/* Live Viewfinder Reticle */}
+                        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-3">
+                          <div className="w-11/12 max-w-[340px] h-24 border-2 border-dashed border-amber-400 rounded-xl relative flex items-center justify-center bg-black/25 backdrop-blur-[0.5px]">
+                            <span className="text-[10px] font-extrabold text-amber-300 bg-slate-950/85 px-2 py-0.5 rounded shadow border border-amber-500/30">
+                              Align Sub-Meter Register (5 Black + 1 Red Tenths)
+                            </span>
+                            <div className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-amber-400" />
+                            <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-amber-400" />
+                            <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 border-amber-400" />
+                            <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-amber-400" />
+                          </div>
+                          <span className="text-[9px] text-slate-300 bg-slate-950/70 px-2 py-0.5 rounded mt-2">
+                            Auto-enhances blurry or dim sub-meter photos
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-2.5">
+                        <button
+                          type="button"
+                          onClick={handleCaptureFromCamera}
+                          disabled={isOcrRunning}
+                          className="flex-1 min-w-[200px] py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 transition"
+                        >
+                          {isOcrRunning ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Reading & Enhancing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Camera className="w-4 h-4" />
+                              <span>
+                                Snap & Insert into{' '}
+                                {targetMeterSlot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'}
+                              </span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => nativeCameraInputRef.current?.click()}
+                          className="px-3 py-2.5 rounded-xl bg-[#1B2333] hover:bg-[#25324A] border border-[#28364F] text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                          title="Open device native camera app"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Device App</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopCamera}
+                          className="px-3 py-2.5 rounded-xl bg-[#141A25] hover:bg-[#1E2738] border border-slate-700 text-slate-400 hover:text-white text-xs font-bold cursor-pointer transition"
+                        >
+                          Close
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="text-center py-3">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto mb-2">
+                        <Camera className="w-6 h-6" />
+                      </div>
+                      <p className="text-xs font-bold text-white">
+                        Live Camera Capture for{' '}
+                        {targetMeterSlot === 'prev'
+                          ? 'Sub-Meter #1 (Previous)'
+                          : 'Sub-Meter #2 (Current)'}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-0.5 max-w-sm mx-auto">
+                        Viewfinder auto-sharpens blurry or dim sub-meter drums and digital LCD displays.
+                      </p>
+                      <div className="flex flex-wrap items-center justify-center gap-2 mt-3.5">
+                        <button
+                          type="button"
+                          onClick={startCamera}
+                          className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs inline-flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 transition"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Start Live Camera</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => nativeCameraInputRef.current?.click()}
+                          className="px-3.5 py-2 rounded-xl bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-200 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
+                        >
+                          <Camera className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Snap via Device Camera App</span>
+                        </button>
+                      </div>
+                    </div>
+                  )
                 ) : (
                   <div className="text-center py-2">
                     <ImagePlus className="w-8 h-8 text-amber-400 mx-auto mb-1.5" />

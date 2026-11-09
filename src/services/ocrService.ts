@@ -438,6 +438,53 @@ export function buildVerifiedValueCropScreenshot(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, sx, sy, sw, sh, 4, headerH + 4, outW - 8, imgAreaH - 8);
 
+  // Apply contrast stretching and 3x3 unsharp sharpening filter to enhance blurry/dim photos
+  try {
+    const cropImageData = ctx.getImageData(4, headerH + 4, outW - 8, imgAreaH - 8);
+    const d = cropImageData.data;
+    const cw = outW - 8;
+    const ch = imgAreaH - 8;
+
+    // 1. Contrast stretch
+    let minLum = 255;
+    let maxLum = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      if (lum < minLum) minLum = lum;
+      if (lum > maxLum) maxLum = lum;
+    }
+    const range = Math.max(30, maxLum - minLum);
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const norm = ((lum - minLum) / range) * 255;
+      const c = Math.min(255, Math.max(0, (norm - 128) * 1.35 + 128));
+      const factor = c / Math.max(1, lum);
+      d[i] = Math.min(255, Math.max(0, d[i] * factor));
+      d[i + 1] = Math.min(255, Math.max(0, d[i + 1] * factor));
+      d[i + 2] = Math.min(255, Math.max(0, d[i + 2] * factor));
+    }
+
+    // 2. 3x3 unsharp mask sharpening
+    const copy = new Uint8ClampedArray(d);
+    for (let y = 1; y < ch - 1; y++) {
+      for (let x = 1; x < cw - 1; x++) {
+        const idx = (y * cw + x) * 4;
+        const top = ((y - 1) * cw + x) * 4;
+        const bot = ((y + 1) * cw + x) * 4;
+        const left = (y * cw + (x - 1)) * 4;
+        const right = (y * cw + (x + 1)) * 4;
+
+        for (let c = 0; c < 3; c++) {
+          const val = 5 * copy[idx + c] - copy[top + c] - copy[bot + c] - copy[left + c] - copy[right + c];
+          d[idx + c] = Math.max(0, Math.min(255, val));
+        }
+      }
+    }
+    ctx.putImageData(cropImageData, 4, headerH + 4);
+  } catch {
+    // If canvas is protected or restricted, keep clean drawImage
+  }
+
   // Highlight frame around the register digits
   ctx.strokeStyle = '#f59e0b';
   ctx.lineWidth = 2.5;
@@ -777,6 +824,8 @@ function buildRegisterWindowCropForOcr(
 
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imgData.data;
+
+  // 1. Contrast stretching
   let minLum = 255;
   let maxLum = 0;
   for (let i = 0; i < data.length; i += 4) {
@@ -788,11 +837,33 @@ function buildRegisterWindowCropForOcr(
   for (let i = 0; i < data.length; i += 4) {
     const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
     const norm = ((lum - minLum) / range) * 255;
-    const c = Math.min(255, Math.max(0, (norm - 128) * 1.55 + 128));
+    const c = Math.min(255, Math.max(0, (norm - 128) * 1.6 + 128));
     data[i] = c;
     data[i + 1] = c;
     data[i + 2] = c;
   }
+
+  // 2. Unsharp sharpening filter for blurry or slightly out-of-focus captures
+  const copy = new Uint8ClampedArray(data);
+  const cw = canvas.width;
+  const ch = canvas.height;
+  for (let y = 1; y < ch - 1; y++) {
+    for (let x = 1; x < cw - 1; x++) {
+      const idx = (y * cw + x) * 4;
+      const top = ((y - 1) * cw + x) * 4;
+      const bot = ((y + 1) * cw + x) * 4;
+      const left = (y * cw + (x - 1)) * 4;
+      const right = (y * cw + (x + 1)) * 4;
+
+      // 3x3 Sharpen Kernel: center * 5 - (top + bot + left + right)
+      const val = 5 * copy[idx] - copy[top] - copy[bot] - copy[left] - copy[right];
+      const clamped = Math.max(0, Math.min(255, val));
+      data[idx] = clamped;
+      data[idx + 1] = clamped;
+      data[idx + 2] = clamped;
+    }
+  }
+
   ctx.putImageData(imgData, 0, 0);
   return canvas.toDataURL('image/png');
 }

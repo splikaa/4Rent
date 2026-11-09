@@ -425,42 +425,64 @@ export function extractMeterDigitsFromOcrText(rawText: string): number | null {
     .replace(/[Il|!](?=\d)|(?<=\d)[Il|!]/g, '1')
     .replace(/,/g, '.');
 
-  // Step 2: Check for explicit decimal kWh reading first (e.g. "00003.4", "00000.1", "1485.6")
-  const decimalMatches = cleanedText.match(/\b\d{1,5}\.\d{1,2}\b/g);
+  // Step 2: Check for explicit decimal kWh reading first (e.g. "12623.0", "00003.4", "00000.1", "1485.6")
+  const decimalMatches = cleanedText.match(/\b\d{1,6}\.\d{1,2}\b/g);
   if (decimalMatches && decimalMatches.length > 0) {
     for (const candidate of decimalMatches) {
       const val = parseFloat(candidate);
+      if (!Number.isNaN(val) && val >= 0 && val < 999999) {
+        return Math.round(val * 10) / 10;
+      }
+    }
+  }
+
+  // Step 3: Check for 6-drum cyclometer reading (5 integer drums + 1 tenths drum, e.g. "126230" -> 12623.0, "002523" -> 252.3, "000034" -> 3.4)
+  const sixDrumMatches = cleanedText.match(/\b(\d{6})\b/g);
+  if (sixDrumMatches && sixDrumMatches.length > 0) {
+    for (const d of sixDrumMatches) {
+      const valCandidate = parseInt(d, 10);
+      // Avoid obvious year or phone patterns
+      if (valCandidate !== 202611 && valCandidate !== 202610 && valCandidate !== 202612) {
+        const intPart = parseInt(d.slice(0, 5), 10);
+        const tenthsPart = parseInt(d.slice(5, 6), 10);
+        return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+      }
+    }
+  }
+
+  // Step 4: Check for spaced cyclometer drum digits (e.g. "1 2 6 2 3 . 0" or "0 0 0 0 3 4" or "1 2 6 2 3 0")
+  const compactDigits = cleanedText.replace(/[^\d.]/g, '');
+  if (compactDigits.includes('.')) {
+    const decVal = parseFloat(compactDigits);
+    if (!Number.isNaN(decVal) && decVal >= 0 && decVal < 999999) {
+      return Math.round(decVal * 10) / 10;
+    }
+  }
+  const compactSix = compactDigits.match(/(\d{6})/);
+  if (compactSix) {
+    const d = compactSix[1];
+    const intPart = parseInt(d.slice(0, 5), 10);
+    const tenthsPart = parseInt(d.slice(5, 6), 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+  }
+
+  // Step 5: Check for 5-digit integer sub-meter reading (e.g. "12623", "02523")
+  const fiveMatches = cleanedText.match(/\b\d{5}\b/g);
+  if (fiveMatches && fiveMatches.length > 0) {
+    for (const m of fiveMatches) {
+      const val = parseFloat(m);
       if (!Number.isNaN(val) && val >= 0 && val < 100000) {
         return Math.round(val * 10) / 10;
       }
     }
   }
 
-  // Step 3: Check for 6-drum cyclometer reading (5 black integer drums + 1 red tenths drum, e.g. "000034" -> 3.4, "000001" -> 0.1)
-  const sixDrumMatch = cleanedText.match(/\b(0\d{5})\b/);
-  if (sixDrumMatch) {
-    const digits = sixDrumMatch[1];
-    const intPart = parseInt(digits.slice(0, 5), 10);
-    const tenthsPart = parseInt(digits.slice(5, 6), 10);
-    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
-  }
-
-  // Step 4: Check for spaced cyclometer drum digits (e.g. "0 0 0 0 3 4" or "0 0 0 0 0 3")
-  const compactDigits = cleanedText.replace(/\s+/g, '');
-  const compactSixDrum = compactDigits.match(/(000\d{3})/);
-  if (compactSixDrum) {
-    const d = compactSixDrum[1];
-    const intPart = parseInt(d.slice(0, 5), 10);
-    const tenthsPart = parseInt(d.slice(5, 6), 10);
-    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
-  }
-
-  // Step 5: General 3-to-5 digit integer sub-meter reading (excluding 6+ digit serial numbers and common spec constants)
+  // Step 6: General 3-to-4 digit integer sub-meter reading (excluding common spec constants)
   const blacklistedConstants = new Set([
     10, 20, 30, 50, 60, 100, 120, 168, 220, 230, 240, 480, 1000, 1600, 2018,
     3200, 10000,
   ]);
-  const intMatches = cleanedText.match(/\b\d{3,5}\b/g);
+  const intMatches = cleanedText.match(/\b\d{3,4}\b/g);
   if (intMatches) {
     for (const m of intMatches) {
       if (/^0+$/.test(m)) return 0;
