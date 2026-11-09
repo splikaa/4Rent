@@ -1,18 +1,26 @@
 package com.splikaa.fourrent;
 
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.hardware.biometrics.BiometricPrompt;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
+import android.provider.MediaStore;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -29,12 +37,17 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_RESULT_CODE = 1001;
+    private static final int CAMERA_PERMISSION_REQUEST_CODE = 2001;
+    private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 2002;
+
+    private static final String NOTIFICATION_CHANNEL_ID = "four_rent_alerts";
     private static final String LOCAL_HOST = "appassets.androidplatform.net";
     private static final String APP_HOST = "splikaa.github.io";
     private static final String START_URL = "https://" + LOCAL_HOST + "/index.html?mobile=1";
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
+    private PermissionRequest pendingWebPermissionRequest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,10 +61,11 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
 
+        initNotificationChannel();
+
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#090D14"));
 
-        // Clear any stale HTTP cache from previous APK versions so new deterministic assets load cleanly
         try {
             webView.clearCache(true);
         } catch (Exception ignored) {
@@ -71,8 +85,9 @@ public class MainActivity extends Activity {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
 
-        // Expose Native Android Hardware Biometric Fingerprint Bridge to JavaScript
+        // Expose Native Android Hardware Bridges to JavaScript
         webView.addJavascriptInterface(new AndroidBiometricBridge(), "AndroidBiometrics");
+        webView.addJavascriptInterface(new AndroidNativeBridge(), "AndroidNative");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -126,7 +141,32 @@ public class MainActivity extends Activity {
                 if (LOCAL_HOST.equalsIgnoreCase(host) || APP_HOST.equalsIgnoreCase(host)) {
                     return false;
                 }
+
                 String scheme = uri.getScheme();
+                // Deep link directly to Messenger app if installed
+                if ("fb-messenger".equalsIgnoreCase(scheme)) {
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                        startActivity(intent);
+                        return true;
+                    } catch (Exception ignored) {
+                    }
+                }
+
+                if ("m.me".equalsIgnoreCase(host) || (host != null && host.contains("messenger.com"))) {
+                    try {
+                        Intent messengerIntent = new Intent(Intent.ACTION_VIEW, uri);
+                        if (isPackageInstalled("com.facebook.orca")) {
+                            messengerIntent.setPackage("com.facebook.orca");
+                        } else if (isPackageInstalled("com.facebook.mlite")) {
+                            messengerIntent.setPackage("com.facebook.mlite");
+                        }
+                        startActivity(messengerIntent);
+                        return true;
+                    } catch (Exception ignored) {
+                    }
+                }
+
                 if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme) || "tel".equalsIgnoreCase(scheme) || "mailto".equalsIgnoreCase(scheme)) {
                     try {
                         Intent intent = new Intent(Intent.ACTION_VIEW, uri);
@@ -141,6 +181,32 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        boolean requiresCamera = false;
+                        for (String res : request.getResources()) {
+                            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res)) {
+                                requiresCamera = true;
+                                break;
+                            }
+                        }
+
+                        if (requiresCamera && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            if (checkSelfPermission("android.permission.CAMERA") != PackageManager.PERMISSION_GRANTED) {
+                                pendingWebPermissionRequest = request;
+                                requestPermissions(new String[]{"android.permission.CAMERA"}, CAMERA_PERMISSION_REQUEST_CODE);
+                                return;
+                            }
+                        }
+
+                        request.grant(request.getResources());
+                    }
+                });
+            }
+
+            @Override
             public boolean onShowFileChooser(
                     WebView webView,
                     ValueCallback<Uri[]> filePathCallback,
@@ -151,15 +217,16 @@ public class MainActivity extends Activity {
                 }
                 MainActivity.this.filePathCallback = filePathCallback;
 
-                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("image/*");
+                Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
+                galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                galleryIntent.setType("image/*");
+
+                Intent chooser = Intent.createChooser(galleryIntent, "Capture or Select Sub-Meter Photo");
+                chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cameraIntent});
 
                 try {
-                    startActivityForResult(
-                            Intent.createChooser(intent, "Select Sub-Meter Photo"),
-                            FILE_CHOOSER_RESULT_CODE
-                    );
+                    startActivityForResult(chooser, FILE_CHOOSER_RESULT_CODE);
                 } catch (ActivityNotFoundException e) {
                     MainActivity.this.filePathCallback = null;
                     return false;
@@ -170,6 +237,190 @@ public class MainActivity extends Activity {
 
         setContentView(webView);
         webView.loadUrl(START_URL);
+    }
+
+    private void initNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                if (manager != null) {
+                    NotificationChannel channel = new NotificationChannel(
+                            NOTIFICATION_CHANNEL_ID,
+                            "4Rent Billing & Due Window Reminders",
+                            NotificationManager.IMPORTANCE_HIGH
+                    );
+                    channel.setDescription("Day 1–10 billing and official receipt notifications");
+                    channel.enableLights(true);
+                    channel.setLightColor(Color.parseColor("#F59E0B"));
+                    channel.enableVibration(true);
+                    manager.createNotificationChannel(channel);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private boolean isPackageInstalled(String packageName) {
+        try {
+            getPackageManager().getPackageInfo(packageName, 0);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public class AndroidNativeBridge {
+        @JavascriptInterface
+        public String getNetworkType() {
+            try {
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                if (cm != null) {
+                    NetworkInfo active = cm.getActiveNetworkInfo();
+                    if (active != null && active.isConnected()) {
+                        int type = active.getType();
+                        if (type == ConnectivityManager.TYPE_WIFI) {
+                            return "wifi";
+                        } else if (type == ConnectivityManager.TYPE_MOBILE) {
+                            return "cellular";
+                        }
+                        return "wifi";
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            return "offline";
+        }
+
+        @JavascriptInterface
+        public boolean areNotificationsEnabled() {
+            try {
+                NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                if (manager != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        return manager.areNotificationsEnabled();
+                    }
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+            return true;
+        }
+
+        @JavascriptInterface
+        public boolean requestAndVerifyNotification(final String title, final String body) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, NOTIFICATION_PERMISSION_REQUEST_CODE);
+                            return;
+                        }
+                    }
+                    sendTestNotification(title, body);
+                    notifyNotificationResult(true);
+                }
+            });
+            return areNotificationsEnabled();
+        }
+
+        @JavascriptInterface
+        public boolean shareToMessenger(final String pngBase64, final String summaryText, final String handle) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                        sendIntent.setType("text/plain");
+                        sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+
+                        boolean hasOrca = isPackageInstalled("com.facebook.orca");
+                        boolean hasLite = isPackageInstalled("com.facebook.mlite");
+
+                        if (hasOrca) {
+                            sendIntent.setPackage("com.facebook.orca");
+                        } else if (hasLite) {
+                            sendIntent.setPackage("com.facebook.mlite");
+                        }
+
+                        Intent chooser = Intent.createChooser(sendIntent, "Share Receipt to Messenger");
+                        startActivity(chooser);
+                    } catch (Exception e) {
+                        // If direct intent failed, attempt deep link
+                        try {
+                            String target = (handle != null && !handle.trim().isEmpty())
+                                    ? "https://m.me/" + handle.trim()
+                                    : "https://www.messenger.com/";
+                            Intent webIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(target));
+                            startActivity(webIntent);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            });
+            return true;
+        }
+    }
+
+    private void sendTestNotification(String title, String body) {
+        try {
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager == null) return;
+
+            android.app.Notification.Builder builder;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder = new android.app.Notification.Builder(this, NOTIFICATION_CHANNEL_ID);
+            } else {
+                builder = new android.app.Notification.Builder(this);
+            }
+
+            builder.setContentTitle(title != null ? title : "4Rent Management System")
+                    .setContentText(body != null ? body : "Billing & Due-Date Reminders are Active")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setAutoCancel(true);
+
+            manager.notify(101, builder.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void notifyNotificationResult(final boolean granted) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (webView != null) {
+                    String js = "if (window.__onAndroidNotificationPermissionResult) { window.__onAndroidNotificationPermissionResult(" + granted + "); }";
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        webView.evaluateJavascript(js, null);
+                    } else {
+                        webView.loadUrl("javascript:" + js);
+                    }
+                }
+            }
+        });
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == CAMERA_PERMISSION_REQUEST_CODE) {
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (pendingWebPermissionRequest != null) {
+                if (granted) {
+                    pendingWebPermissionRequest.grant(pendingWebPermissionRequest.getResources());
+                } else {
+                    pendingWebPermissionRequest.deny();
+                }
+                pendingWebPermissionRequest = null;
+            }
+        } else if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (granted) {
+                sendTestNotification("4Rent Notifications Verified ✓", "Day 1–10 billing alerts are active on this phone.");
+            }
+            notifyNotificationResult(granted);
+        } else {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
     }
 
     public class AndroidBiometricBridge {
@@ -187,7 +438,7 @@ public class MainActivity extends Activity {
                         try {
                             BiometricPrompt prompt = new BiometricPrompt.Builder(MainActivity.this)
                                     .setTitle(title != null ? title : "4Rent Management System")
-                                    .setSubtitle(subtitle != null ? subtitle : "Touch the fingerprint sensor to authenticate")
+                                    .setSubtitle(subtitle != null ? subtitle : "Touch fingerprint sensor to authenticate")
                                     .setNegativeButton(
                                             "Use 4-Digit PIN",
                                             getMainExecutor(),
@@ -215,9 +466,8 @@ public class MainActivity extends Activity {
                                             super.onAuthenticationError(errorCode, errString);
                                             if (errorCode == BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED
                                                     || errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
-                                                notifyBiometricResult(false, "Fingerprint scan cancelled. Tap sensor icon to retry.");
+                                                notifyBiometricResult(false, "Fingerprint scan cancelled. Tap to retry.");
                                             } else {
-                                                // If device has no enrolled OS fingerprint yet, allow touch sensor enrollment
                                                 notifyBiometricResult(true, "Mobile biometric sensor verified.");
                                             }
                                         }

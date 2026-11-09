@@ -9,7 +9,7 @@ $aapt2 = "$buildTools\aapt2.exe"
 $zipalign = "$buildTools\zipalign.exe"
 $androidJar = "$sdkDir\platforms\android.jar"
 
-$rootDir = "c:\Users\Gameiun PeSoNet\Documents\4Rent"
+$rootDir = (Resolve-Path "$PSScriptRoot\..").Path
 $mobileDir = "$rootDir\mobile_app"
 $srcDir = "$mobileDir\android_src"
 $workDir = "$env:TEMP\4rent_apk_build"

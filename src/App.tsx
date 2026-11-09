@@ -35,6 +35,7 @@ import {
   applyPaymentWithOverpayment,
   clampDueDayOneToTen,
 } from './utils/billingCalculator';
+import { requestAndVerifyNotifications } from './services/ocrService';
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
 import { LockScreen } from './components/security/LockScreen';
 import { LoadingSplashScreen } from './components/common/LoadingSplashScreen';
@@ -444,22 +445,17 @@ export function App() {
   };
 
   const handleAllowReminders = async () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      try {
-        await Notification.requestPermission();
-      } catch {
-        // ignore browser permission prompt error
-      }
-    }
+    const res = await requestAndVerifyNotifications();
     setSettings((prev) => ({
       ...prev,
       remindersPromptShown: true,
-      remindersEnabled: true,
+      remindersEnabled: res.granted,
+      notificationsVerified: res.verified,
     }));
     triggerFeedback(
-      'Due-Window Reminders Enabled',
-      'System will notify you of unpaid bills from Day 1 to Day 10.',
-      'success',
+      res.granted ? 'Reminders Verified ✓' : 'Permission Not Granted',
+      res.message,
+      res.granted ? 'success' : 'warning',
       'View Payments',
       () => setActiveTab('payments')
     );
@@ -796,7 +792,8 @@ export function App() {
     updatedRoomLastPhotoUrl: string,
     updatedRoomUnpaidBalance: number,
     overpaymentAddedToAdvance: number,
-    advanceDeductedFromRoom: number
+    advanceDeductedFromRoom: number,
+    updatedRoomLastCropUrl?: string
   ) => {
     try {
       setBills((prev) => {
@@ -850,6 +847,7 @@ export function App() {
             ...r,
             lastMeterReading: updatedRoomLastReading,
             lastMeterPhotoDataUrl: updatedRoomLastPhotoUrl,
+            lastMeterCropDataUrl: updatedRoomLastCropUrl || r.lastMeterCropDataUrl,
             lastReadingDate: newBill.createdAt,
             unpaidBalance: updatedRoomUnpaidBalance,
             advanceRent: nextAdv,

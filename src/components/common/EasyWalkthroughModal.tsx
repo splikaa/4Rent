@@ -37,14 +37,13 @@ export const EasyWalkthroughModal: React.FC<EasyWalkthroughModalProps> = ({
 
   const steps = [
     {
-      badge: 'Step 1 of 5 • Room & Tenant Setup',
-      title: 'Create Rooms & Verify Tenant Lease Privacy',
+      badge: 'Step 1 of 5 • Room Setup',
+      title: 'Create Rooms & Manage Tenants',
       description:
-        'Each apartment room tracks its own continuous electric sub-meter kWh reading (never resets when tenants change), required security deposit, and RA 10173 Data Privacy / Contract of Lease status.',
+        'Track continuous electric sub-meter readings, deposits, and tenant contacts per room.',
       highlights: [
-        'Continuous Sub-Meter kWh persists across tenant move-outs',
-        'Occupied rooms are protected from accidental archiving without a reason',
-        '1-tap Privacy Shield masks tenant phone numbers & revenue on screen',
+        'Continuous sub-meter baseline never resets on move-out',
+        'Occupied rooms protected from accidental archiving',
       ],
       icon: <DoorOpen className="w-6 h-6 text-amber-400" />,
       actionLabel: 'Go to Rooms & Add Room',
@@ -55,68 +54,64 @@ export const EasyWalkthroughModal: React.FC<EasyWalkthroughModalProps> = ({
       },
     },
     {
-      badge: 'Step 2 of 5 • Calibrated Sub-Meter OCR',
-      title: 'Scan Previous & Current Sub-Meters Accurately',
+      badge: 'Step 2 of 5 • Sub-Meter OCR',
+      title: 'Scan & Verify Sub-Meter Readings',
       description:
-        'Upload or capture photos of mechanical roller meters (Safari SY-168, Static TYPE-SP1) or digital LCD meters (GE kV2c, Cirtech MT-60i). The system inspects the 5 black integer + 1 red decimal tenths drums and calculates exact kWh consumption.',
+        'Upload or snap a photo of any mechanical roller or digital LCD meter. Digits are auto-read with a zoomed value crop.',
       highlights: [
-        'Filters out faceplate serial numbers, barcodes & 240V/60Hz specs',
-        'Embeds both Previous (#1) and Current (#2) meter photo proofs',
-        'Automatically deducts any available Room Advance Balance on billing day',
+        'Auto-inserts reading into Previous or Current slot',
+        'Next month automatically rolls current meter into previous baseline',
       ],
       icon: <Camera className="w-6 h-6 text-amber-400" />,
-      actionLabel: 'Open Sub-Meter OCR Scanner',
+      actionLabel: 'Open Sub-Meter Scanner',
       onAction: () => {
         onOpenScanner();
         onClose();
       },
     },
     {
-      badge: 'Step 3 of 5 • White-Paper Official Receipt',
-      title: 'Formal Statement of Account & Printable Receipt',
+      badge: 'Step 3 of 5 • Official Receipt',
+      title: 'Generate & Share Receipts',
       description:
-        'Every generated bill produces a formal, crisp White-Paper Statement of Account & Official Receipt with bordered tables, dual sub-meter photo proofs, itemized charges, and Landlord/Tenant signature lines.',
+        'Clean white-paper statement with itemized charges and dual sub-meter photo proofs.',
       highlights: [
-        'Single-page A4 Print / PDF output & High-DPI PNG image download',
-        '1-click Copy & Share directly to Tenant Facebook Messenger',
-        '1 Room = 1 Active Official Receipt (older receipts auto-archive)',
+        'Share directly to Messenger app or download high-res PNG',
+        'Print or export single-page A4 PDF',
       ],
       icon: <ReceiptText className="w-6 h-6 text-emerald-400" />,
-      actionLabel: 'Go to Payment & Receipts',
+      actionLabel: 'View Payments & Receipts',
       onAction: () => {
         onNavigateTab('payments');
         onClose();
       },
     },
     {
-      badge: 'Step 4 of 5 • Auto-Deducting Advance Balance',
-      title: 'Add Advance Payment & Automatic Bill Deduction',
+      badge: 'Step 4 of 5 • Advance Balance',
+      title: 'Auto-Deducting Advance Payments',
       description:
-        'When a tenant pays in advance or overpays a bill, the credit is stored in their Advance Balance. If an unpaid bill exists, it deducts automatically right away—or automatically deducts when the next billing day arrives.',
+        'Overpayments and prepaid rent credit to Advance Balance and automatically deduct on billing day.',
       highlights: [
-        'No manual "Apply to Bill" step needed—deductions happen automatically',
-        'Landlord can also record Withdrawals / Refunds at move-out',
-        'Full transaction ledger recorded per room',
+        'Zero manual calculations—auto-deductions apply upon billing',
+        'Transparent ledger for credits and tenant move-out refunds',
       ],
       icon: <Wallet className="w-6 h-6 text-emerald-400" />,
-      actionLabel: 'Manage Room Advance Balances',
+      actionLabel: 'Manage Rooms & Balances',
       onAction: () => {
         onNavigateTab('rooms');
         onClose();
       },
     },
     {
-      badge: 'Step 5 of 5 • Archive Guard & Desktop ↔ Mobile Sync',
-      title: 'Occupied Archive Protection & Real-Time Mobile Sync',
+      badge: 'Step 5 of 5 • Sync & Security',
+      title: 'Offline-First & Cloud Sync',
       description:
-        'Occupied rooms with remaining stay days cannot be archived directly without selecting a mandatory reason (e.g., missing Contract of Lease). All rooms and bills sync live between Desktop and the Android Mobile APK.',
+        'Works 100% offline via local IndexedDB. Automatically synchronizes when connected to Wi-Fi or Mobile Data.',
       highlights: [
-        'Mobile Biometric Fingerprint unlock + Desktop 4-Digit Passcode PIN',
-        'Real-Time Cloud & Local Sync using Property Code 4RENT-MAIN',
-        'Full JSON Database Backup & Restore in Settings',
+        'Phone biometric / 4-digit PIN security',
+        'Live sync between Mobile and Desktop with code 4RENT-MAIN',
       ],
       icon: <Smartphone className="w-6 h-6 text-blue-400" />,
-      actionLabel: 'Open Sync & Security Settings',
+      actionLabel: 'Open Settings',
       onAction: () => {
         onNavigateTab('settings');
         onClose();

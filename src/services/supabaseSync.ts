@@ -265,3 +265,118 @@ export async function pullSnapshotFromCloud(
     };
   }
 }
+
+export type NetworkConnectionType = 'wifi' | 'cellular' | 'offline' | 'unknown';
+
+export function getNetworkStatus(): {
+  isOnline: boolean;
+  connectionType: NetworkConnectionType;
+  label: string;
+} {
+  const win = typeof window !== 'undefined' ? (window as any) : {};
+  if (win.AndroidNative && typeof win.AndroidNative.getNetworkType === 'function') {
+    try {
+      const type = win.AndroidNative.getNetworkType() as NetworkConnectionType;
+      if (type === 'offline') {
+        return { isOnline: false, connectionType: 'offline', label: 'Offline (Local Safe)' };
+      }
+      return {
+        isOnline: true,
+        connectionType: type === 'cellular' ? 'cellular' : 'wifi',
+        label: type === 'cellular' ? 'Mobile Data (Active)' : 'Wi-Fi (Active)',
+      };
+    } catch {
+      // fallback
+    }
+  }
+
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+  if (!isOnline) {
+    return { isOnline: false, connectionType: 'offline', label: 'Offline (Local Safe)' };
+  }
+
+  const nav = typeof navigator !== 'undefined' ? (navigator as any) : null;
+  const conn = nav?.connection || nav?.mozConnection || nav?.webkitConnection;
+  if (conn) {
+    const t = String(conn.type || '').toLowerCase();
+    const eff = String(conn.effectiveType || '').toLowerCase();
+    if (t.includes('wifi') || t.includes('ethernet')) {
+      return { isOnline: true, connectionType: 'wifi', label: 'Wi-Fi (Active)' };
+    }
+    if (t.includes('cellular') || ['2g', '3g', '4g', '5g'].includes(eff)) {
+      return { isOnline: true, connectionType: 'cellular', label: 'Mobile Data (Active)' };
+    }
+  }
+
+  return { isOnline: true, connectionType: 'wifi', label: 'Wi-Fi / Network Online' };
+}
+
+export function mergeDatabaseSnapshots(
+  local: AppDatabaseSnapshot,
+  remote: AppDatabaseSnapshot
+): AppDatabaseSnapshot {
+  const roomMap = new Map<string, any>();
+  for (const r of remote.rooms || []) {
+    roomMap.set(r.id, r);
+  }
+  for (const l of local.rooms || []) {
+    const existing = roomMap.get(l.id);
+    if (!existing) {
+      roomMap.set(l.id, l);
+    } else {
+      const localTime = new Date(l.updatedAt || 0).getTime();
+      const remoteTime = new Date(existing.updatedAt || 0).getTime();
+      if (localTime >= remoteTime) {
+        roomMap.set(l.id, l);
+      }
+    }
+  }
+
+  const billMap = new Map<string, any>();
+  for (const b of remote.bills || []) {
+    billMap.set(b.id, b);
+  }
+  for (const b of local.bills || []) {
+    const existing = billMap.get(b.id);
+    if (!existing) {
+      billMap.set(b.id, b);
+    } else {
+      const localTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      const remoteTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+      if (localTime >= remoteTime) {
+        billMap.set(b.id, b);
+      }
+    }
+  }
+
+  const inquiryMap = new Map<string, any>();
+  for (const i of remote.inquiries || []) {
+    inquiryMap.set(i.id, i);
+  }
+  for (const i of local.inquiries || []) {
+    inquiryMap.set(i.id, i);
+  }
+
+  const historyMap = new Map<string, any>();
+  for (const h of remote.tenantHistory || []) {
+    historyMap.set(h.id, h);
+  }
+  for (const h of local.tenantHistory || []) {
+    historyMap.set(h.id, h);
+  }
+
+  const mergedSettings = {
+    ...(remote.settings || {}),
+    ...(local.settings || {}),
+  };
+
+  return {
+    version: '1.0.0',
+    exportedAt: new Date().toISOString(),
+    rooms: Array.from(roomMap.values()),
+    bills: Array.from(billMap.values()),
+    inquiries: Array.from(inquiryMap.values()),
+    tenantHistory: Array.from(historyMap.values()),
+    settings: mergedSettings,
+  };
+}

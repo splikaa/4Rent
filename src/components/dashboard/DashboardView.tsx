@@ -566,44 +566,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Analytics Section with Generous Gaps */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-            <div className="surface-card rounded-3xl p-6 sm:p-7">
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+            <div className="surface-card rounded-3xl p-5 sm:p-7">
+              <div className="flex items-center justify-between gap-3 mb-5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
                     <TrendingUp className="w-5 h-5 text-emerald-400" />
                   </div>
-                  <div>
-                    <h3 className="text-base font-extrabold text-white">
-                      Revenue & Collection Overview
+                  <div className="min-w-0">
+                    <h3 className="text-base font-extrabold text-white truncate">
+                      Revenue Overview
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      1 Room = 1 Active Receipt • 2 Sub-Meter Proofs Included
+                    <p className="text-xs text-slate-400 mt-0.5 truncate">
+                      Active collections & sub-meter billing
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => onNavigate('payments')}
-                  className="text-xs font-bold text-amber-400 hover:underline cursor-pointer"
+                  className="text-xs font-bold text-amber-400 hover:underline cursor-pointer whitespace-nowrap shrink-0"
                 >
                   All Payments →
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-5">
-                <div className="rounded-2xl bg-[#0D121B] border border-[#202B40] p-4">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-5">
+                <div className="rounded-2xl bg-[#0D121B] border border-[#202B40] p-3.5 sm:p-4">
+                  <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-slate-400 block truncate">
                     Total Paid (Revenue)
                   </span>
-                  <div className="text-xl sm:text-2xl font-extrabold text-emerald-400 font-mono-num mt-1.5">
+                  <div className="text-base sm:text-xl lg:text-2xl font-extrabold text-emerald-400 font-mono-num mt-1 truncate">
                     {formatPesoPrivacy(totalRevenuePaid, privacyMaskEnabled)}
                   </div>
                 </div>
-                <div className="rounded-2xl bg-[#0D121B] border border-[#202B40] p-4">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                <div className="rounded-2xl bg-[#0D121B] border border-[#202B40] p-3.5 sm:p-4">
+                  <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-slate-400 block truncate">
                     Total Unpaid (Due)
                   </span>
-                  <div className="text-xl sm:text-2xl font-extrabold text-amber-400 font-mono-num mt-1.5">
+                  <div className="text-base sm:text-xl lg:text-2xl font-extrabold text-amber-400 font-mono-num mt-1 truncate">
                     {formatPesoPrivacy(totalUnpaidDue, privacyMaskEnabled)}
                   </div>
                 </div>
@@ -611,9 +611,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               {activeBills.length > 0 && (
                 <div className="mt-5 pt-4 border-t border-[#222E44]">
-                  <div className="text-xs font-semibold text-slate-400 mb-3">
-                    Active Room Receipts (Tap to Print / Share Dual Sub-Meter
-                    Proof)
+                  <div className="text-xs font-semibold text-slate-400 mb-2.5">
+                    Active Room Receipts
                   </div>
                   <div className="space-y-2.5">
                     {activeBills.slice(0, 4).map((b) => (
@@ -621,22 +620,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         key={b.id}
                         type="button"
                         onClick={() => onSelectBillForReceipt(b)}
-                        className="w-full rounded-2xl bg-[#0D121B] hover:bg-[#172133] border border-[#202B40] px-4 py-3 flex items-center justify-between text-left transition cursor-pointer"
+                        className="w-full rounded-2xl bg-[#0D121B] hover:bg-[#172133] border border-[#202B40] px-3.5 py-2.5 sm:px-4 sm:py-3 flex items-center justify-between text-left transition cursor-pointer"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
                           <ReceiptText className="w-4 h-4 text-amber-400 shrink-0" />
-                          <div className="truncate">
-                            <span className="text-xs sm:text-sm font-bold text-white">
+                          <div className="min-w-0 truncate">
+                            <span className="text-xs sm:text-sm font-bold text-white block truncate">
                               {b.roomName} • {b.tenantName}
                             </span>
-                            <span className="block text-[11px] text-slate-400 mt-0.5">
-                              {b.prevReading.toFixed(1)} →{' '}
-                              {b.currReading.toFixed(1)} kWh (Δ{' '}
-                              {b.consumptionKwh.toFixed(1)} kWh)
+                            <span className="block text-[11px] text-slate-400 mt-0.5 truncate">
+                              {b.prevReading.toFixed(1)} → {b.currReading.toFixed(1)} kWh (Δ {b.consumptionKwh.toFixed(1)} kWh)
                             </span>
                           </div>
                         </div>
-                        <div className="text-right shrink-0 ml-3">
+                        <div className="text-right shrink-0 ml-2.5">
                           <span className="text-xs sm:text-sm font-extrabold text-white font-mono-num block">
                             {formatPesoPrivacy(
                               b.totalAmountDue,
@@ -662,20 +659,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               )}
             </div>
 
-            <div className="surface-card rounded-3xl p-6 sm:p-7 flex flex-col justify-between">
+            <div className="surface-card rounded-3xl p-5 sm:p-7 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-5">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
                       <Zap className="w-5 h-5 text-amber-400" />
                     </div>
                     <div>
                       <h3 className="text-base font-extrabold text-white">
-                        Continuous Sub-Meter Readings (kWh)
+                        Sub-Meter Consumption
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        Total billed usage: {totalKwhBilled.toFixed(1)} kWh @{' '}
-                        {formatPeso(globalElectricRate)}/kWh
+                        Total: {totalKwhBilled.toFixed(1)} kWh @ {formatPeso(globalElectricRate)}/kWh
                       </p>
                     </div>
                   </div>

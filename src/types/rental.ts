@@ -51,6 +51,7 @@ export interface Room {
   monthlyRent: number; // Base monthly rent in ₱
   lastMeterReading: number; // Continuous physical electric sub-meter kWh reading (never resets on tenant change)
   lastMeterPhotoDataUrl?: string; // Stored photo proof of the previous sub-meter reading
+  lastMeterCropDataUrl?: string; // Cropped close-up screenshot of the sub-meter register value itself
   lastReadingDate?: string;
   status: 'occupied' | 'vacant';
   tenant?: TenantProfile;
@@ -112,7 +113,9 @@ export interface BillRecord {
   electricRate: number; // Global ₱/kWh from Settings
   electricTotal: number; // consumptionKwh * electricRate
   prevMeterPhotoDataUrl?: string; // Sub-Meter #1: Previous Reading Photo Proof
+  prevMeterCropDataUrl?: string; // Sub-Meter #1: Cropped Register Value Screenshot
   meterPhotoDataUrl?: string; // Sub-Meter #2: Current Reading Photo Proof
+  currMeterCropDataUrl?: string; // Sub-Meter #2: Cropped Register Value Screenshot
   ocrConfidence?: number;
 
   // Financial Breakdown
@@ -171,6 +174,7 @@ export interface AppSettings {
   defaultSecurityDeposit: number;
   remindersPromptShown: boolean;
   remindersEnabled: boolean;
+  notificationsVerified?: boolean;
   receiptPrintFormat: 'standard' | 'thermal80';
   privacyMaskEnabled?: boolean; // Masks tenant PII and revenue when viewing in public
   maskReceiptContacts?: boolean; // Masks tenant phone digits on exported receipts for privacy
