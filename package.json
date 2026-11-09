@@ -8,12 +8,13 @@
     "dev": "vite",
     "electron": "electron .",
     "build": "tsc -b && vite build",
+    "build:apk": "node scripts/build_signed_apk.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.0",
-    "lucide-react": "^1.16.0",
     "html-to-image": "^1.11.11",
+    "lucide-react": "^1.16.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tesseract.js": "^7.0.0"
@@ -23,6 +24,8 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "apk_sign_ts": "^1.0.1",
+    "jszip": "^3.10.2",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
     "vite": "^6.4.1"
