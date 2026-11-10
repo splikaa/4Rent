@@ -36,7 +36,6 @@ import {
   mergeDatabaseSnapshots,
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
-  SUPABASE_SETUP_SQL,
   FIREBASE_RULES_JSON,
 } from '../../services/firebaseSync';
 import { requestAndVerifyNotifications } from '../../services/ocrService';
@@ -629,200 +628,87 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             {showDevCloudConfig && (
               <div className="mt-3 p-4 rounded-2xl bg-[#0D121B] border border-[#243047] space-y-4 text-xs">
-                {/* Database Provider Selector */}
                 <div>
-                  <label className="block text-slate-400 mb-1.5 font-bold">
-                    Cloud Database Provider
+                  <label className="block text-slate-300 mb-1 font-bold">
+                    Cloud Database Provider: <span className="text-amber-400">🔥 Firebase Realtime Database</span>
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setForm({
-                          ...form,
-                          cloudSync: {
-                            ...form.cloudSync,
-                            provider: 'firebase',
-                            enabled: true,
-                          },
-                        })
-                      }
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                        (form.cloudSync.provider || 'firebase') === 'firebase'
-                          ? 'bg-amber-500/15 border-amber-500 text-amber-300'
-                          : 'bg-[#151B26] border-[#252F42] text-slate-400'
-                      }`}
-                    >
-                      <span>🔥 Firebase (Recommended)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setForm({
-                          ...form,
-                          cloudSync: {
-                            ...form.cloudSync,
-                            provider: 'supabase',
-                            enabled: true,
-                          },
-                        })
-                      }
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                        form.cloudSync.provider === 'supabase'
-                          ? 'bg-blue-500/15 border-blue-500 text-blue-300'
-                          : 'bg-[#151B26] border-[#252F42] text-slate-400'
-                      }`}
-                    >
-                      <span>⚡ Supabase</span>
-                    </button>
-                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Live bidirectional SSE and REST synchronization between Mobile & Desktop devices.
+                  </p>
                 </div>
 
-                {/* Firebase Settings */}
-                {(form.cloudSync.provider || 'firebase') === 'firebase' ? (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1 font-semibold">
-                          Firebase Project ID
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="e.g. four-rent-demo"
-                          value={form.cloudSync.firebaseProjectId || ''}
-                          onChange={(e) =>
-                            setForm({
-                              ...form,
-                              cloudSync: {
-                                ...form.cloudSync,
-                                provider: 'firebase',
-                                firebaseProjectId: e.target.value,
-                                enabled: true,
-                              },
-                            })
-                          }
-                          className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1 font-semibold">
-                          Database URL (Optional)
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="https://<project>-default-rtdb.firebaseio.com"
-                          value={form.cloudSync.firebaseDatabaseUrl || ''}
-                          onChange={(e) =>
-                            setForm({
-                              ...form,
-                              cloudSync: {
-                                ...form.cloudSync,
-                                provider: 'firebase',
-                                firebaseDatabaseUrl: e.target.value,
-                                enabled: true,
-                              },
-                            })
-                          }
-                          className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-white"
-                        />
-                      </div>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-semibold">
+                        Firebase Project ID
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. rent-41279"
+                        value={form.cloudSync.firebaseProjectId || ''}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            cloudSync: {
+                              ...form.cloudSync,
+                              provider: 'firebase',
+                              firebaseProjectId: e.target.value,
+                              enabled: true,
+                            },
+                          })
+                        }
+                        className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-white"
+                      />
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await navigator.clipboard.writeText(FIREBASE_RULES_JSON);
-                          setCopiedSql(true);
-                          setTimeout(() => setCopiedSql(false), 2500);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-[#151B26] border border-[#252F42] text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-                      >
-                        {copiedSql ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-400">Rules Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Copy Firebase Realtime Rules</span>
-                          </>
-                        )}
-                      </button>
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-semibold">
+                        Database URL
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="https://rent-41279-default-rtdb.asia-southeast1.firebasedatabase.app"
+                        value={form.cloudSync.firebaseDatabaseUrl || ''}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            cloudSync: {
+                              ...form.cloudSync,
+                              provider: 'firebase',
+                              firebaseDatabaseUrl: e.target.value,
+                              enabled: true,
+                            },
+                          })
+                        }
+                        className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-white font-mono text-[11px]"
+                      />
                     </div>
                   </div>
-                ) : (
-                  /* Supabase Settings */
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-400 mb-1 font-semibold">
-                          Supabase Project URL
-                        </label>
-                        <input
-                          type="text"
-                          value={form.cloudSync.supabaseUrl || ''}
-                          onChange={(e) =>
-                            setForm({
-                              ...form,
-                              cloudSync: {
-                                ...form.cloudSync,
-                                provider: 'supabase',
-                                supabaseUrl: e.target.value,
-                                enabled: true,
-                              },
-                            })
-                          }
-                          className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1 font-semibold">
-                          Anon API Key
-                        </label>
-                        <input
-                          type="password"
-                          value={form.cloudSync.supabaseAnonKey || ''}
-                          onChange={(e) =>
-                            setForm({
-                              ...form,
-                              cloudSync: {
-                                ...form.cloudSync,
-                                provider: 'supabase',
-                                supabaseAnonKey: e.target.value,
-                                enabled: true,
-                              },
-                            })
-                          }
-                          className="w-full h-9 rounded-xl bg-[#151B26] border border-[#252F42] px-3 text-white"
-                        />
-                      </div>
-                    </div>
 
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={async () => {
-                        await navigator.clipboard.writeText(SUPABASE_SETUP_SQL);
+                        await navigator.clipboard.writeText(FIREBASE_RULES_JSON);
                         setCopiedSql(true);
                         setTimeout(() => setCopiedSql(false), 2500);
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-[#151B26] border border-[#252F42] text-slate-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-[#151B26] border border-[#252F42] text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                     >
                       {copiedSql ? (
                         <>
                           <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400">SQL Copied</span>
+                          <span className="text-emerald-400">Rules Copied</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3 h-3" />
-                          <span>Copy Database Table SQL</span>
+                          <span>Copy Firebase Realtime Rules</span>
                         </>
                       )}
                     </button>
                   </div>
-                )}
+                </div>
               </div>
             )}
           </div>

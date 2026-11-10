@@ -248,7 +248,7 @@ runTest('Suite 4: Mobile App Sources', 'pubspec.yaml has valid syntax and declar
   assert(/sdk:\s*["']>=3\.3\.0 <4\.0\.0["']/.test(pubspec), 'Missing environment sdk >=3.3.0 <4.0.0');
 
   // Check critical dependencies
-  const deps = ['flutter', 'supabase_flutter', 'shared_preferences', 'image_picker', 'google_mlkit_text_recognition', 'intl'];
+  const deps = ['flutter', 'firebase_core', 'shared_preferences', 'image_picker', 'google_mlkit_text_recognition', 'intl'];
   for (const dep of deps) {
     const depRegex = new RegExp(`^\\s+${dep}:`, 'm');
     assert(depRegex.test(pubspec), `Missing dependency in pubspec.yaml: ${dep}`);

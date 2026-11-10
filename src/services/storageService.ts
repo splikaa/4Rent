@@ -55,10 +55,6 @@ const DEV_FIREBASE_DATABASE_URL =
 const DEV_FIREBASE_API_KEY =
   viteEnv.VITE_FIREBASE_API_KEY ||
   'AIzaSyADZ1u2AAvEF1Rvh3knPjck_rnRihP2Ifk';
-const DEV_SUPABASE_URL =
-  viteEnv.VITE_SUPABASE_URL || '';
-const DEV_SUPABASE_ANON_KEY =
-  viteEnv.VITE_SUPABASE_ANON_KEY || '';
 const DEV_PROPERTY_CODE = viteEnv.VITE_PROPERTY_CODE || '4RENT-MAIN';
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -139,9 +135,6 @@ export function loadSettings(): AppSettings {
           parsed.cloudSync?.firebaseApiKey || DEV_FIREBASE_API_KEY,
         firebaseDatabaseUrl:
           parsed.cloudSync?.firebaseDatabaseUrl || DEV_FIREBASE_DATABASE_URL,
-        supabaseUrl: parsed.cloudSync?.supabaseUrl || DEV_SUPABASE_URL,
-        supabaseAnonKey:
-          parsed.cloudSync?.supabaseAnonKey || DEV_SUPABASE_ANON_KEY,
         propertyCode: parsed.cloudSync?.propertyCode || DEV_PROPERTY_CODE,
       },
     };

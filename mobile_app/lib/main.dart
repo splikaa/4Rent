@@ -1,30 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// ============================================================================
 /// 4Rent Management System v1.0.0 — Native Mobile App (Flutter: Android & iOS)
-/// Real-Time Bidirectional Sync with 4Rent Desktop via Supabase Realtime
+/// Real-Time Bidirectional Sync with 4Rent Desktop via Firebase Realtime Database
 /// ============================================================================
 
-String _decodeEndpoint(String b64) => utf8.decode(base64.decode(b64));
-
-final String kDefaultSupabaseUrl = _decodeEndpoint(
-  'aHR0cHM6Ly9uZndneWlxZG15bmFxa3BoZ2ZxZS5zdXBhYmFzZS5jbw==',
-);
-final String kDefaultSupabaseAnonKey = _decodeEndpoint(
-  'c2JfcHVibGlzaGFibGVfRGxjTUctSk8zWl9tOFczNEFUemJsQV9zT05XRFk0bg==',
-);
+const String kDefaultFirebaseDatabaseUrl =
+    'https://rent-41279-default-rtdb.asia-southeast1.firebasedatabase.app';
 const String kDefaultPropertyCode = '4RENT-MAIN';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: kDefaultSupabaseUrl,
-    anonKey: kDefaultSupabaseAnonKey,
-  );
   runApp(const FourRentMobileApp());
 }
 
@@ -135,8 +125,8 @@ class _FourRentMobileHomeScreenState extends State<FourRentMobileHomeScreen> {
   bool _privacyShieldEnabled = false;
   bool _isSyncing = false;
   String _propertyCode = kDefaultPropertyCode;
-  String _syncStatus = 'Connected to Desktop Realtime Channel';
-  RealtimeChannel? _realtimeChannel;
+  String _syncStatus = 'Connected to Firebase Realtime Database';
+  Timer? _syncTimer;
 
   List<Map<String, dynamic>> _rooms = [];
   List<Map<String, dynamic>> _bills = [];
@@ -154,9 +144,7 @@ class _FourRentMobileHomeScreenState extends State<FourRentMobileHomeScreen> {
 
   @override
   void dispose() {
-    if (_realtimeChannel != null) {
-      Supabase.instance.client.removeChannel(_realtimeChannel!);
-    }
+    _syncTimer?.cancel();
     super.dispose();
   }
 
@@ -169,44 +157,9 @@ class _FourRentMobileHomeScreenState extends State<FourRentMobileHomeScreen> {
 
     await _pullFromDesktopCloud();
 
-    final client = Supabase.instance.client;
-    final channel = client.channel('4rent-live-$_propertyCode');
-
-    channel
-        .onBroadcast(
-          event: 'db_update',
-          callback: (payload) {
-            final snap = payload['snapshot'];
-            if (snap is Map<String, dynamic>) {
-              _applySnapshotMap(snap);
-              setState(() {
-                _syncStatus = 'Live update received from Desktop';
-              });
-            }
-          },
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'four_rent_sync',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'property_code',
-            value: _propertyCode,
-          ),
-          callback: (payload) {
-            final snap = payload.newRecord['snapshot'];
-            if (snap is Map<String, dynamic>) {
-              _applySnapshotMap(snap);
-              setState(() {
-                _syncStatus = 'Synced with Desktop Postgres DB';
-              });
-            }
-          },
-        )
-        .subscribe();
-
-    _realtimeChannel = channel;
+    _syncTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _pullFromDesktopCloud();
+    });
   }
 
   Future<void> _applySnapshotMap(Map<String, dynamic> snap) async {
@@ -234,19 +187,23 @@ class _FourRentMobileHomeScreenState extends State<FourRentMobileHomeScreen> {
   Future<void> _pullFromDesktopCloud() async {
     setState(() => _isSyncing = true);
     try {
-      final res = await Supabase.instance.client
-          .from('four_rent_sync')
-          .select('snapshot, updated_at')
-          .eq('property_code', _propertyCode)
-          .maybeSingle();
-
-      if (res != null && res['snapshot'] is Map<String, dynamic>) {
-        await _applySnapshotMap(
-          Map<String, dynamic>.from(res['snapshot'] as Map),
-        );
-        setState(() {
-          _syncStatus = 'Synced with Desktop ($_propertyCode)';
-        });
+      final client = HttpClient();
+      final uri = Uri.parse(
+        '$kDefaultFirebaseDatabaseUrl/properties/$_propertyCode.json',
+      );
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final data = jsonDecode(body) as Map<String, dynamic>?;
+        if (data != null && data['snapshot'] is Map<String, dynamic>) {
+          await _applySnapshotMap(
+            Map<String, dynamic>.from(data['snapshot'] as Map),
+          );
+          setState(() {
+            _syncStatus = 'Synced with Firebase ($_propertyCode)';
+          });
+        }
       }
     } catch (e) {
       setState(() {
@@ -269,24 +226,25 @@ class _FourRentMobileHomeScreenState extends State<FourRentMobileHomeScreen> {
     };
 
     try {
-      await _realtimeChannel?.sendBroadcastMessage(
-        event: 'db_update',
-        payload: {
+      final client = HttpClient();
+      final uri = Uri.parse(
+        '$kDefaultFirebaseDatabaseUrl/properties/$_propertyCode.json',
+      );
+      final request = await client.putUrl(uri);
+      request.headers.set('content-type', 'application/json');
+      request.write(
+        jsonEncode({
           'propertyCode': _propertyCode,
           'snapshot': snapshot,
-          'syncedAt': nowIso,
-        },
+          'updatedAt': nowIso,
+        }),
       );
-
-      await Supabase.instance.client.from('four_rent_sync').upsert({
-        'property_code': _propertyCode,
-        'snapshot': snapshot,
-        'updated_at': nowIso,
-      });
-
-      setState(() {
-        _syncStatus = 'Pushed live to Desktop ($_propertyCode)';
-      });
+      final response = await request.close();
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        setState(() {
+          _syncStatus = 'Pushed live to Firebase ($_propertyCode)';
+        });
+      }
     } catch (e) {
       setState(() {
         _syncStatus = 'Saved locally (Will sync when online)';

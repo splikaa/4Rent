@@ -62,14 +62,9 @@ declare module 'tesseract.js' {
   export default Tesseract;
 }
 
-declare module '@supabase/supabase-js' {
-  export type SupabaseClient = any;
-  export type RealtimeChannel = any;
-  export const createClient: (supabaseUrl: string, supabaseKey: string, options?: any) => any;
-}
 
 declare module 'lucide-react' {
-  export const [key: string]: any;
+  export const [key, string]: any;
 }
 
 declare module 'html-to-image' {

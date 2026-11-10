@@ -8,6 +8,7 @@
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">splikaa.github.io</domain>
         <domain includeSubdomains="true">appassets.androidplatform.net</domain>
-        <domain includeSubdomains="true">supabase.co</domain>
+        <domain includeSubdomains="true">firebasedatabase.app</domain>
+        <domain includeSubdomains="true">firebaseio.com</domain>
     </domain-config>
 </network-security-config>

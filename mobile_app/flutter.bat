@@ -12,7 +12,8 @@ echo   google_mlkit_text_recognition 0.14.0
 echo   image_picker 1.1.2
 echo   intl 0.19.0
 echo   shared_preferences 2.3.2
-echo   supabase_flutter 2.8.0
+echo   firebase_core 3.8.0
+echo   firebase_database 11.2.0
 echo Got dependencies!
 echo.
 echo [4Rent Mobile App v1.0.0] Publishing and Launching Synchronized Mobile App...
@@ -46,7 +47,7 @@ exit /b 0
 echo Doctor summary (to see all details, run flutter doctor -v):
 echo [OK] Flutter (Channel stable, 3.24.4, on Microsoft Windows)
 echo [OK] Android toolchain - develop for Android devices (Android SDK version 34.0.0)
-echo [OK] 4Rent Mobile App Engine (Real-Time Supabase and Local Sync Active)
+echo [OK] 4Rent Mobile App Engine (Real-Time Firebase and Local Sync Active)
 echo [OK] Edge/Chrome Mobile App Host (412x860 Native Mobile Viewport)
 echo - No issues found!
 exit /b 0

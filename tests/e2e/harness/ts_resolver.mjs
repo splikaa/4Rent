@@ -8,12 +8,6 @@ const projectRoot = path.resolve(__dirname, '../../..');
 
 export async function resolve(specifier, context, nextResolve) {
   // Virtual stubs for npm packages in headless test environment without node_modules
-  if (specifier === '@supabase/supabase-js') {
-    return {
-      shortCircuit: true,
-      url: 'data:text/javascript,export const createClient = () => ({ channel: () => ({ on: () => ({ subscribe: () => ({}) }) }), from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) }); export class SupabaseClient {}; export class RealtimeChannel {}; export default { createClient, SupabaseClient, RealtimeChannel };',
-    };
-  }
   if (specifier === 'tesseract.js') {
     return {
       shortCircuit: true,

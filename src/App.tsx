@@ -360,7 +360,7 @@ export function App() {
     };
   }, []);
 
-  // Live Instant Realtime sync across Desktop & Mobile devices (Local BroadcastChannel + Storage + Supabase Cloud)
+  // Live Instant Realtime sync across Desktop & Mobile devices (Local BroadcastChannel + Storage + Firebase Cloud)
   useEffect(() => {
     const unsubscribeLocal = subscribeToLocalCrossWindowSync(() => {
       if (!isAppHydrated()) return;
@@ -396,8 +396,6 @@ export function App() {
     settings.cloudSync.provider,
     settings.cloudSync.firebaseProjectId,
     settings.cloudSync.firebaseDatabaseUrl,
-    settings.cloudSync.supabaseUrl,
-    settings.cloudSync.supabaseAnonKey,
     settings.cloudSync.propertyCode,
   ]);
 
@@ -429,8 +427,6 @@ export function App() {
     settings.cloudSync.provider,
     settings.cloudSync.firebaseProjectId,
     settings.cloudSync.firebaseDatabaseUrl,
-    settings.cloudSync.supabaseUrl,
-    settings.cloudSync.supabaseAnonKey,
   ]);
 
   useEffect(() => {

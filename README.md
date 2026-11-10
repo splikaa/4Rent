@@ -75,7 +75,7 @@ The generated **Official Statement of Account & Sub-Meter Billing Receipt** incl
 
 4Rent operates seamlessly in any environment:
 - **Offline Mode**: Uses browser IndexedDB (`idbDatabase.ts`) so landlords can record readings, generate bills, and inspect rooms in apartment basements with zero reception.
-- **Mobile Data & Wi-Fi**: Automatically detects connection type via `navigator.connection` and synchronizes with Supabase (`4RENT-MAIN`) as soon as connectivity is restored.
+- **Mobile Data & Wi-Fi**: Automatically detects connection type via `navigator.connection` and synchronizes with Firebase Realtime Database (`4RENT-MAIN`) as soon as connectivity is restored.
 - **Conflict-Free Merge**: Timestamps ensure newest device changes take precedence without data loss.
 
 ---
