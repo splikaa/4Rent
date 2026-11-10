@@ -241,6 +241,18 @@ export async function pullSnapshotFromCloud(
     ])) as any;
 
     if (error) {
+      if (
+        (error as any).code === '42P01' ||
+        (error as any).code === 'PGRST204' ||
+        String((error as any).code) === '404' ||
+        (error.message && error.message.includes('does not exist'))
+      ) {
+        return {
+          ok: false,
+          message:
+            'Cloud Sync table not yet initialized. Copy and run the SQL Setup Script in Settings to create it.',
+        };
+      }
       return { ok: false, message: `Supabase Error: ${error.message}` };
     }
 

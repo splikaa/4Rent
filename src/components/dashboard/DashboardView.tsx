@@ -165,7 +165,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5">
           {onOpenWalkthrough && (
             <button
               type="button"
@@ -335,7 +335,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             transaction history
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5">
           <button
             type="button"
             onClick={onOpenAddRoom}

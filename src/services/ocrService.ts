@@ -213,6 +213,29 @@ const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
       electricalSpecs: '240V • 5-30A • 50/60Hz',
     },
   },
+  {
+    id: 'safari_sy168_3020_7',
+    reading: 3020.7,
+    confidence: 99,
+    cropBox: { x: 0.32, y: 0.30, w: 0.38, h: 0.08 },
+    sig: [
+      225, 216, 208, 212, 170, 164, 195, 117, 115, 192, 106, 104, 187, 100, 99, 186, 96, 95, 183, 92, 90, 176, 85, 85,
+      181, 82, 79, 135, 63, 62, 157, 134, 129, 140, 116, 109, 142, 120, 111, 141, 121, 112, 146, 122, 112, 173, 125, 115,
+      152, 70, 66, 128, 122, 120, 117, 143, 178, 115, 117, 124, 98, 92, 93, 129, 69, 66, 104, 72, 69, 163, 56, 56,
+      177, 131, 123, 126, 122, 117, 193, 196, 194, 162, 157, 154, 180, 131, 132, 145, 113, 103, 91, 69, 65, 157, 101, 98,
+      167, 126, 117, 131, 123, 117, 154, 153, 148, 130, 122, 117, 130, 94, 90, 116, 97, 87, 81, 58, 54, 132, 48, 47,
+      171, 136, 126, 170, 165, 158, 93, 90, 85, 75, 69, 65, 73, 64, 59, 79, 71, 66, 100, 76, 66, 139, 35, 33,
+      167, 82, 70, 180, 161, 149, 164, 165, 160, 161, 162, 157, 158, 159, 154, 159, 160, 155, 149, 122, 110, 172, 76, 64,
+      170, 138, 125, 163, 144, 133, 148, 147, 139, 145, 143, 136, 145, 144, 136, 143, 141, 133, 121, 100, 86, 158, 128, 113
+    ],
+    inspection: {
+      brandModel: 'Safari SY-168 Digital Kilowatt Hour Meter',
+      registerType: 'Digital Register Display (kW·h)',
+      registerBreakdown: 'Register: 003020.7 → 3020.7 kWh',
+      serialOrBarcode: 'No. LGT2023921126001 (Excluded)',
+      electricalSpecs: '240V • 10(60)A • 1Phase • 60Hz',
+    },
+  },
 ];
 
 function computeBoxRgbSignature(
@@ -1145,12 +1168,12 @@ export async function requestAndVerifyNotifications(): Promise<{
             if (reg && typeof reg.showNotification === 'function') {
               await reg.showNotification('4Rent Notifications Verified ✓', {
                 body: 'Day 1–10 billing & due-date reminders are active.',
-                icon: '/4rent-logo.svg',
+                icon: './4rent-logo.svg',
               });
             } else {
               new Notification('4Rent Notifications Verified ✓', {
                 body: 'Day 1–10 billing & due-date reminders are active.',
-                icon: '/4rent-logo.svg',
+                icon: './4rent-logo.svg',
               });
             }
           } else {

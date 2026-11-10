@@ -1425,7 +1425,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       {/* PIN Unlock Modal for Manual Reading Override */}
       {showPinUnlockModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm rounded-3xl bg-[#141A25] border border-amber-500/40 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
