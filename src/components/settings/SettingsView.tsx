@@ -13,8 +13,10 @@ import {
   Lock,
   RefreshCw,
   Save,
+  Share2,
   Shield,
   ShieldCheck,
+  Smartphone,
   Upload,
   Wifi,
   WifiOff,
@@ -68,6 +70,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [showAuditLogs, setShowAuditLogs] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
   const [copiedSyncCode, setCopiedSyncCode] = useState(false);
+  const [copiedMobileLink, setCopiedMobileLink] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [networkInfo, setNetworkInfo] = useState(() => getNetworkStatus());
@@ -538,6 +541,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <>
                     <Copy className="w-3.5 h-3.5" />
                     <span>Copy Code</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const prop = encodeURIComponent(
+                    form.cloudSync.propertyCode || '4RENT-MAIN'
+                  );
+                  const proj = form.cloudSync.firebaseProjectId
+                    ? `&proj=${encodeURIComponent(form.cloudSync.firebaseProjectId)}`
+                    : '';
+                  const link = `${window.location.origin}${window.location.pathname}?prop=${prop}${proj}`;
+                  await navigator.clipboard.writeText(link);
+                  setCopiedMobileLink(true);
+                  setTimeout(() => setCopiedMobileLink(false), 2500);
+                }}
+                className="px-3 py-2 rounded-xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-emerald-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                title="Send this 1-click link to your phone or desktop to sync data instantly"
+              >
+                {copiedMobileLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Link Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Smartphone className="w-3.5 h-3.5" />
+                    <span>Pair Mobile</span>
                   </>
                 )}
               </button>

@@ -113,6 +113,19 @@ replaceExact(
   'Firebase pullSnapshotFromCloud support'
 );
 
+replaceExact(
+  'function Oj(s,n){const r=yf(s);',
+  'function Oj(s,n){if(s.provider==="firebase"||(!s.provider&&!s.supabaseUrl)){if(typeof EventSource==="undefined")return()=>{};try{const f_u=`${getFbUrl(s)}/properties/${encodeURIComponent(s.propertyCode||"4RENT-MAIN")}.json`,es=new EventSource(f_u);es.addEventListener("put",e=>{try{const d=JSON.parse(e.data);if(d&&d.data&&d.data.snapshot)n(d.data.snapshot);else if(d&&d.snapshot)n(d.snapshot)}catch{}});es.addEventListener("patch",e=>{try{const d=JSON.parse(e.data);if(d&&d.data&&d.data.snapshot)n(d.data.snapshot);else if(d&&d.snapshot)n(d.snapshot)}catch{}});return()=>es.close()}catch{return()=>{}}}const r=yf(s);',
+  'Firebase Realtime EventSource subscription in Oj'
+);
+
+// Enable cloud sync triggers for Firebase (not just Supabase)
+code = code.replaceAll(
+  's.cloudSync.enabled&&s.cloudSync.supabaseUrl&&s.cloudSync.supabaseAnonKey',
+  's.cloudSync.enabled&&(s.cloudSync.provider==="firebase"||s.cloudSync.supabaseUrl)'
+);
+console.log('[PASS] Patched: Cloud sync auto-trigger conditions for Firebase');
+
 // 4. Patch Tesseract timeout from 5500 to 15000
 replaceExact(
   'setTimeout(()=>k(null),5500)',

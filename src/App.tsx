@@ -30,6 +30,7 @@ import {
 } from './services/storageService';
 import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
+  isCloudConfigured,
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
   subscribeToRealtimeSync,
@@ -305,6 +306,50 @@ export function App() {
         if (mounted) {
           setAppHydrated(true);
           setIsHydrated(true);
+
+          // Check for 1-click Mobile/Desktop cloud pairing in URL query
+          try {
+            const urlParams = new URLSearchParams(window.location.search);
+            const syncProp = urlParams.get('prop') || urlParams.get('propertyCode');
+            const syncProj = urlParams.get('proj') || urlParams.get('projectId');
+            const syncDbUrl = urlParams.get('dbUrl');
+            if (syncProp) {
+              const currentSettings = loadSettings();
+              const nextSync = {
+                ...currentSettings.cloudSync,
+                enabled: true,
+                provider: 'firebase' as const,
+                propertyCode: syncProp,
+                ...(syncProj ? { firebaseProjectId: syncProj } : {}),
+                ...(syncDbUrl ? { firebaseDatabaseUrl: syncDbUrl } : {}),
+              };
+              const updatedSettings: AppSettings = {
+                ...currentSettings,
+                cloudSync: nextSync,
+              };
+              setSettings(updatedSettings);
+              saveSettings(updatedSettings);
+
+              // Clean query string from browser address bar
+              const cleanUrl = window.location.origin + window.location.pathname;
+              window.history.replaceState({}, document.title, cleanUrl);
+
+              pullSnapshotFromCloud(nextSync).then((res) => {
+                if (res.ok && res.snapshot) {
+                  importDatabaseSnapshot(res.snapshot);
+                  setRooms(loadRooms());
+                  setBills(loadBills());
+                  setInquiries(loadInquiries());
+                  setTenantHistory(loadTenantHistory());
+                  triggerFeedback(
+                    '📱 Mobile & Desktop Synced',
+                    `Connected to Property "${syncProp}". All data updated from cloud.`,
+                    'success'
+                  );
+                }
+              });
+            }
+          } catch {}
         }
       }
     };
@@ -331,11 +376,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (
-      settings.cloudSync.enabled &&
-      settings.cloudSync.supabaseUrl &&
-      settings.cloudSync.supabaseAnonKey
-    ) {
+    if (isCloudConfigured(settings.cloudSync)) {
       const unsubscribe = subscribeToRealtimeSync(
         settings.cloudSync,
         (remoteSnap) => {
@@ -352,6 +393,9 @@ export function App() {
     }
   }, [
     settings.cloudSync.enabled,
+    settings.cloudSync.provider,
+    settings.cloudSync.firebaseProjectId,
+    settings.cloudSync.firebaseDatabaseUrl,
     settings.cloudSync.supabaseUrl,
     settings.cloudSync.supabaseAnonKey,
     settings.cloudSync.propertyCode,
@@ -360,11 +404,7 @@ export function App() {
   // Automatic Desktop <-> Mobile Cloud Sync when window gains focus
   useEffect(() => {
     const syncFromCloudOnFocus = async () => {
-      if (
-        settings.cloudSync.enabled &&
-        settings.cloudSync.supabaseUrl &&
-        settings.cloudSync.supabaseAnonKey
-      ) {
+      if (isCloudConfigured(settings.cloudSync)) {
         const res = await pullSnapshotFromCloud(settings.cloudSync);
         if (res.ok && res.snapshot) {
           importDatabaseSnapshot(res.snapshot);
@@ -386,6 +426,9 @@ export function App() {
       window.removeEventListener('visibilitychange', handleVisibility);
   }, [
     settings.cloudSync.enabled,
+    settings.cloudSync.provider,
+    settings.cloudSync.firebaseProjectId,
+    settings.cloudSync.firebaseDatabaseUrl,
     settings.cloudSync.supabaseUrl,
     settings.cloudSync.supabaseAnonKey,
   ]);
@@ -416,11 +459,7 @@ export function App() {
   }, [tenantHistory, isHydrated]);
 
   const triggerOptionalCloudSync = () => {
-    if (
-      settings.cloudSync.enabled &&
-      settings.cloudSync.supabaseUrl &&
-      settings.cloudSync.supabaseAnonKey
-    ) {
+    if (isCloudConfigured(settings.cloudSync)) {
       setTimeout(() => {
         pushSnapshotToCloud(settings.cloudSync, exportDatabaseSnapshot());
       }, 200);

@@ -9,6 +9,25 @@ import {
 
 export { FIREBASE_RULES_JSON };
 
+export function isCloudConfigured(config?: CloudSyncConfig): boolean {
+  if (!config || !config.enabled) return false;
+  const isFirebase =
+    config.provider === 'firebase' ||
+    (!config.provider && (Boolean(config.firebaseProjectId) || !config.supabaseUrl));
+  if (isFirebase) {
+    return Boolean(
+      (config.firebaseProjectId && config.firebaseProjectId.trim()) ||
+      (config.firebaseDatabaseUrl && config.firebaseDatabaseUrl.trim())
+    );
+  }
+  return Boolean(
+    config.supabaseUrl &&
+    config.supabaseUrl.trim() &&
+    config.supabaseAnonKey &&
+    config.supabaseAnonKey.trim()
+  );
+}
+
 let cachedClient: SupabaseClient | null = null;
 let cachedConfigKey = '';
 let activeLiveChannel: RealtimeChannel | null = null;
