@@ -51,7 +51,7 @@ const DEV_FIREBASE_PROJECT_ID =
   viteEnv.VITE_FIREBASE_PROJECT_ID || 'rent-41279';
 const DEV_FIREBASE_DATABASE_URL =
   viteEnv.VITE_FIREBASE_DATABASE_URL ||
-  'https://rent-41279-default-rtdb.firebaseio.com';
+  'https://rent-41279-default-rtdb.asia-southeast1.firebasedatabase.app';
 const DEV_FIREBASE_API_KEY =
   viteEnv.VITE_FIREBASE_API_KEY ||
   'AIzaSyADZ1u2AAvEF1Rvh3knPjck_rnRihP2Ifk';

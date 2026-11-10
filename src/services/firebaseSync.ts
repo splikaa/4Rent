@@ -44,6 +44,9 @@ create policy "Allow public sync access by property_code"
 
 alter publication supabase_realtime add table public.four_rent_sync;`;
 
+export const DEFAULT_FIREBASE_DATABASE_URL =
+  'https://rent-41279-default-rtdb.asia-southeast1.firebasedatabase.app';
+
 export function getFirebaseDatabaseUrl(config: CloudSyncConfig): string {
   if (config.firebaseDatabaseUrl && config.firebaseDatabaseUrl.trim()) {
     return config.firebaseDatabaseUrl.trim().replace(/\/+$/, '');
@@ -51,6 +54,9 @@ export function getFirebaseDatabaseUrl(config: CloudSyncConfig): string {
   const projectId = (
     config.firebaseProjectId || DEFAULT_FIREBASE_CONFIG.projectId
   ).trim();
+  if (projectId === 'rent-41279' || projectId === 'four-rent-demo') {
+    return DEFAULT_FIREBASE_DATABASE_URL;
+  }
   return `https://${projectId}-default-rtdb.firebaseio.com`;
 }
 
