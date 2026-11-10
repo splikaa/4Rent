@@ -19,8 +19,14 @@ Thumbs.db
 # Workspace Agent Skill Directories (excluded from 4Rent application repo)
 .agents/
 awesome-agent-skills/
+agentic-awesome-skills/
+agent-skills/
+anthropics-skills/
+skills/
 hermes-agent/
 omniroute/
+open-code-review/
+ponytail/
 transformers/
 ui-ux-pro-max-skill/
 

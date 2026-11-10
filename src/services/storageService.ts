@@ -5,9 +5,23 @@ import {
   Room,
   RoomInquiryBooking,
   SecurityAuditEntry,
+  SubMeterReadingLog,
   TenantHistoryEntry,
 } from '../types/rental';
-import { saveSnapshotToIndexedDb } from './idbDatabase';
+import {
+  saveSnapshotToIndexedDb,
+  loadSnapshotFromIndexedDb,
+} from './idbDatabase';
+
+let _isAppHydrated = false;
+
+export function isAppHydrated(): boolean {
+  return _isAppHydrated;
+}
+
+export function setAppHydrated(hydrated: boolean): void {
+  _isAppHydrated = hydrated;
+}
 
 /**
  * Stable, version-independent storage keys so app updates NEVER wipe existing data.
@@ -19,6 +33,7 @@ const STORAGE_KEYS = {
   HISTORY: '4rent_db_tenant_history',
   SETTINGS: '4rent_db_settings',
   AUDIT_LOG: '4rent_db_audit_log',
+  METER_LOGS: '4rent_db_meter_logs',
 };
 
 // Safe runtime decoder so raw credentials and project endpoints are never exposed in git tracking
@@ -268,6 +283,39 @@ export function appendAuditLog(
   return next;
 }
 
+export function loadReadingLogs(roomId?: string): SubMeterReadingLog[] {
+  try {
+    const raw =
+      localStorage.getItem(STORAGE_KEYS.METER_LOGS) ||
+      localStorage.getItem('4rent_meter_logs_v1');
+    const logs: SubMeterReadingLog[] = raw ? JSON.parse(raw) : [];
+    if (!roomId) {
+      return [...logs].sort((a, b) => b.readingDate.localeCompare(a.readingDate));
+    }
+    return logs
+      .filter((l) => l.roomId === roomId)
+      .sort((a, b) => b.readingDate.localeCompare(a.readingDate));
+  } catch {
+    return [];
+  }
+}
+
+export function saveReadingLogs(logs: SubMeterReadingLog[]): void {
+  const nextRaw = JSON.stringify(logs);
+  if (localStorage.getItem(STORAGE_KEYS.METER_LOGS) !== nextRaw) {
+    localStorage.setItem(STORAGE_KEYS.METER_LOGS, nextRaw);
+    persistMasterIndexedDb();
+    broadcastLocalChange(STORAGE_KEYS.METER_LOGS);
+  }
+}
+
+export function appendReadingLog(log: SubMeterReadingLog): SubMeterReadingLog[] {
+  const existing = loadReadingLogs();
+  const next = [log, ...existing.filter((item) => item.id !== log.id)];
+  saveReadingLogs(next);
+  return next;
+}
+
 export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
   return {
     version: '1.0.0',
@@ -277,11 +325,36 @@ export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
     inquiries: loadInquiries(),
     tenantHistory: loadTenantHistory(),
     settings: loadSettings(),
+    meterLogs: loadReadingLogs(),
   };
 }
 
-function persistMasterIndexedDb(): void {
+async function persistMasterIndexedDb(): Promise<void> {
+  if (!_isAppHydrated) return;
   const snap = exportDatabaseSnapshot();
+  const isCandidateEmpty =
+    (!snap.rooms || snap.rooms.length === 0) &&
+    (!snap.bills || snap.bills.length === 0) &&
+    (!snap.tenantHistory || snap.tenantHistory.length === 0);
+
+  if (isCandidateEmpty) {
+    try {
+      const existing = await loadSnapshotFromIndexedDb();
+      if (
+        (existing?.rooms && existing.rooms.length > 0) ||
+        (existing?.bills && existing.bills.length > 0) ||
+        (existing?.tenantHistory && existing.tenantHistory.length > 0)
+      ) {
+        console.warn(
+          '[4Rent Storage Guard] Blocked empty snapshot overwrite of populated IndexedDB backup.'
+        );
+        return;
+      }
+    } catch {
+      // Proceed if check fails
+    }
+  }
+
   saveSnapshotToIndexedDb(snap);
 }
 
@@ -300,6 +373,9 @@ export function importDatabaseSnapshot(snapshot: AppDatabaseSnapshot): void {
   }
   if (snapshot.settings) {
     saveSettings(snapshot.settings);
+  }
+  if (Array.isArray(snapshot.meterLogs)) {
+    saveReadingLogs(snapshot.meterLogs);
   }
 }
 

@@ -16,12 +16,12 @@
 Landlords do **not** need to install Node.js, Python, Git, or any complex developer tools:
 
 ### 🖥️ Windows Desktop (100% Zero-Installation Full-Screen App)
-1. Download **`4Rent Launcher.bat`** from the [`packages/desktop/`](./packages/desktop/) folder (or [`packages/`](./packages/)).
+1. Download **`4Rent Launcher.bat`** from the [`packages/desktop/`](./packages/desktop/) directory.
 2. Double-click **`4Rent Launcher.bat`**.
 3. It automatically creates an official **4Rent Management System** shortcut directly on the landlord's Windows Desktop and launches 4Rent in **Full-Screen Standalone App Mode** via built-in Microsoft Edge / Google Chrome!
 
 ### 📱 Android Mobile App (Offline / Mobile Data / Wi-Fi)
-1. Download **`4Rent-v1.0.0-release.apk`** from the [`packages/mobile/`](./packages/mobile/) folder (or [`packages/`](./packages/)).
+1. Download **`4Rent-v1.0.0-release.apk`** from the [`packages/mobile/`](./packages/mobile/) directory.
 2. Install the APK on your Android phone or tablet.
 3. The app runs fully standalone with offline IndexedDB local storage, camera permissions for sub-meter capture, OS notification reminders, and real-time cloud synchronization.
 
@@ -35,10 +35,8 @@ All distributables are cleanly isolated in the [`packages/`](./packages/) direct
 packages/
 ├── desktop/
 │   └── 4Rent Launcher.bat          # Standalone full-screen Desktop launcher
-├── mobile/
-│   └── 4Rent-v1.0.0-release.apk     # Standalone Android release APK
-├── 4Rent Launcher.bat               # Direct root link for quick download
-└── 4Rent-v1.0.0-release.apk         # Direct root link for quick download
+└── mobile/
+    └── 4Rent-v1.0.0-release.apk     # Standalone Android release APK
 ```
 
 ---

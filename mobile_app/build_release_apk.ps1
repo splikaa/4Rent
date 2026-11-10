@@ -1,6 +1,14 @@
 $ErrorActionPreference = "Continue"
 
-$sdkDir = "$env:LOCALAPPDATA\Android\sdk"
+$sdkDir = if ($env:ANDROID_HOME -and (Test-Path $env:ANDROID_HOME)) {
+  $env:ANDROID_HOME
+} elseif ($env:ANDROID_SDK_ROOT -and (Test-Path $env:ANDROID_SDK_ROOT)) {
+  $env:ANDROID_SDK_ROOT
+} elseif (Test-Path "$env:LOCALAPPDATA\Android\sdk") {
+  "$env:LOCALAPPDATA\Android\sdk"
+} else {
+  "$env:LOCALAPPDATA\Android\sdk"
+}
 $java = "$sdkDir\jdk\bin\java.exe"
 $javac = "$sdkDir\jdk\bin\javac.exe"
 $keytool = "$sdkDir\jdk\bin\keytool.exe"
@@ -29,10 +37,19 @@ New-Item -ItemType Directory -Force -Path "$srcDir\res\mipmap-xxxhdpi" | Out-Nul
 # 1. Copy icons and compiled web bundle into assets/www
 Copy-Item "$rootDir\public\icon-192.png" "$srcDir\res\mipmap-mdpi\ic_launcher.png" -Force
 Copy-Item "$rootDir\public\icon-512.png" "$srcDir\res\mipmap-xxxhdpi\ic_launcher.png" -Force
-Copy-Item "$rootDir\dist\*" "$workDir\assets\www\" -Recurse -Force
+if (Test-Path "$rootDir\dist") {
+  Copy-Item "$rootDir\dist\*" "$workDir\assets\www\" -Recurse -Force
+} else {
+  Write-Warning "Directory '$rootDir\dist' does not exist. Run 'npm run build' first to package latest web assets."
+}
 Remove-Item "$workDir\assets\www\*.apk" -Force -ErrorAction SilentlyContinue
 
 # 2. Compile resources with aapt2
+if (-not (Test-Path $aapt2)) {
+  Write-Warning "Android SDK build-tools (aapt2.exe) not found at: $aapt2"
+  Write-Host "For a pure Node.js build without Android SDK, run: npm run build:apk" -ForegroundColor Yellow
+  exit 1
+}
 & $aapt2 compile --dir "$srcDir\res" -o "$workDir\compiled_res.zip"
 if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
 
@@ -113,13 +130,16 @@ $finalApk = "$outDir\app-release.apk"
   "$workDir\aligned.apk"
 if ($LASTEXITCODE -ne 0) { throw "apksigner failed" }
 
-# 10. Copy to project root, public/, and dist/ for 1-click download
-Copy-Item "$finalApk" "$rootDir\4Rent-v1.0.0-release.apk" -Force
-Copy-Item "$finalApk" "$rootDir\public\4Rent-v1.0.0-release.apk" -Force
+# 10. Copy to standardized distribution location packages\mobile\
+$mobilePkgDir = "$rootDir\packages\mobile"
+if (-not (Test-Path $mobilePkgDir)) {
+  New-Item -ItemType Directory -Force -Path $mobilePkgDir | Out-Null
+}
+Copy-Item "$finalApk" "$mobilePkgDir\4Rent-v1.0.0-release.apk" -Force
 if (Test-Path "$rootDir\dist") {
   Copy-Item "$finalApk" "$rootDir\dist\4Rent-v1.0.0-release.apk" -Force
 }
 
 $sizeMB = [math]::Round((Get-Item $finalApk).Length / 1MB, 2)
 Write-Host "Built build\app\outputs\flutter-apk\app-release.apk ($sizeMB MB)." -ForegroundColor Green
-Write-Host "Also copied to: $rootDir\4Rent-v1.0.0-release.apk" -ForegroundColor Green
+Write-Host "Distributed to: $mobilePkgDir\4Rent-v1.0.0-release.apk" -ForegroundColor Green

@@ -32,6 +32,7 @@ import {
   formatPeso,
   formatPesoPrivacy,
 } from '../../utils/billingCalculator';
+import { loadReadingLogs } from '../../services/storageService';
 
 interface DashboardViewProps {
   rooms: Room[];
@@ -104,9 +105,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     (sum, b) => sum + (Number(b.remainingBalance) || 0),
     0
   );
-  const totalKwhBilled = bills.reduce(
-    (sum, b) => sum + (Number(b.consumptionKwh) || 0),
+  const persistentLogs = loadReadingLogs();
+  const persistentTotalKwh = persistentLogs.reduce(
+    (sum, l) => sum + (Number(l.consumptionDeltaKwh) || 0),
     0
+  );
+  const totalKwhBilled = Math.max(
+    persistentTotalKwh,
+    bills.reduce((sum, b) => sum + (Number(b.consumptionKwh) || 0), 0)
   );
 
   const roomsWithDueBalance = activeRooms.filter((r) => r.unpaidBalance > 0);
@@ -683,11 +689,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                 <div className="space-y-4 mt-4">
                   {activeRooms.map((r) => {
-                    const roomBills = bills.filter((b) => b.roomId === r.id);
-                    const roomKwh = roomBills.reduce(
-                      (s, b) => s + b.consumptionKwh,
+                    const roomLogs = persistentLogs.filter((l) => l.roomId === r.id);
+                    const roomLogsKwh = roomLogs.reduce(
+                      (s, l) => s + (Number(l.consumptionDeltaKwh) || 0),
                       0
                     );
+                    const roomBills = bills.filter((b) => b.roomId === r.id);
+                    const roomBillsKwh = roomBills.reduce(
+                      (s, b) => s + (Number(b.consumptionKwh) || 0),
+                      0
+                    );
+                    const roomKwh = Math.max(roomLogsKwh, roomBillsKwh);
                     const maxKwh = Math.max(100, totalKwhBilled);
                     const pct = Math.min(
                       100,

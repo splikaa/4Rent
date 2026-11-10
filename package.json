@@ -25,6 +25,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
     "apk_sign_ts": "^1.0.1",
+    "electron": "^34.2.0",
     "jszip": "^3.10.2",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",

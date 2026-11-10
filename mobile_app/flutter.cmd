@@ -34,7 +34,7 @@ if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
 start "" "%APP_URL%"
 exit /b 0
 :buildapk
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "c:\Users\Gameiun PeSoNet\Documents\4Rent\mobile_app\build_release_apk.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0build_release_apk.ps1"
 exit /b %ERRORLEVEL%
 :ver
 echo Flutter 3.24.4 - channel stable - https://github.com/flutter/flutter.git

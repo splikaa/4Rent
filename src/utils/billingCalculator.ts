@@ -1,14 +1,35 @@
 import { BillRecord, PaymentTransaction } from '../types/rental';
 
+export interface OcrVerificationResult {
+  rawReading: number;
+  verifiedReading: number;
+  confidence: number;
+  status: 'verified' | 'needs_confirmation' | 'anomaly_detected' | 'rollover_detected';
+  warningMessage?: string;
+  anomalyType?: 'exceeds_threshold' | 'negative_delta' | 'low_confidence';
+}
+
+export interface ConsumptionDeltaResult {
+  delta: number;
+  isNegative: boolean;
+  isRollover: boolean;
+  isReset?: boolean;
+  error?: string;
+}
+
 export interface SubMeterCalculationInput {
   prevReading: number;
   currReading: number;
   electricRate: number;
+  isRollover?: boolean;
+  dialDigits?: number;
+  isReset?: boolean;
 }
 
 export interface SubMeterCalculationResult {
   isValid: boolean;
   isRollover: boolean;
+  isReset?: boolean;
   consumptionKwh: number;
   electricTotal: number;
   errorMessage?: string;
@@ -21,6 +42,9 @@ export interface FullBillInput {
   electricRate: number;
   previousBalanceCarryOver: number;
   depositApplied?: number;
+  isRollover?: boolean;
+  dialDigits?: number;
+  isReset?: boolean;
 }
 
 export interface FullBillResult {
@@ -210,6 +234,92 @@ export function getBillingPeriodOptions(): string[] {
 }
 
 /**
+ * Pure calculator for sub-meter consumption delta supporting linear progression,
+ * mechanical dial rollover ($10^N - prev + curr$), and zero-reset / replacement.
+ */
+export function calculateConsumptionDelta(
+  current: number,
+  previous: number,
+  isRollover = false,
+  dialDigits = 5,
+  isReset = false
+): ConsumptionDeltaResult {
+  const prev = Number(previous) || 0;
+  const curr = Number(current) || 0;
+
+  if (curr >= prev) {
+    const delta = Math.round((curr - prev) * 100) / 100;
+    return { delta, isNegative: false, isRollover: false };
+  }
+
+  if (!isRollover && !isReset) {
+    const delta = Math.round((curr - prev) * 100) / 100;
+    return {
+      delta,
+      isNegative: true,
+      isRollover: false,
+      error: `Current reading (${curr.toFixed(1)} kWh) is lower than previous reading (${prev.toFixed(1)} kWh). Confirm meter dial rollover or meter reset to proceed.`,
+    };
+  }
+
+  if (isReset) {
+    const delta = Math.round(curr * 100) / 100;
+    return { delta, isNegative: false, isRollover: false, isReset: true };
+  }
+
+  const safeDigits = Math.max(3, Math.min(8, Number(dialDigits) || 5));
+  let modulus = 10 ** safeDigits;
+  while (modulus <= prev) {
+    modulus *= 10;
+  }
+
+  const delta = Math.round((modulus - prev + curr) * 100) / 100;
+  return { delta, isNegative: false, isRollover: true };
+}
+
+/**
+ * Validates extracted OCR meter readings against previous readings and historical benchmarks.
+ */
+export function verifyOcrReading(
+  detectedVal: number,
+  prevReading: number,
+  averageMonthlyKwh = 120
+): OcrVerificationResult {
+  const curr = Number(detectedVal) || 0;
+  const prev = Number(prevReading) || 0;
+
+  if (curr < prev) {
+    return {
+      rawReading: curr,
+      verifiedReading: curr,
+      confidence: 0.9,
+      status: 'rollover_detected',
+      warningMessage: `Current reading (${curr.toFixed(1)}) is lower than previous reading (${prev.toFixed(1)}). Dial rollover or meter reset required.`,
+      anomalyType: 'negative_delta',
+    };
+  }
+
+  const delta = curr - prev;
+  if (delta > 600 || (averageMonthlyKwh > 0 && delta > averageMonthlyKwh * 4)) {
+    return {
+      rawReading: curr,
+      verifiedReading: curr,
+      confidence: 0.85,
+      status: 'anomaly_detected',
+      warningMessage: `Consumption surge detected: Δ ${delta.toFixed(1)} kWh exceeds expected monthly threshold. Please verify meter photo.`,
+      anomalyType: 'exceeds_threshold',
+    };
+  }
+
+  return {
+    rawReading: curr,
+    verifiedReading: curr,
+    confidence: 0.95,
+    status: 'verified',
+  };
+}
+
+/**
  * Calculates the sub-meter kWh difference and total electric cost.
  */
 export function calculateSubMeterDifference(
@@ -219,23 +329,34 @@ export function calculateSubMeterDifference(
   const curr = Number(input.currReading) || 0;
   const rate = Math.max(0, Number(input.electricRate) || 0);
 
-  if (curr < prev) {
+  const deltaResult = calculateConsumptionDelta(
+    curr,
+    prev,
+    input.isRollover,
+    input.dialDigits,
+    input.isReset
+  );
+
+  if (deltaResult.isNegative) {
     return {
       isValid: false,
       isRollover: false,
+      isReset: false,
       consumptionKwh: 0,
       electricTotal: 0,
       errorMessage:
+        deltaResult.error ||
         'Current reading cannot be less than previous reading unless meter was reset.',
     };
   }
 
-  const consumptionKwh = Math.round((curr - prev) * 100) / 100;
+  const consumptionKwh = deltaResult.delta;
   const electricTotal = Math.round(consumptionKwh * rate * 100) / 100;
 
   return {
     isValid: true,
-    isRollover: false,
+    isRollover: Boolean(deltaResult.isRollover),
+    isReset: Boolean(deltaResult.isReset),
     consumptionKwh,
     electricTotal,
   };
@@ -250,6 +371,9 @@ export function calculateBillBreakdown(input: FullBillInput): FullBillResult {
     prevReading: input.prevReading,
     currReading: input.currReading,
     electricRate: input.electricRate,
+    isRollover: input.isRollover,
+    dialDigits: input.dialDigits,
+    isReset: input.isReset,
   });
 
   const baseRent = Math.max(0, Number(input.baseRent) || 0);

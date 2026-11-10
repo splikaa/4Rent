@@ -34,6 +34,7 @@ import {
   maskPhoneNumber,
   getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
+import { loadReadingLogs } from '../../services/storageService';
 
 interface RoomDetailsModalProps {
   room: Room | null;
@@ -68,6 +69,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   const safeDeposit =
     room.securityDeposit > 0 ? room.securityDeposit : room.monthlyRent;
   const safeAdvance = isOccupied ? Math.max(0, room.advanceRent || 0) : 0;
+  const meterLogs = loadReadingLogs(room.id);
 
   const safeDueDay = clampDueDayOneToTen(room.tenant?.dueDayOfMonth || 5);
   const nextDueIso = getNextDueDateInOneToTenWindow(
@@ -133,7 +135,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               title="Edit room configuration"
             >
               <Edit2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="hidden xs:inline">Edit Room</span>
+              <span className="hidden sm:inline">Edit Room</span>
             </button>
             <button
               type="button"
@@ -348,6 +350,71 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Sub-Meter Usage History & Reading Logs (Feature 19) */}
+          <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3.5">
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                  Sub-Meter Usage History & Reading Logs ({meterLogs.length})
+                </h4>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Persistent kWh readings & verification history
+              </span>
+            </div>
+
+            {meterLogs.length === 0 ? (
+              <div className="text-center py-6 text-xs text-slate-500">
+                No sub-meter reading logs recorded for {roomTitle} yet. Readings will automatically appear here when scanned.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {meterLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-[#111724] border border-[#1E293D] text-xs hover:border-amber-500/40 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      {log.cropDataUrl || log.photoDataUrl ? (
+                        <img
+                          src={log.cropDataUrl || log.photoDataUrl}
+                          alt="Meter Proof"
+                          className="w-10 h-10 object-cover rounded-lg border border-[#2B3B59] shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                          <Zap className="w-4 h-4 text-amber-400" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono-num font-black text-amber-400 text-sm">
+                            {log.readingKwh.toFixed(1)} kWh
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold font-mono-num">
+                            +{log.consumptionDeltaKwh.toFixed(1)} kWh
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-mono-num mt-0.5">
+                          {new Date(log.readingDate).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                          {log.tenantName ? ` • ${log.tenantName}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-lg bg-[#182133] text-slate-300 text-[10px] font-semibold uppercase tracking-wider">
+                      {log.source === 'ocr_scan' ? 'OCR Verified' : log.source === 'rollover' ? 'Dial Rollover' : 'Manual'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Room Receipts & Previous Transactions Ledger */}

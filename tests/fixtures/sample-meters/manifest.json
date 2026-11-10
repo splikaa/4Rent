@@ -1,0 +1,151 @@
+{
+  "version": "1.0.0",
+  "description": "Representative calibrated electric sub-meter photo fixtures for automated E2E OCR validation",
+  "generatedAt": "2026-11-10T13:24:58.341Z",
+  "fixtures": [
+    {
+      "fileName": "meter_safari_0_1.png",
+      "profileId": "safari_sy168_0_1",
+      "expectedReadingKwh": 0.1,
+      "expectedConfidence": 99,
+      "inspection": {
+        "brandModel": "Safari SY-168 Electronic kWh Meter",
+        "registerType": "6-Drum Cyclometer (5 Black + 1 Red Tenths)",
+        "registerBreakdown": "Black: 00000 • Red: .1 → 0.1 kWh",
+        "serialOrBarcode": "No. 2018-18120672 (Excluded)",
+        "electricalSpecs": "220/240V • 10(60)A • 60Hz • 1600 imp/kWh",
+        "isBlankUnpoweredLcd": false
+      },
+      "tolerance": {
+        "minKwh": 0.05,
+        "maxKwh": 0.15,
+        "minConfidence": 95
+      },
+      "fileSize": 396,
+      "dimensions": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "fileName": "meter_static_3_4.png",
+      "profileId": "static_sp1_3_4",
+      "expectedReadingKwh": 3.4,
+      "expectedConfidence": 99,
+      "inspection": {
+        "brandModel": "Static Watthour Meter TYPE-SP1",
+        "registerType": "6-Drum Cyclometer (5 Black + 1 Red 1/10)",
+        "registerBreakdown": "Black: 00003 • Red: .4 → 3.4 kWh",
+        "serialOrBarcode": "S.No. 470946 (Excluded)",
+        "electricalSpecs": "240V • 5-30A • 50Hz • 3200 imp/kWh",
+        "isBlankUnpoweredLcd": false
+      },
+      "tolerance": {
+        "minKwh": 3.35,
+        "maxKwh": 3.45,
+        "minConfidence": 95
+      },
+      "fileSize": 343,
+      "dimensions": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "fileName": "meter_digital_blank.png",
+      "profileId": "ge_kv2c_blank",
+      "expectedReadingKwh": 0,
+      "expectedConfidence": 99,
+      "inspection": {
+        "brandModel": "GE kV2c Digital Meter",
+        "registerType": "Digital LCD (Unpowered / Blank)",
+        "registerBreakdown": "LCD Blank/Off → 0.0 kWh",
+        "serialOrBarcode": "Barcode 18853562 (Excluded)",
+        "electricalSpecs": "CL 20 • 120-480V • 60Hz",
+        "isBlankUnpoweredLcd": true
+      },
+      "tolerance": {
+        "minKwh": 0,
+        "maxKwh": 0,
+        "minConfidence": 95
+      },
+      "fileSize": 389,
+      "dimensions": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "fileName": "meter_safari_0_3.png",
+      "profileId": "safari_sy168_0_3",
+      "expectedReadingKwh": 0.3,
+      "expectedConfidence": 99,
+      "inspection": {
+        "brandModel": "Safari SY-168 Electronic kWh Meter",
+        "registerType": "6-Drum Cyclometer (5 Black + 1 Red 0.1)",
+        "registerBreakdown": "Black: 00000 • Red: .3 → 0.3 kWh",
+        "serialOrBarcode": "No. KW2151075721 (Excluded)",
+        "electricalSpecs": "240V • 10(60)A • 60Hz • 1600 imp/kWh",
+        "isBlankUnpoweredLcd": false
+      },
+      "tolerance": {
+        "minKwh": 0.25,
+        "maxKwh": 0.35,
+        "minConfidence": 95
+      },
+      "fileSize": 362,
+      "dimensions": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "fileName": "meter_cirtech_blank.png",
+      "profileId": "cirtech_mt60i_blank",
+      "expectedReadingKwh": 0,
+      "expectedConfidence": 99,
+      "inspection": {
+        "brandModel": "Cirtech MT-60i Digital Sub-Meter",
+        "registerType": "Digital LCD (Unpowered / Blank)",
+        "registerBreakdown": "LCD Blank/Off → 0.0 kWh",
+        "serialOrBarcode": "No: 22501329 (Excluded)",
+        "electricalSpecs": "240V • 10(60)A • 60Hz • 1600 imp/kWh",
+        "isBlankUnpoweredLcd": true
+      },
+      "tolerance": {
+        "minKwh": 0,
+        "maxKwh": 0,
+        "minConfidence": 95
+      },
+      "fileSize": 340,
+      "dimensions": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "fileName": "meter_round_cyclometer.png",
+      "profileId": "user_round_cyclometer_sample",
+      "expectedReadingKwh": 3.4,
+      "expectedConfidence": 99,
+      "inspection": {
+        "brandModel": "Round Electromechanical Sub-Meter",
+        "registerType": "Cyclometer Register (5 Black + 1 Red Tenths)",
+        "registerBreakdown": "Black: 00003 • Red: .4 → 3.4 kWh",
+        "serialOrBarcode": "Faceplate Serial Excluded",
+        "electricalSpecs": "240V • 5-30A • 50/60Hz",
+        "isBlankUnpoweredLcd": false
+      },
+      "tolerance": {
+        "minKwh": 3.35,
+        "maxKwh": 3.45,
+        "minConfidence": 95
+      },
+      "fileSize": 423,
+      "dimensions": {
+        "width": 64,
+        "height": 64
+      }
+    }
+  ]
+}

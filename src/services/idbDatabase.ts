@@ -35,7 +35,55 @@ export async function saveSnapshotToIndexedDb(
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      store.put(snapshot, PRIMARY_KEY);
+      const getReq = store.get(PRIMARY_KEY);
+      getReq.onsuccess = () => {
+        const existing: AppDatabaseSnapshot | undefined = getReq.result;
+        let toSave = snapshot;
+        if (existing) {
+          // Preserve offloaded photo assets from existing IndexedDB snapshot
+          const mergedRooms = snapshot.rooms?.map((r) => {
+            if (r.lastMeterPhotoDataUrl === '[idb-offloaded:photo]') {
+              const existingRoom = existing.rooms?.find((er) => er.id === r.id);
+              if (
+                existingRoom?.lastMeterPhotoDataUrl &&
+                existingRoom.lastMeterPhotoDataUrl !== '[idb-offloaded:photo]'
+              ) {
+                return {
+                  ...r,
+                  lastMeterPhotoDataUrl: existingRoom.lastMeterPhotoDataUrl,
+                };
+              }
+            }
+            return r;
+          });
+          const mergedBills = snapshot.bills?.map((b) => {
+            let updated = { ...b };
+            const existingBill = existing.bills?.find((eb) => eb.id === b.id);
+            if (
+              b.prevMeterPhotoDataUrl === '[idb-offloaded:photo]' &&
+              existingBill?.prevMeterPhotoDataUrl
+            ) {
+              updated.prevMeterPhotoDataUrl = existingBill.prevMeterPhotoDataUrl;
+            }
+            if (
+              b.meterPhotoDataUrl === '[idb-offloaded:photo]' &&
+              existingBill?.meterPhotoDataUrl
+            ) {
+              updated.meterPhotoDataUrl = existingBill.meterPhotoDataUrl;
+            }
+            return updated;
+          });
+          toSave = {
+            ...snapshot,
+            rooms: mergedRooms || snapshot.rooms,
+            bills: mergedBills || snapshot.bills,
+          };
+        }
+        store.put(toSave, PRIMARY_KEY);
+      };
+      getReq.onerror = () => {
+        store.put(snapshot, PRIMARY_KEY);
+      };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

@@ -97,6 +97,11 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [currMeterSnapshotUrl, setCurrMeterSnapshotUrl] = useState<string>('');
   const [currMeterCropUrl, setCurrMeterCropUrl] = useState<string>('');
 
+  // Mechanical Dial Rollover & Zero-Reset Override State
+  const [isRollover, setIsRollover] = useState(false);
+  const [rolloverType, setRolloverType] = useState<'dial_rollover' | 'meter_reset'>('dial_rollover');
+  const [dialDigits, setDialDigits] = useState<number>(5);
+
   // OCR, Inspection & Camera state
   const [scanTab, setScanTab] = useState<'upload' | 'camera'>('upload');
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -150,6 +155,11 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       setOcrStatusMsg(null);
       setMeterInspection(null);
+
+      // Reset rollover override state when switching rooms
+      setIsRollover(false);
+      setRolloverType('dial_rollover');
+      setDialDigits(5);
     }
   }, [selectedRoom?.id]);
 
@@ -333,10 +343,16 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     Math.max(0, parseFloat(depositApplied) || 0)
   );
 
+  const isReset = rolloverType === 'meter_reset';
+  const isRolloverActive = isRollover && currNum < prevNum;
+
   const subMeterCheck = calculateSubMeterDifference({
     prevReading: prevNum,
     currReading: currNum,
     electricRate: rateNum,
+    isRollover: isRolloverActive && !isReset,
+    dialDigits,
+    isReset: isRolloverActive && isReset,
   });
 
   const billBreakdown = calculateBillBreakdown({
@@ -346,6 +362,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     electricRate: rateNum,
     previousBalanceCarryOver: carryNum,
     depositApplied: depNum,
+    isRollover: isRolloverActive && !isReset,
+    dialDigits,
+    isReset: isRolloverActive && isReset,
   });
 
   const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOneToTen, 10) || 5);
@@ -460,6 +479,11 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               },
             ]
           : [],
+      notes: isRolloverActive
+        ? isReset
+          ? `[Meter Reset Baseline Verified] Current reading ${currNum.toFixed(1)} kWh recorded after sub-meter replacement/zero-reset. Delta: ${billBreakdown.consumptionKwh.toFixed(1)} kWh.`
+          : `[Dial Rollover Verified] Meter mechanical rollover processed (${dialDigits}-digit dial capacity). Previous: ${prevNum.toFixed(1)} kWh, Current: ${currNum.toFixed(1)} kWh, Delta: ${billBreakdown.consumptionKwh.toFixed(1)} kWh.`
+        : undefined,
       updatedAt: nowIso,
     };
 
@@ -983,7 +1007,102 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
               </div>
 
-              {!subMeterCheck.isValid && (
+              {/* Negative Reading / Rollover Handling UI */}
+              {currNum < prevNum && !isRollover && (
+                <div className="mt-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 p-3 text-xs text-amber-200 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-amber-300">
+                        Current reading ({currNum.toFixed(1)} kWh) is lower than previous reading ({prevNum.toFixed(1)} kWh).
+                      </p>
+                      <p className="text-slate-300 mt-0.5">
+                        If the meter exceeded its dial capacity (rollover) or was replaced/reset to 0, enable the rollover override below.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsRollover(true)}
+                    className="w-full py-1.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <span>Enable Meter Dial Rollover / Reset Override</span>
+                  </button>
+                </div>
+              )}
+
+              {currNum < prevNum && isRollover && (
+                <div className="mt-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 p-3 text-xs text-emerald-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-emerald-300">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span>Rollover / Reset Mode Enabled</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsRollover(false)}
+                      className="text-[11px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                    >
+                      Disable Override
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRolloverType('dial_rollover')}
+                      className={`p-2 rounded-lg border text-left cursor-pointer transition ${
+                        rolloverType === 'dial_rollover'
+                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 font-bold'
+                          : 'bg-[#161D2B] border-[#263248] text-slate-400'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold">Mechanical Rollover</div>
+                      <div className="text-[10px] text-slate-300 mt-0.5">Meter reached max dials</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRolloverType('meter_reset')}
+                      className={`p-2 rounded-lg border text-left cursor-pointer transition ${
+                        rolloverType === 'meter_reset'
+                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 font-bold'
+                          : 'bg-[#161D2B] border-[#263248] text-slate-400'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold">Zero Reset / New Meter</div>
+                      <div className="text-[10px] text-slate-300 mt-0.5">Reading starts from 0</div>
+                    </button>
+                  </div>
+
+                  {rolloverType === 'dial_rollover' && (
+                    <div className="flex items-center justify-between pt-1 border-t border-emerald-500/20">
+                      <span className="text-slate-300 text-[11px]">Dial Digits Capacity:</span>
+                      <div className="flex gap-1.5">
+                        {[4, 5, 6].map((digits) => (
+                          <button
+                            key={digits}
+                            type="button"
+                            onClick={() => setDialDigits(digits)}
+                            className={`px-2 py-0.5 rounded text-[11px] font-mono-num font-bold cursor-pointer transition ${
+                              dialDigits === digits
+                                ? 'bg-emerald-400 text-slate-950'
+                                : 'bg-[#161D2B] border border-[#263248] text-slate-300'
+                            }`}
+                          >
+                            {digits} ({10 ** digits})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="text-[11px] text-emerald-300/90 bg-emerald-950/40 rounded-lg p-2 font-mono-num">
+                    Calculated Delta: <strong className="text-emerald-200">{billBreakdown.consumptionKwh.toFixed(1)} kWh</strong>
+                  </div>
+                </div>
+              )}
+
+              {!subMeterCheck.isValid && currNum >= prevNum && (
                 <div className="mt-2 rounded-xl bg-red-500/15 border border-red-500/30 p-2 text-xs text-red-300 flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{subMeterCheck.errorMessage}</span>
@@ -1161,13 +1280,28 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               </div>
             </div>
 
+            {currNum < prevNum && !isRollover && (
+              <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-xs text-amber-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>Action Blocked: Current reading is lower than previous. Enable Rollover/Reset above to proceed.</span>
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={!subMeterCheck.isValid}
-              className="w-full py-3 px-4 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] disabled:opacity-40 text-slate-950 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-amber-500/20 transition cursor-pointer"
+              className={`w-full py-3 px-4 rounded-2xl disabled:opacity-40 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl transition cursor-pointer ${
+                isRolloverActive
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
+                  : 'bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 shadow-amber-500/20'
+              }`}
             >
               <FileCheck2 className="w-4 h-4" />
-              <span>Save & Generate Receipt</span>
+              <span>
+                {isRolloverActive
+                  ? 'Save & Generate Receipt (Rollover Verified)'
+                  : 'Save & Generate Receipt'}
+              </span>
             </button>
           </div>
         </form>

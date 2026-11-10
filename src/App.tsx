@@ -13,6 +13,7 @@ import {
   appendAuditLog,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
+  isAppHydrated,
   loadBills,
   loadInquiries,
   loadRooms,
@@ -23,6 +24,8 @@ import {
   saveRooms,
   saveSettings,
   saveTenantHistory,
+  appendReadingLog,
+  setAppHydrated,
   subscribeToLocalCrossWindowSync,
 } from './services/storageService';
 import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
@@ -72,6 +75,7 @@ export function App() {
   const [tenantHistory, setTenantHistory] = useState<TenantHistoryEntry[]>(() =>
     loadTenantHistory()
   );
+  const [isHydrated, setIsHydrated] = useState<boolean>(() => isAppHydrated());
 
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -240,20 +244,41 @@ export function App() {
   // Hydrate from Persistent IndexedDB if localStorage was cleared by an OS/browser update
   useEffect(() => {
     let mounted = true;
-    loadSnapshotFromIndexedDb().then((idbSnap) => {
-      if (!mounted || !idbSnap) return;
-      const currentRooms = loadRooms();
-      if (currentRooms.length === 0 && idbSnap.rooms?.length > 0) {
-        importDatabaseSnapshot(idbSnap);
-        setRooms(idbSnap.rooms);
-        setBills(idbSnap.bills || []);
-        setInquiries(idbSnap.inquiries || []);
-        setTenantHistory(idbSnap.tenantHistory || []);
-        if (idbSnap.settings) {
-          setSettings(idbSnap.settings);
+    const hydrate = async () => {
+      try {
+        const idbSnap = await loadSnapshotFromIndexedDb();
+        if (!mounted || !idbSnap) return;
+        const currentRooms = loadRooms();
+        const hasIdbData =
+          (idbSnap.rooms && idbSnap.rooms.length > 0) ||
+          (idbSnap.bills && idbSnap.bills.length > 0) ||
+          (idbSnap.tenantHistory && idbSnap.tenantHistory.length > 0);
+
+        if (currentRooms.length === 0 && hasIdbData) {
+          importDatabaseSnapshot(idbSnap);
+          setRooms(idbSnap.rooms || []);
+          setBills(idbSnap.bills || []);
+          setInquiries(idbSnap.inquiries || []);
+          setTenantHistory(idbSnap.tenantHistory || []);
+          if (idbSnap.settings) {
+            setSettings(idbSnap.settings);
+            if (idbSnap.settings.security?.isSetupComplete) {
+              setShowSecuritySetup(false);
+              setIsLocked(idbSnap.settings.security.lockEnabled ?? true);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[4Rent] IndexedDB hydration error:', err);
+      } finally {
+        if (mounted) {
+          setAppHydrated(true);
+          setIsHydrated(true);
         }
       }
-    });
+    };
+
+    hydrate();
     return () => {
       mounted = false;
     };
@@ -262,6 +287,7 @@ export function App() {
   // Live Instant Realtime sync across Desktop & Mobile devices (Local BroadcastChannel + Storage + Supabase Cloud)
   useEffect(() => {
     const unsubscribeLocal = subscribeToLocalCrossWindowSync(() => {
+      if (!isAppHydrated()) return;
       setRooms(loadRooms());
       setBills(loadBills());
       setInquiries(loadInquiries());
@@ -334,24 +360,29 @@ export function App() {
   ]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     saveSettings(settings);
-  }, [settings]);
+  }, [settings, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     saveRooms(rooms);
-  }, [rooms]);
+  }, [rooms, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     saveBills(bills);
-  }, [bills]);
+  }, [bills, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     saveInquiries(inquiries);
-  }, [inquiries]);
+  }, [inquiries, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     saveTenantHistory(tenantHistory);
-  }, [tenantHistory]);
+  }, [tenantHistory, isHydrated]);
 
   const triggerOptionalCloudSync = () => {
     if (
@@ -567,6 +598,36 @@ export function App() {
       if (!roomPendingPinDelete) return;
       const targetId = roomPendingPinDelete.id;
       const targetName = roomPendingPinDelete.name;
+      const nowIso = new Date().toISOString();
+
+      // Layer 2 Engine Archival Fail-Safe: Archive active tenant to TenantHistoryEntry
+      if (roomPendingPinDelete.tenant) {
+        const entry: TenantHistoryEntry = {
+          id: `hist-${Date.now()}`,
+          roomId: roomPendingPinDelete.id,
+          roomName: roomPendingPinDelete.name,
+          tenantName: roomPendingPinDelete.tenant.fullName,
+          phone: roomPendingPinDelete.tenant.phone,
+          messengerUsername: roomPendingPinDelete.tenant.messengerUsername,
+          moveInDate: roomPendingPinDelete.tenant.moveInDate,
+          moveOutDate: nowIso.slice(0, 10),
+          reason: 'Permanent Room Deletion with Master PIN (Archived on Deletion)',
+          finalMeterReading: roomPendingPinDelete.lastMeterReading,
+          depositHeld: roomPendingPinDelete.securityDeposit,
+          unpaidBalanceAtMoveOut: roomPendingPinDelete.unpaidBalance,
+        };
+        setTenantHistory((prev) => [entry, ...prev]);
+      }
+
+      // Layer 2 Engine Archival Fail-Safe: Archive associated active bills to prevent orphaned bills
+      setBills((prev) =>
+        prev.map((b) =>
+          b.roomId === targetId && !b.isArchived
+            ? { ...b, isArchived: true, archivedAt: nowIso }
+            : b
+        )
+      );
+
       setRooms((prev) => prev.filter((r) => r.id !== targetId));
       setRoomPendingPinDelete(null);
       appendAuditLog(
@@ -857,6 +918,23 @@ export function App() {
           };
         })
       );
+
+      appendReadingLog({
+        id: `meter-log-${newBill.id}-${Date.now()}`,
+        roomId: newBill.roomId,
+        roomName: newBill.roomName,
+        tenantName: newBill.tenantName,
+        readingDate: newBill.createdAt,
+        readingKwh: newBill.currReading,
+        consumptionDeltaKwh: newBill.consumptionKwh,
+        source: newBill.notes?.includes('Rollover')
+          ? 'rollover'
+          : (newBill.ocrConfidence ? 'ocr_scan' : 'manual_entry'),
+        photoDataUrl: newBill.meterPhotoDataUrl,
+        cropDataUrl: newBill.currMeterCropDataUrl,
+        billId: newBill.id,
+        notes: newBill.notes,
+      });
 
       appendAuditLog(
         'Official Receipt Generated',
@@ -1197,11 +1275,33 @@ export function App() {
       setRooms((prev) =>
         prev.map((r) => {
           if (r.id !== inquiry.roomId) return r;
-          const reqDep = r.securityDeposit || settings.defaultMonthlyRent;
-          const excessAdvance =
-            inquiry.reservationFee > reqDep
-              ? Math.round((inquiry.reservationFee - reqDep) * 100) / 100
-              : inquiry.reservationFee;
+          const reqDep =
+            inquiry.requiredDeposit && inquiry.requiredDeposit > 0
+              ? inquiry.requiredDeposit
+              : r.securityDeposit || settings.defaultMonthlyRent;
+          const excessAdvance = Math.max(
+            0,
+            Math.round(((inquiry.reservationFee || 0) - reqDep) * 100) / 100
+          );
+
+          const advanceTx: AdvanceBalanceTransaction | null =
+            excessAdvance > 0
+              ? {
+                  id: `adv-inq-${Date.now()}`,
+                  type: 'overpayment_credit',
+                  amount: excessAdvance,
+                  createdAt: nowIso,
+                  note: `Booking reservation excess credited to advance rent (Reservation fee: ₱${(inquiry.reservationFee || 0).toFixed(2)}, Deposit: ₱${reqDep.toFixed(2)})`,
+                }
+              : null;
+
+          if (excessAdvance > 0) {
+            appendAuditLog(
+              'Advance Rent Credited',
+              `₱${excessAdvance.toFixed(2)} excess reservation fee credited as advance rent for ${inquiry.prospectName} in ${r.name}.`,
+              'billing'
+            );
+          }
 
           const moveInDay = clampDueDayOneToTen(
             new Date(inquiry.targetMoveInDate).getDate() || 5
@@ -1211,8 +1311,12 @@ export function App() {
             ...r,
             status: 'occupied',
             securityDeposit: reqDep,
+            unpaidBalance: 0,
             advanceRent:
               Math.round(((r.advanceRent || 0) + excessAdvance) * 100) / 100,
+            advanceHistory: advanceTx
+              ? [advanceTx, ...(r.advanceHistory || [])]
+              : r.advanceHistory || [],
             tenant: {
               id: `ten-${Date.now()}`,
               fullName: inquiry.prospectName,
@@ -1406,7 +1510,7 @@ export function App() {
     rooms.find((r) => r.id === selectedRoomDetailsId) || null;
 
   // 0. Initial System Boot Loading Screen
-  if (showBootSplash) {
+  if (showBootSplash || !isHydrated) {
     return (
       <LoadingSplashScreen
         mode="boot"
@@ -1499,9 +1603,19 @@ export function App() {
               setEditingRoom(room);
               setIsRoomModalOpen(true);
             }}
-            onRequestDeleteRoomWithPin={(room) =>
-              setRoomPendingPinDelete(room)
-            }
+            onRequestDeleteRoomWithPin={(room) => {
+              if (room.status === 'occupied' || Boolean(room.tenant)) {
+                triggerFeedback(
+                  'Cannot Delete Occupied Room',
+                  `${room.name} is occupied by ${room.tenant?.fullName || 'a tenant'}. Move out the tenant or archive the room first to protect tenant and billing records.`,
+                  'warning',
+                  'View Room Ledger',
+                  () => setSelectedRoomDetailsId(room.id)
+                );
+                return;
+              }
+              setRoomPendingPinDelete(room);
+            }}
             onArchiveRoom={handleArchiveRoom}
             onMoveOutTenant={handleMoveOutTenant}
             onOpenScanMeter={(room) => handleOpenScanForRoom(room)}

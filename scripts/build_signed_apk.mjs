@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve, join, relative } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync } from 'node:fs';
+import { resolve, join, relative, dirname } from 'node:path';
 import JSZip from 'jszip';
 import { ApkSigner, SigningKey, convertToPEM } from 'apk_sign_ts';
 
@@ -8,6 +8,13 @@ const baseApkPath = join(rootDir, 'mobile_app', 'build', 'app', 'outputs', 'flut
 const keystorePath = join(rootDir, 'mobile_app', '4rent-release-key.jks');
 const distDir = join(rootDir, 'dist');
 const publicDir = join(rootDir, 'public');
+
+if (!existsSync(baseApkPath)) {
+  throw new Error(`[4Rent APK Signer] Base APK not found at: ${baseApkPath}`);
+}
+if (!existsSync(keystorePath)) {
+  throw new Error(`[4Rent APK Signer] Keystore not found at: ${keystorePath}`);
+}
 
 console.log('[4Rent APK Signer] Loading base Android binary artifacts from:', baseApkPath);
 const baseApkBytes = readFileSync(baseApkPath);
@@ -179,7 +186,11 @@ function addDirRecursive(dirPath, zipPrefix) {
   }
 }
 
-addDirRecursive(distDir, 'assets/www');
+if (!existsSync(distDir)) {
+  console.warn('[4Rent APK Signer] Warning: dist/ directory not found. Run "npm run build" first to package latest web assets.');
+} else {
+  addDirRecursive(distDir, 'assets/www');
+}
 
 // Also ensure icons are in assets/www
 if (newZip.file('assets/www/icon-192.png') == null && statSync(join(publicDir, 'icon-192.png'), { throwIfNoEntry: false })) {
@@ -224,13 +235,15 @@ console.log(`[4Rent APK Signer] Successfully signed! Total APK size: ${signedApk
 // 5. Output to package destinations
 const outputTargets = [
   join(rootDir, 'packages', 'mobile', '4Rent-v1.0.0-release.apk'),
-  join(rootDir, 'packages', '4Rent-v1.0.0-release.apk'),
-  join(rootDir, 'public', '4Rent-v1.0.0-release.apk'),
-  join(rootDir, 'dist', '4Rent-v1.0.0-release.apk'),
   baseApkPath,
 ];
 
+if (existsSync(distDir)) {
+  outputTargets.push(join(distDir, '4Rent-v1.0.0-release.apk'));
+}
+
 for (const target of outputTargets) {
+  mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, signedApk);
   console.log(`[4Rent APK Signer] Wrote: ${relative(rootDir, target)}`);
 }

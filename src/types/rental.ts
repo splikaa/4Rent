@@ -182,6 +182,21 @@ export interface AppSettings {
   cloudSync: CloudSyncConfig;
 }
 
+export interface SubMeterReadingLog {
+  id: string;
+  roomId: string;
+  roomName: string;
+  tenantName?: string;
+  readingDate: string; // ISO 8601
+  readingKwh: number;
+  consumptionDeltaKwh: number;
+  source: 'ocr_scan' | 'manual_entry' | 'rollover';
+  photoDataUrl?: string; // stored in IndexedDB, referenced or truncated in localStorage
+  cropDataUrl?: string;
+  billId?: string;
+  notes?: string;
+}
+
 export interface AppDatabaseSnapshot {
   version: string;
   exportedAt: string;
@@ -190,4 +205,5 @@ export interface AppDatabaseSnapshot {
   inquiries: RoomInquiryBooking[];
   tenantHistory: TenantHistoryEntry[];
   settings: AppSettings;
+  meterLogs?: SubMeterReadingLog[];
 }

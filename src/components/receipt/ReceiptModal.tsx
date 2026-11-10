@@ -558,7 +558,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               className="h-11 py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/15 transition cursor-pointer btn-fluid"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden xs:inline">Download</span> PNG
+              <span className="hidden sm:inline">Download</span> PNG
             </button>
 
             <button
@@ -574,7 +574,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               ) : (
                 <>
                   <Copy className="w-4 h-4" />
-                  <span className="hidden xs:inline">Copy</span> Text
+                  <span className="hidden sm:inline">Copy</span> Text
                 </>
               )}
             </button>

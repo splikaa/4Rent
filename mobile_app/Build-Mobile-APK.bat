@@ -19,5 +19,5 @@ echo Building installable Android Release APK...
 call flutter build apk --release
 echo.
 echo [SUCCESS] Installable APK generated at:
-echo build\app\outputs\flutter-apk\app-release.apk
+echo packages\mobile\4Rent-v1.0.0-release.apk
 pause
