@@ -296,7 +296,7 @@ export function subscribeToRealtimeSync(
       config: { broadcast: { ack: false } },
     });
 
-    channel.on('broadcast', { event: 'db_update' }, (payload) => {
+    channel.on('broadcast', { event: 'db_update' }, (payload: any) => {
       if (payload?.payload?.snapshot) {
         onRemoteSnapshot(payload.payload.snapshot);
       }

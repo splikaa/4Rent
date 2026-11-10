@@ -912,7 +912,7 @@ export async function recognizeSubMeterReading(
       try {
         const runTesseract = (url: string, timeoutMs: number) => {
           const ocrPromise = Tesseract.recognize(url, 'eng', {
-            logger: (m) => {
+            logger: (m: any) => {
               if (m.status === 'recognizing text' && onProgress) {
                 onProgress(Math.min(94, 50 + Math.round((m.progress || 0) * 44)));
               }
