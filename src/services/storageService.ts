@@ -47,14 +47,15 @@ const _decodeSecret = (b64: string): string => {
 
 const viteEnv =
   (import.meta as unknown as { env?: Record<string, string> }).env || {};
+const DEV_FIREBASE_PROJECT_ID =
+  viteEnv.VITE_FIREBASE_PROJECT_ID || 'four-rent-demo';
+const DEV_FIREBASE_DATABASE_URL =
+  viteEnv.VITE_FIREBASE_DATABASE_URL ||
+  'https://four-rent-demo-default-rtdb.firebaseio.com';
 const DEV_SUPABASE_URL =
-  viteEnv.VITE_SUPABASE_URL ||
-  _decodeSecret('aHR0cHM6Ly9uZndneWlxZG15bmFxa3BoZ2ZxZS5zdXBhYmFzZS5jbw==');
+  viteEnv.VITE_SUPABASE_URL || '';
 const DEV_SUPABASE_ANON_KEY =
-  viteEnv.VITE_SUPABASE_ANON_KEY ||
-  _decodeSecret(
-    'c2JfcHVibGlzaGFibGVfRGxjTUctSk8zWl9tOFczNEFUemJsQV9zT05XRFk0bg=='
-  );
+  viteEnv.VITE_SUPABASE_ANON_KEY || '';
 const DEV_PROPERTY_CODE = viteEnv.VITE_PROPERTY_CODE || '4RENT-MAIN';
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -80,9 +81,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     requirePinForSensitiveActions: true,
   },
   cloudSync: {
-    enabled: Boolean(DEV_SUPABASE_URL && DEV_SUPABASE_ANON_KEY),
-    supabaseUrl: DEV_SUPABASE_URL,
-    supabaseAnonKey: DEV_SUPABASE_ANON_KEY,
+    enabled: false,
+    provider: 'firebase',
+    firebaseProjectId: DEV_FIREBASE_PROJECT_ID,
+    firebaseDatabaseUrl: DEV_FIREBASE_DATABASE_URL,
     propertyCode: DEV_PROPERTY_CODE,
   },
 };
@@ -126,6 +128,11 @@ export function loadSettings(): AppSettings {
       cloudSync: {
         ...DEFAULT_SETTINGS.cloudSync,
         ...(parsed.cloudSync || {}),
+        provider: parsed.cloudSync?.provider || 'firebase',
+        firebaseProjectId:
+          parsed.cloudSync?.firebaseProjectId || DEV_FIREBASE_PROJECT_ID,
+        firebaseDatabaseUrl:
+          parsed.cloudSync?.firebaseDatabaseUrl || DEV_FIREBASE_DATABASE_URL,
         supabaseUrl: parsed.cloudSync?.supabaseUrl || DEV_SUPABASE_URL,
         supabaseAnonKey:
           parsed.cloudSync?.supabaseAnonKey || DEV_SUPABASE_ANON_KEY,

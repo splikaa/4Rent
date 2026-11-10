@@ -1,5 +1,13 @@
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { AppDatabaseSnapshot, CloudSyncConfig } from '../types/rental';
+import {
+  FIREBASE_RULES_JSON,
+  pullSnapshotFromFirebase,
+  pushSnapshotToFirebase,
+  subscribeToFirebaseRealtime,
+} from './firebaseSync';
+
+export { FIREBASE_RULES_JSON };
 
 let cachedClient: SupabaseClient | null = null;
 let cachedConfigKey = '';
@@ -54,6 +62,13 @@ export function subscribeToRealtimeSync(
   config: CloudSyncConfig,
   onRemoteSnapshot: (snapshot: AppDatabaseSnapshot) => void
 ): () => void {
+  const isFirebase =
+    config.provider === 'firebase' ||
+    (!config.provider && (Boolean(config.firebaseProjectId) || !config.supabaseUrl));
+  if (isFirebase) {
+    return subscribeToFirebaseRealtime(config, onRemoteSnapshot);
+  }
+
   const client = getClient(config);
   if (!client) return () => {};
 
@@ -121,6 +136,13 @@ export async function pushSnapshotToCloud(
   config: CloudSyncConfig,
   snapshot: AppDatabaseSnapshot
 ): Promise<{ ok: boolean; message: string; syncedAt?: string }> {
+  const isFirebase =
+    config.provider === 'firebase' ||
+    (!config.provider && (Boolean(config.firebaseProjectId) || !config.supabaseUrl));
+  if (isFirebase) {
+    return pushSnapshotToFirebase(config, snapshot);
+  }
+
   const client = getClient(config);
   if (!client) {
     return {
@@ -206,6 +228,13 @@ export async function pullSnapshotFromCloud(
   snapshot?: AppDatabaseSnapshot;
   updatedAt?: string;
 }> {
+  const isFirebase =
+    config.provider === 'firebase' ||
+    (!config.provider && (Boolean(config.firebaseProjectId) || !config.supabaseUrl));
+  if (isFirebase) {
+    return pullSnapshotFromFirebase(config);
+  }
+
   const client = getClient(config);
   if (!client) {
     return {

@@ -360,7 +360,7 @@ function matchCalibratedSubMeterProfile(
     }
   }
 
-  if (bestProfile && bestScore <= 22.5) {
+  if (bestProfile && bestScore <= 38.0) {
     return bestProfile;
   }
   return null;

@@ -155,10 +155,16 @@ export interface SecurityConfig {
   requirePinForSensitiveActions?: boolean; // Require PIN for advance withdrawals & room deletions
 }
 
+export type CloudProvider = 'firebase' | 'supabase';
+
 export interface CloudSyncConfig {
   enabled: boolean;
-  supabaseUrl: string;
-  supabaseAnonKey: string;
+  provider?: CloudProvider;
+  firebaseProjectId?: string;
+  firebaseApiKey?: string;
+  firebaseDatabaseUrl?: string;
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
   propertyCode: string;
   lastSyncedAt?: string;
 }

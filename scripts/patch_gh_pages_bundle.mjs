@@ -84,6 +84,35 @@ replaceExact(
   'upload subtitle cyclometer text'
 );
 
+// OCR score threshold to 38.0 for resilient image recognition
+replaceExact(
+  'y<r&&(r=y,n=c)}return n&&r<=22.5?n:null',
+  'y<r&&(r=y,n=c)}return n&&r<=38?n:null',
+  'OCR calibrated profile match threshold to 38'
+);
+
+// Firebase cloud sync default settings
+replaceExact(
+  'cloudSync:{enabled:!!(Kh&&Yh),supabaseUrl:Kh,supabaseAnonKey:Yh,propertyCode:Bb}}',
+  'cloudSync:{enabled:!1,provider:"firebase",firebaseProjectId:"four-rent-demo",firebaseDatabaseUrl:"https://four-rent-demo-default-rtdb.firebaseio.com",propertyCode:Bb}}',
+  'cloudSync default settings to Firebase'
+);
+
+// Firebase push/pull cloud sync implementation
+const fbHelper = 'function getFbUrl(s){if(s.firebaseDatabaseUrl&&s.firebaseDatabaseUrl.trim())return s.firebaseDatabaseUrl.trim().replace(/\\/+$/,"");return `https://${(s.firebaseProjectId||"four-rent-demo").trim()}-default-rtdb.firebaseio.com`};';
+
+replaceExact(
+  'async function gy(s,n){const r=yf(s);',
+  `${fbHelper}async function gy(s,n){if(s.provider==="firebase"||(!s.provider&&!s.supabaseUrl)){const l=s.propertyCode||"4RENT-MAIN",c=new Date().toISOString(),h={...n,exportedAt:c};try{const f_u=\`\${getFbUrl(s)}/properties/\${encodeURIComponent(l)}.json\`,res=await fetch(f_u,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({propertyCode:l,snapshot:h,updatedAt:c})});return res.ok?{ok:!0,message:\`Synchronized to Firebase Realtime Database (\${l})\`,syncedAt:c}:{ok:!1,message:\`Firebase Error (\${res.status})\`}}catch(f){return{ok:!1,message:f instanceof Error?f.message:"Network error during Firebase sync"}}}const r=yf(s);`,
+  'Firebase pushSnapshotToCloud support'
+);
+
+replaceExact(
+  'async function by(s){const n=yf(s);',
+  'async function by(s){if(s.provider==="firebase"||(!s.provider&&!s.supabaseUrl)){try{const f_u=`${getFbUrl(s)}/properties/${encodeURIComponent(s.propertyCode||"4RENT-MAIN")}.json`,res=await fetch(f_u);if(!res.ok)return{ok:!1,message:`Firebase Error (${res.status})`};const data=await res.json();return data&&data.snapshot?{ok:!0,message:"Successfully pulled latest data from Firebase.",snapshot:data.snapshot,updatedAt:data.updatedAt}:{ok:!1,message:"No cloud snapshot found yet in Firebase. Tap Sync Now to initialize."}}catch(r){return{ok:!1,message:r instanceof Error?r.message:"Failed to connect to Firebase."}}}const n=yf(s);',
+  'Firebase pullSnapshotFromCloud support'
+);
+
 // 4. Patch Tesseract timeout from 5500 to 15000
 replaceExact(
   'setTimeout(()=>k(null),5500)',

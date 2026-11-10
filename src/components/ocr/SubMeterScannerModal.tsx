@@ -276,8 +276,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       setOcrConfidence(result.confidence);
       setMeterInspection(result.inspection || null);
-      // Readings stay safely protected after auto-insertion
-      setIsReadingsLocked(true);
+      // Auto-lock only when a valid reading was recognized; keep unlocked if 0.0 to allow immediate typing
+      setIsReadingsLocked(detectedVal > 0);
 
       setOcrStatusMsg(
         `✓ Enhanced & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
