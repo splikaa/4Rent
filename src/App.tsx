@@ -34,7 +34,7 @@ import {
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
   subscribeToRealtimeSync,
-} from './services/supabaseSync';
+} from './services/firebaseSync';
 import {
   applyPaymentWithOverpayment,
   clampDueDayOneToTen,

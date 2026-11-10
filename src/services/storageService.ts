@@ -48,10 +48,13 @@ const _decodeSecret = (b64: string): string => {
 const viteEnv =
   (import.meta as unknown as { env?: Record<string, string> }).env || {};
 const DEV_FIREBASE_PROJECT_ID =
-  viteEnv.VITE_FIREBASE_PROJECT_ID || 'four-rent-demo';
+  viteEnv.VITE_FIREBASE_PROJECT_ID || 'rent-41279';
 const DEV_FIREBASE_DATABASE_URL =
   viteEnv.VITE_FIREBASE_DATABASE_URL ||
-  'https://four-rent-demo-default-rtdb.firebaseio.com';
+  'https://rent-41279-default-rtdb.firebaseio.com';
+const DEV_FIREBASE_API_KEY =
+  viteEnv.VITE_FIREBASE_API_KEY ||
+  'AIzaSyADZ1u2AAvEF1Rvh3knPjck_rnRihP2Ifk';
 const DEV_SUPABASE_URL =
   viteEnv.VITE_SUPABASE_URL || '';
 const DEV_SUPABASE_ANON_KEY =
@@ -84,6 +87,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     enabled: false,
     provider: 'firebase',
     firebaseProjectId: DEV_FIREBASE_PROJECT_ID,
+    firebaseApiKey: DEV_FIREBASE_API_KEY,
     firebaseDatabaseUrl: DEV_FIREBASE_DATABASE_URL,
     propertyCode: DEV_PROPERTY_CODE,
   },
@@ -131,6 +135,8 @@ export function loadSettings(): AppSettings {
         provider: parsed.cloudSync?.provider || 'firebase',
         firebaseProjectId:
           parsed.cloudSync?.firebaseProjectId || DEV_FIREBASE_PROJECT_ID,
+        firebaseApiKey:
+          parsed.cloudSync?.firebaseApiKey || DEV_FIREBASE_API_KEY,
         firebaseDatabaseUrl:
           parsed.cloudSync?.firebaseDatabaseUrl || DEV_FIREBASE_DATABASE_URL,
         supabaseUrl: parsed.cloudSync?.supabaseUrl || DEV_SUPABASE_URL,

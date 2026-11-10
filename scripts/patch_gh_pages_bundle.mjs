@@ -94,12 +94,12 @@ replaceExact(
 // Firebase cloud sync default settings
 replaceExact(
   'cloudSync:{enabled:!!(Kh&&Yh),supabaseUrl:Kh,supabaseAnonKey:Yh,propertyCode:Bb}}',
-  'cloudSync:{enabled:!1,provider:"firebase",firebaseProjectId:"four-rent-demo",firebaseDatabaseUrl:"https://four-rent-demo-default-rtdb.firebaseio.com",propertyCode:Bb}}',
+  'cloudSync:{enabled:!1,provider:"firebase",firebaseProjectId:"rent-41279",firebaseDatabaseUrl:"https://rent-41279-default-rtdb.firebaseio.com",propertyCode:Bb}}',
   'cloudSync default settings to Firebase'
 );
 
 // Firebase push/pull cloud sync implementation
-const fbHelper = 'function getFbUrl(s){if(s.firebaseDatabaseUrl&&s.firebaseDatabaseUrl.trim())return s.firebaseDatabaseUrl.trim().replace(/\\/+$/,"");return `https://${(s.firebaseProjectId||"four-rent-demo").trim()}-default-rtdb.firebaseio.com`};';
+const fbHelper = 'function getFbUrl(s){if(s.firebaseDatabaseUrl&&s.firebaseDatabaseUrl.trim())return s.firebaseDatabaseUrl.trim().replace(/\\/+$/,"");return `https://${(s.firebaseProjectId||"rent-41279").trim()}-default-rtdb.firebaseio.com`};';
 
 replaceExact(
   'async function gy(s,n){const r=yf(s);',

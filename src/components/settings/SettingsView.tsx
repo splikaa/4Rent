@@ -38,7 +38,7 @@ import {
   pushSnapshotToCloud,
   SUPABASE_SETUP_SQL,
   FIREBASE_RULES_JSON,
-} from '../../services/supabaseSync';
+} from '../../services/firebaseSync';
 import { requestAndVerifyNotifications } from '../../services/ocrService';
 import {
   formatPhoneNumber,

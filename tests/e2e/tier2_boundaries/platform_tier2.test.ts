@@ -18,7 +18,7 @@ import {
   assertFalse,
 } from '../harness/test_utils';
 import { resetBrowserEnv } from '../harness/browser_env';
-import { getNetworkStatus } from '../../../src/services/supabaseSync';
+import { getNetworkStatus } from '../../../src/services/firebaseSync';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
