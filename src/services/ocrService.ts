@@ -882,28 +882,45 @@ export async function recognizeSubMeterReading(
     let rawText = '';
     let confidence = 0;
 
-    // Attempt Tesseract OCR with a 5.5s timeout so offline mode never stalls
+    // Multi-pass Tesseract OCR:
+    // Pass 1: Try the enhanced cropped register window
+    // Pass 2: If register crop yields no reading, try the full meter faceplate photo
     if (typeof navigator === 'undefined' || navigator.onLine !== false) {
       try {
-        const ocrPromise = Tesseract.recognize(
-          ocrCropUrl || imageDataUrl,
-          'eng',
-          {
+        const runTesseract = (url: string, timeoutMs: number) => {
+          const ocrPromise = Tesseract.recognize(url, 'eng', {
             logger: (m) => {
               if (m.status === 'recognizing text' && onProgress) {
-                onProgress(Math.min(92, 50 + Math.round((m.progress || 0) * 40)));
+                onProgress(Math.min(94, 50 + Math.round((m.progress || 0) * 44)));
               }
             },
-          }
-        );
-        const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 5500)
-        );
-        const result = await Promise.race([ocrPromise, timeoutPromise]);
-        if (result && result.data) {
-          rawText = result.data.text || '';
-          confidence = Math.round(result.data.confidence || 0);
+          });
+          const timeoutPromise = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), timeoutMs)
+          );
+          return Promise.race([ocrPromise, timeoutPromise]);
+        };
+
+        // Pass 1: register crop (up to 15s)
+        const pass1Result = await runTesseract(ocrCropUrl || imageDataUrl, 15000);
+        if (pass1Result && pass1Result.data) {
+          rawText = pass1Result.data.text || '';
+          confidence = Math.round(pass1Result.data.confidence || 0);
           reading = extractMeterDigitsFromOcrText(rawText);
+        }
+
+        // Pass 2: full photo fallback if crop gave no reading (up to 12s)
+        if (reading === null && ocrCropUrl && imageDataUrl) {
+          const pass2Result = await runTesseract(imageDataUrl, 12000);
+          if (pass2Result && pass2Result.data) {
+            const pass2Text = pass2Result.data.text || '';
+            const pass2Reading = extractMeterDigitsFromOcrText(pass2Text);
+            if (pass2Reading !== null) {
+              reading = pass2Reading;
+              rawText = pass2Text;
+              confidence = Math.max(confidence, Math.round(pass2Result.data.confidence || 0));
+            }
+          }
         }
       } catch {
         // Offline or worker unavailable — fall through to local canvas analyzer
@@ -913,14 +930,35 @@ export async function recognizeSubMeterReading(
     // Offline / Fallback Local Register Drum & LCD Analyzer
     const offlineAnalysis = analyzeRegisterWindowOffline(img, detectedCropBox);
     const finalReading = reading !== null ? reading : offlineAnalysis.reading;
+
+    // Detect known models from OCR raw text if available
+    let detectedBrand = 'Electric kWh Sub-Meter';
+    let detectedSpecs = '220–240V • 60Hz Sub-Meter';
+    let detectedSerial = 'Faceplate Serial Excluded';
+    if (/safari|sy-?168/i.test(rawText)) {
+      detectedBrand = 'Safari SY-168 Digital Kilowatt Hour Meter';
+      detectedSpecs = '240V • 10(60)A • 1Phase • 60Hz';
+    } else if (/static|sp1|type-?sp1/i.test(rawText)) {
+      detectedBrand = 'Static Watthour Meter TYPE-SP1';
+      detectedSpecs = '240V • 5-30A • 50Hz • 3200 imp/kWh';
+    } else if (/cirtech|mt-?60i|cl-?60/i.test(rawText)) {
+      detectedBrand = 'Cirtech MT-60i Digital Sub-Meter';
+      detectedSpecs = '240V • 10(60)A • 60Hz • 1600 imp/kWh';
+    }
+
+    const serialMatch = rawText.match(/\b(?:no\.?|s\.?\s*no|serial)\s*[:#-]?\s*([A-Z0-9\-]+)/i);
+    if (serialMatch) {
+      detectedSerial = `No. ${serialMatch[1]} (Excluded)`;
+    }
+
     const finalInspection: SubMeterHardwareInspection =
       reading !== null
         ? {
-            brandModel: 'Electric kWh Sub-Meter',
-            registerType: 'Register Window Digit Extraction',
-            registerBreakdown: `Verified Register: ${reading.toFixed(1)} kWh`,
-            serialOrBarcode: 'Faceplate Serial Excluded',
-            electricalSpecs: '220–240V • 60Hz Sub-Meter',
+            brandModel: detectedBrand,
+            registerType: 'Digital Register Window Digit Extraction',
+            registerBreakdown: `Verified Register: ${finalReading.toFixed(1)} kWh`,
+            serialOrBarcode: detectedSerial,
+            electricalSpecs: detectedSpecs,
           }
         : offlineAnalysis.inspection;
 

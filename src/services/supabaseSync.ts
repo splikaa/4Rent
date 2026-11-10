@@ -295,20 +295,54 @@ export function getNetworkStatus(): {
     return { isOnline: false, connectionType: 'offline', label: 'Offline (Local Safe)' };
   }
 
+  const isMobile =
+    typeof navigator !== 'undefined' &&
+    /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent || ''
+    );
+
   const nav = typeof navigator !== 'undefined' ? (navigator as any) : null;
   const conn = nav?.connection || nav?.mozConnection || nav?.webkitConnection;
   if (conn) {
     const t = String(conn.type || '').toLowerCase();
     const eff = String(conn.effectiveType || '').toLowerCase();
+
     if (t.includes('wifi') || t.includes('ethernet')) {
-      return { isOnline: true, connectionType: 'wifi', label: 'Wi-Fi (Active)' };
+      return {
+        isOnline: true,
+        connectionType: 'wifi',
+        label: isMobile ? 'Wi-Fi (Active)' : 'Online (Wi-Fi / LAN)',
+      };
     }
-    if (t.includes('cellular') || ['2g', '3g', '4g', '5g'].includes(eff)) {
-      return { isOnline: true, connectionType: 'cellular', label: 'Mobile Data (Active)' };
+
+    if (t.includes('cellular')) {
+      return {
+        isOnline: true,
+        connectionType: 'cellular',
+        label: 'Mobile Data (Active)',
+      };
+    }
+
+    // Only mobile devices should fall back to cellular on saveData or 2G/3G estimation
+    if (isMobile && (conn.saveData || (eff && ['2g', '3g'].includes(eff)))) {
+      return {
+        isOnline: true,
+        connectionType: 'cellular',
+        label: 'Mobile Data (Active)',
+      };
     }
   }
 
-  return { isOnline: true, connectionType: 'wifi', label: 'Wi-Fi / Network Online' };
+  // Desktop defaults to Wi-Fi / LAN
+  if (!isMobile) {
+    return {
+      isOnline: true,
+      connectionType: 'wifi',
+      label: 'Online (Wi-Fi / LAN)',
+    };
+  }
+
+  return { isOnline: true, connectionType: 'wifi', label: 'Online (Wi-Fi)' };
 }
 
 export function mergeDatabaseSnapshots(

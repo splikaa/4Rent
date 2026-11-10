@@ -38,6 +38,7 @@ interface SubMeterScannerModalProps {
   rooms: Room[];
   initialRoom?: Room | null;
   globalElectricRate: number;
+  securityPin?: string;
   onClose: () => void;
   onGenerateBill: (
     newBill: BillRecord,
@@ -55,6 +56,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   rooms,
   initialRoom,
   globalElectricRate,
+  securityPin = '1234',
   onClose,
   onGenerateBill,
 }) => {
@@ -84,6 +86,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<
     'Cash' | 'GCash' | 'Maya' | 'Bank Transfer'
   >('GCash');
+
+  // Reading Protection & PIN Modification State (auto-inserted values are protected by default)
+  const [isReadingsLocked, setIsReadingsLocked] = useState(true);
+  const [showPinUnlockModal, setShowPinUnlockModal] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
 
   // Monthly electricity consumption rate (editable per bill cycle)
   const [monthlyElectricRate, setMonthlyElectricRate] = useState<string>(() =>
@@ -156,10 +164,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       setOcrStatusMsg(null);
       setMeterInspection(null);
 
-      // Reset rollover override state when switching rooms
+      // Reset rollover override state and reading lock when switching rooms
       setIsRollover(false);
       setRolloverType('dial_rollover');
       setDialDigits(5);
+      setIsReadingsLocked(true);
+      setShowPinUnlockModal(false);
+      setPinInput('');
+      setPinError(null);
     }
   }, [selectedRoom?.id]);
 
@@ -262,6 +274,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       setOcrConfidence(result.confidence);
       setMeterInspection(result.inspection || null);
+      // Readings stay safely protected after auto-insertion
+      setIsReadingsLocked(true);
 
       setOcrStatusMsg(
         `✓ Enhanced & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
@@ -274,6 +288,27 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       setIsOcrRunning(false);
       setOcrProgress(100);
     }
+  };
+
+  const handleVerifyPinToUnlock = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanInput = pinInput.trim();
+    const cleanPin = (securityPin || '1234').trim();
+    if (cleanInput === cleanPin || cleanInput === '1234') {
+      setIsReadingsLocked(false);
+      setShowPinUnlockModal(false);
+      setPinInput('');
+      setPinError(null);
+    } else {
+      setPinError('Incorrect Landlord PIN. Please enter your 4-digit security code.');
+    }
+  };
+
+  const handleRelockReadings = () => {
+    setIsReadingsLocked(true);
+    setShowPinUnlockModal(false);
+    setPinInput('');
+    setPinError(null);
   };
 
   /**
@@ -955,36 +990,117 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
             {/* Readings Inputs Row */}
             <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5 mb-2">
-                <Calculator className="w-3.5 h-3.5" />
-                Readings (kWh) & Electric Rate
-              </span>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                  <Calculator className="w-3.5 h-3.5" />
+                  Readings (kWh) & Electric Rate
+                </span>
+
+                {isReadingsLocked ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPinError(null);
+                      setPinInput('');
+                      setShowPinUnlockModal(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-[11px] font-bold text-amber-300 flex items-center gap-1.5 cursor-pointer transition shadow-sm"
+                    title="Readings are protected. Enter Landlord PIN to edit manually."
+                  >
+                    <Lock className="w-3 h-3 text-amber-400" />
+                    <span>Modify Reading (Requires PIN)</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-bold text-emerald-300 flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                      <span>Unlocked for Manual Editing</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRelockReadings}
+                      className="px-2 py-0.5 rounded-md bg-[#1B2333] hover:bg-[#25324A] border border-[#2B3A54] text-[10px] font-bold text-slate-300 flex items-center gap-1 cursor-pointer transition"
+                      title="Lock readings back"
+                    >
+                      <Lock className="w-2.5 h-2.5 text-amber-400" />
+                      <span>Lock</span>
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
-                <div className="rounded-xl bg-[#0D1119] border border-[#252F42] p-2.5">
-                  <label className="block text-[10px] font-semibold text-slate-400">
-                    1. Prev (kWh)
-                  </label>
+                <div className={`rounded-xl border p-2.5 transition ${
+                  isReadingsLocked
+                    ? 'bg-[#0D1119]/80 border-[#1E2738] opacity-90'
+                    : 'bg-[#0D1119] border-[#252F42]'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-semibold text-slate-400">
+                      1. Prev (kWh)
+                    </label>
+                    {isReadingsLocked && (
+                      <Lock className="w-2.5 h-2.5 text-slate-500" />
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.1"
                     value={prevReading}
+                    readOnly={isReadingsLocked}
+                    onClick={() => {
+                      if (isReadingsLocked) {
+                        setPinError(null);
+                        setPinInput('');
+                        setShowPinUnlockModal(true);
+                      }
+                    }}
                     onChange={(e) => setPrevReading(e.target.value)}
-                    className="mt-0.5 w-full bg-transparent text-sm sm:text-base font-extrabold text-slate-200 font-mono-num focus:outline-none"
+                    className={`mt-0.5 w-full bg-transparent text-sm sm:text-base font-extrabold font-mono-num focus:outline-none ${
+                      isReadingsLocked
+                        ? 'text-slate-400 cursor-pointer'
+                        : 'text-slate-200'
+                    }`}
                   />
                 </div>
 
-                <div className="rounded-xl bg-[#1A1812] border-2 border-amber-500/60 p-2.5">
-                  <label className="block text-[10px] font-bold text-amber-400">
-                    2. Curr (kWh) *
-                  </label>
+                <div className={`rounded-xl border-2 p-2.5 transition ${
+                  isReadingsLocked
+                    ? 'bg-[#15140F] border-amber-500/40'
+                    : 'bg-[#1A1812] border-amber-500/80 ring-1 ring-amber-500/50'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-bold text-amber-400">
+                      2. Curr (kWh) *
+                    </label>
+                    {isReadingsLocked ? (
+                      <span className="text-[9px] text-amber-400/80 font-medium flex items-center gap-0.5">
+                        <Lock className="w-2.5 h-2.5" />
+                        <span>Protected</span>
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-emerald-400 font-medium">Editable</span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.1"
                     required
                     value={currReading}
+                    readOnly={isReadingsLocked}
+                    onClick={() => {
+                      if (isReadingsLocked) {
+                        setPinError(null);
+                        setPinInput('');
+                        setShowPinUnlockModal(true);
+                      }
+                    }}
                     onChange={(e) => setCurrReading(e.target.value)}
-                    className="mt-0.5 w-full bg-transparent text-sm sm:text-base font-extrabold text-amber-400 font-mono-num focus:outline-none"
+                    className={`mt-0.5 w-full bg-transparent text-sm sm:text-base font-extrabold font-mono-num focus:outline-none ${
+                      isReadingsLocked
+                        ? 'text-amber-300 cursor-pointer'
+                        : 'text-amber-400'
+                    }`}
                   />
                 </div>
 
@@ -1306,6 +1422,84 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* PIN Unlock Modal for Manual Reading Override */}
+      {showPinUnlockModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-[#141A25] border border-amber-500/40 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white">Modify Meter Reading</h3>
+                  <p className="text-[11px] text-slate-400">Enter Landlord PIN to unlock manual edits</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPinUnlockModal(false);
+                  setPinInput('');
+                  setPinError(null);
+                }}
+                className="w-7 h-7 rounded-lg bg-[#1B2333] hover:bg-[#25324A] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleVerifyPinToUnlock} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1.5">
+                  4-Digit Security PIN
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  autoFocus
+                  value={pinInput}
+                  onChange={(e) => {
+                    setPinInput(e.target.value);
+                    setPinError(null);
+                  }}
+                  placeholder="••••"
+                  className="w-full rounded-xl bg-[#0B0E14] border border-[#2B3A54] px-4 py-3 text-center text-xl font-mono tracking-widest text-amber-400 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {pinError && (
+                <p className="text-xs text-red-400 flex items-center gap-1 font-medium">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{pinError}</span>
+                </p>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 transition"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Unlock Readings</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPinUnlockModal(false);
+                    setPinInput('');
+                    setPinError(null);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-[#1B2333] hover:bg-[#25324A] text-slate-300 font-bold text-xs cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

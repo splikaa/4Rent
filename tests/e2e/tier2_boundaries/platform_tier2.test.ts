@@ -18,6 +18,7 @@ import {
   assertFalse,
 } from '../harness/test_utils';
 import { resetBrowserEnv } from '../harness/browser_env';
+import { getNetworkStatus } from '../../../src/services/supabaseSync';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -290,6 +291,21 @@ describe('Tier 2: Platform File Organization, Launchers, Hygiene & Mobile Build 
       );
       // Electron must be in devDependencies
       assertTrue(devDeps.includes('electron'), 'electron must be declared in devDependencies');
+    });
+
+    it('T2.F11.6 Desktop Wi-Fi/LAN vs Mobile Data network status detection', () => {
+      // In desktop browser environment with standard effectiveType "4g", connection must be recognized as Wi-Fi/LAN
+      const net = getNetworkStatus();
+      assertTrue(net.isOnline, 'Network status must be online');
+      assertStrictEqual(net.connectionType, 'wifi', 'Desktop network must report wifi/lan');
+      assertTrue(
+        net.label.includes('Wi-Fi') || net.label.includes('LAN'),
+        `Desktop network label must reflect Wi-Fi/LAN, got "${net.label}"`
+      );
+      assertFalse(
+        net.label.includes('Mobile Data'),
+        'Desktop network must NEVER falsely report "Mobile Data (Active)"'
+      );
     });
   });
 

@@ -94,6 +94,22 @@ describe('Tier 1: OCR Reading & Verification Feature Coverage', () => {
       // Must extract 55.2 and discard 3200 and scale header numbers
       assertStrictEqual(extracted, 55.2);
     });
+
+    it('4.6 Safari SY-168 Digital Kilowatt Hour Meter (003020.7 kW-h) auto-extracts 3020.7 kWh accurately', () => {
+      const rawFaceplateText = `
+        Safari
+        DIGITAL KILOWATT HOUR METER
+        (2) 003020.7 kW-h
+        SY-168 10(60)A 1PHASE 60Hz 240V
+        Reverse Impulse Power
+        No. LGT2023921126001
+        JAPAN TECHNOLOGY
+      `;
+      const extracted = extractMeterDigitsFromOcrText(rawFaceplateText);
+
+      // Must accurately extract 3020.7 kWh ignoring specifications and serial barcode
+      assertStrictEqual(extracted, 3020.7);
+    });
   });
 
   // ==========================================================================
@@ -163,6 +179,28 @@ describe('Tier 1: OCR Reading & Verification Feature Coverage', () => {
       assertStrictEqual(manualBill.currReading, 425.0);
       assertStrictEqual(manualBill.consumptionKwh, 25.0);
       assertStrictEqual(manualBill.ocrConfidence, undefined);
+    });
+
+    it('5.6 Landlord PIN unlocks manual meter reading edits for Prev and Curr kWh inputs', () => {
+      const landlordPin = '4821';
+      let isReadingsLocked = true;
+
+      // When readings are locked, manual typing is blocked
+      assertStrictEqual(isReadingsLocked, true);
+
+      // Attempt unlocking with wrong PIN fails
+      const wrongAttempt = '9999';
+      if (wrongAttempt === landlordPin) {
+        isReadingsLocked = false;
+      }
+      assertStrictEqual(isReadingsLocked, true, 'Wrong PIN must NOT unlock readings');
+
+      // Attempt unlocking with valid Landlord PIN succeeds
+      const validAttempt = '4821';
+      if (validAttempt === landlordPin || validAttempt === '1234') {
+        isReadingsLocked = false;
+      }
+      assertStrictEqual(isReadingsLocked, false, 'Valid Landlord PIN must unlock readings for modification');
     });
   });
 

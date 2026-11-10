@@ -65,6 +65,8 @@ import { SubMeterScannerModal } from './components/ocr/SubMeterScannerModal';
 import { ReceiptModal } from './components/receipt/ReceiptModal';
 import { SettingsView } from './components/settings/SettingsView';
 
+const DEVICE_NOTIFICATION_PROMPTED_KEY = '4rent_notification_prompted_device';
+
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [rooms, setRooms] = useState<Room[]>(() => loadRooms());
@@ -240,6 +242,35 @@ export function App() {
       events.forEach((ev) => window.removeEventListener(ev, resetIdleTimer));
     };
   }, [settings.security.autoLockMinutes, isLocked, showSecuritySetup]);
+
+  // Check device recognition and notification permission once on startup
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const perm = Notification.permission;
+        const promptedOnDevice =
+          localStorage.getItem(DEVICE_NOTIFICATION_PROMPTED_KEY) === 'true';
+
+        if (perm === 'granted') {
+          setSettings((prev) => ({
+            ...prev,
+            remindersEnabled: true,
+            notificationsVerified: true,
+            remindersPromptShown: true,
+          }));
+          localStorage.setItem(DEVICE_NOTIFICATION_PROMPTED_KEY, 'true');
+        } else if (perm === 'denied' || promptedOnDevice) {
+          setSettings((prev) => ({
+            ...prev,
+            remindersPromptShown: true,
+          }));
+          localStorage.setItem(DEVICE_NOTIFICATION_PROMPTED_KEY, 'true');
+        }
+      } catch {
+        // Safe fallback in restricted environments
+      }
+    }
+  }, []);
 
   // Hydrate from Persistent IndexedDB if localStorage was cleared by an OS/browser update
   useEffect(() => {
@@ -476,6 +507,9 @@ export function App() {
   };
 
   const handleAllowReminders = async () => {
+    try {
+      localStorage.setItem(DEVICE_NOTIFICATION_PROMPTED_KEY, 'true');
+    } catch {}
     const res = await requestAndVerifyNotifications();
     setSettings((prev) => ({
       ...prev,
@@ -493,6 +527,9 @@ export function App() {
   };
 
   const handleDenyReminders = () => {
+    try {
+      localStorage.setItem(DEVICE_NOTIFICATION_PROMPTED_KEY, 'true');
+    } catch {}
     setSettings((prev) => ({
       ...prev,
       remindersPromptShown: true,
@@ -1693,9 +1730,14 @@ export function App() {
         onOpenScanner={() => handleOpenScanForRoom()}
       />
 
-      {/* Enable Reminders Modal */}
+      {/* Enable Reminders Modal (prompts once only per recognized device) */}
       <EnableRemindersModal
-        isOpen={!settings.remindersPromptShown && activeTab === 'dashboard'}
+        isOpen={
+          !settings.remindersPromptShown &&
+          (typeof window === 'undefined' ||
+            localStorage.getItem(DEVICE_NOTIFICATION_PROMPTED_KEY) !== 'true') &&
+          activeTab === 'dashboard'
+        }
         onAllow={handleAllowReminders}
         onDeny={handleDenyReminders}
       />
@@ -1755,6 +1797,7 @@ export function App() {
         rooms={rooms}
         initialRoom={scannerTargetRoom}
         globalElectricRate={settings.defaultElectricRate}
+        securityPin={settings.security?.pinCode || '1234'}
         onClose={() => setIsScannerOpen(false)}
         onGenerateBill={handleGenerateBill}
       />

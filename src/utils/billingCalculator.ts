@@ -510,46 +510,98 @@ export function applyPaymentToBill(
 export function extractMeterDigitsFromOcrText(rawText: string): number | null {
   if (!rawText || !rawText.trim() || !/\d/.test(rawText)) return null;
 
-  // Step 1: Remove known faceplate specification lines, serial numbers, and scale headers
-  const cleanedLines = rawText
+  // Step 0: Pre-clean character substitutions and circled counter prefixes
+  const preCleaned = rawText
+    .replace(/[②③]|(\(\s*[123]\s*\))/g, ' ')
+    .replace(/[OoQq](?=\d)|(?<=\d)[OoQq]/g, '0')
+    .replace(/[Il|!](?=\d)|(?<=\d)[Il|!]/g, '1')
+    .replace(/,/g, '.');
+
+  // Step 1: Explicit kWh / kW·h unit anchored readings (HIGHEST PRIORITY)
+  // Sub-meters explicitly display the unit "kW·h", "kW-h", "kWh", or "kW.h" immediately after the reading.
+  // 1A. Explicit decimal reading right next to kWh (e.g. "003020.7 kW-h", "3020.7 kWh", "00123.4 kW·h")
+  const kwhDecimalMatch = preCleaned.match(/(?:^|[^\d])(\d{1,6}\.\d{1,2})\s*(?:kw[·\-.]?h|kwh)\b/i);
+  if (kwhDecimalMatch) {
+    const val = parseFloat(kwhDecimalMatch[1]);
+    if (!Number.isNaN(val) && val >= 0 && val < 999999) {
+      return Math.round(val * 10) / 10;
+    }
+  }
+
+  // 1B. 7-digit reading right next to kWh (6 integer digits + 1 tenths digit, e.g. "0030207 kW-h" -> 3020.7)
+  const kwhSevenMatch = preCleaned.match(/(?:^|[^\d])(\d{7})\s*(?:kw[·\-.]?h|kwh)\b/i);
+  if (kwhSevenMatch) {
+    const d = kwhSevenMatch[1];
+    const intPart = parseInt(d.slice(0, 6), 10);
+    const tenthsPart = parseInt(d.slice(6, 7), 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+  }
+
+  // 1C. 6-digit reading right next to kWh (5 integer digits + 1 tenths digit, e.g. "000034 kW-h" -> 3.4)
+  const kwhSixMatch = preCleaned.match(/(?:^|[^\d])(\d{6})\s*(?:kw[·\-.]?h|kwh)\b/i);
+  if (kwhSixMatch) {
+    const d = kwhSixMatch[1];
+    const intPart = parseInt(d.slice(0, 5), 10);
+    const tenthsPart = parseInt(d.slice(5, 6), 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+  }
+
+  // Step 2: Strip known faceplate specifications, serial numbers, and scale headers
+  const cleanedLines = preCleaned
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => {
       if (!line) return false;
-      // Ignore serial / barcode / year / model lines
+      // Multiplier scale headers (e.g. "10000 1000 100 10 1 0.1" or "1/10") must be dropped
+      if (/\b(10000|1000\s+100|1\/10)\b/i.test(line)) {
+        return false;
+      }
+      // Pure impulse rating lines (e.g. "1600 imp/kWh", "3200 imp/kWh")
+      if (/^\s*\d+\s*imp\/kwh\s*$/i.test(line) || /^\s*imp\/kwh\s*$/i.test(line)) {
+        return false;
+      }
+      // Lines with serial/barcode/specs without kWh reading
+      const hasKwhOrReading = /kw[·\-.]?h|\bkwh\b|\b\d{1,6}\.\d{1,2}\b|\b\d{6,7}\b/i.test(line);
       if (
+        !hasKwhOrReading &&
         /\b(s\.?\s*no|no\.?|serial|year|september|india|japan|technology|barcode|multifunction|approved|erc)\b/i.test(
           line
         )
       ) {
         return false;
       }
-      // Ignore multiplier scale headers (e.g. "10000 1000 100 10 1 1/10" or "0.1")
-      if (/10000|1000\s+100|1\/10/i.test(line)) {
-        return false;
-      }
-      // Ignore electrical ratings and model spec boxes
+      // Electrical ratings lines without kWh reading
       if (
-        /\b(1600|3200|imp|220|240v|480\s*v|120-|50hz|60hz|10\s*\(\s*60\s*\)|5-30\s*a|sy-?168|mt-?60i|cl-?60|cl\s*20|kv2c|type-?sp1|1\s*phase|2\s*wire)\b/i.test(
+        !hasKwhOrReading &&
+        /\b(1600|3200|imp|220\s*v|240\s*v|480\s*v|120-|50\s*hz|60\s*hz|10\s*\(\s*60\s*\)|5-30\s*a|sy-?168|mt-?60i|cl-?60|cl\s*20|kv2c|type-?sp1|1\s*phase|2\s*wire)\b/i.test(
           line
         )
       ) {
         return false;
       }
       return true;
+    })
+    .map((line) => {
+      // Strip serial / barcode tokens (e.g. No. LGT2023921126001, S.No. 470946, etc.)
+      let l = line.replace(/\b(s\.?\s*no\.?|serial(?:\s*no\.?)?|barcode|no\.)\s*[:#-]?\s*[A-Z0-9\-]+/gi, ' ');
+      // Strip electrical specs & model tokens
+      l = l.replace(/\b(1600\s*imp\/kwh|3200\s*imp\/kwh|imp\/kwh|220\s*v|240\s*v|480\s*v|120-480v|50\s*hz|60\s*hz|10\s*\(\s*60\s*\)\s*a?|5-30\s*a|sy-?168|mt-?60i|cl-?60|cl\s*20|kv2c|type-?sp1|1\s*phase|2\s*wire)\b/gi, ' ');
+      // Strip non-reading keywords
+      l = l.replace(/\b(japan|technology|india|electronic|digital kilowatt hour meter|kilowatt hour meter|reverse impulse power|reverse|impulse|power)\b/gi, ' ');
+      return l.trim();
+    })
+    .filter((line) => {
+      if (!line) return false;
+      if (!/\d/.test(line)) return false;
+      if (/^(?:no\.?|s\.?\s*no|year|september|approved|erc)\b/i.test(line)) return false;
+      return true;
     });
 
   if (cleanedLines.length === 0) return null;
 
-  const cleanedText = cleanedLines
-    .join(' ')
-    // Strip circled counter prefix "(2)" or "②" before the cyclometer window
-    .replace(/[②③]|(\(\s*2\s*\))/g, ' ')
-    .replace(/[OoQq](?=\d)|(?<=\d)[OoQq]/g, '0')
-    .replace(/[Il|!](?=\d)|(?<=\d)[Il|!]/g, '1')
-    .replace(/,/g, '.');
+  const cleanedText = cleanedLines.join(' ');
 
-  // Step 2: Check for explicit decimal kWh reading first (e.g. "12623.0", "00003.4", "00000.1", "1485.6")
+  // Step 3: Check for explicit decimal kWh reading (e.g. "003020.7", "12623.0", "00003.4", "00000.1", "1485.6")
   const decimalMatches = cleanedText.match(/\b\d{1,6}\.\d{1,2}\b/g);
   if (decimalMatches && decimalMatches.length > 0) {
     for (const candidate of decimalMatches) {
@@ -560,7 +612,20 @@ export function extractMeterDigitsFromOcrText(rawText: string): number | null {
     }
   }
 
-  // Step 3: Check for 6-drum cyclometer reading (5 integer drums + 1 tenths drum, e.g. "126230" -> 12623.0, "002523" -> 252.3, "000034" -> 3.4)
+  // Step 4: Check for 7-digit reading (6 integer digits + 1 tenths digit, e.g. "0030207" -> 3020.7)
+  const sevenDrumMatches = cleanedText.match(/\b(\d{7})\b/g);
+  if (sevenDrumMatches && sevenDrumMatches.length > 0) {
+    for (const d of sevenDrumMatches) {
+      const valCandidate = parseInt(d, 10);
+      if (valCandidate < 9999990) {
+        const intPart = parseInt(d.slice(0, 6), 10);
+        const tenthsPart = parseInt(d.slice(6, 7), 10);
+        return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+      }
+    }
+  }
+
+  // Step 5: Check for 6-drum cyclometer reading (5 integer drums + 1 tenths drum, e.g. "126230" -> 12623.0, "002523" -> 252.3, "000034" -> 3.4)
   const sixDrumMatches = cleanedText.match(/\b(\d{6})\b/g);
   if (sixDrumMatches && sixDrumMatches.length > 0) {
     for (const d of sixDrumMatches) {
@@ -574,13 +639,20 @@ export function extractMeterDigitsFromOcrText(rawText: string): number | null {
     }
   }
 
-  // Step 4: Check for spaced cyclometer drum digits (e.g. "1 2 6 2 3 . 0" or "0 0 0 0 3 4" or "1 2 6 2 3 0")
+  // Step 6: Check for spaced cyclometer drum digits (e.g. "1 2 6 2 3 . 0" or "0 0 0 0 3 4" or "0 0 3 0 2 0 7")
   const compactDigits = cleanedText.replace(/[^\d.]/g, '');
   if (compactDigits.includes('.')) {
     const decVal = parseFloat(compactDigits);
     if (!Number.isNaN(decVal) && decVal >= 0 && decVal < 999999) {
       return Math.round(decVal * 10) / 10;
     }
+  }
+  const compactSeven = compactDigits.match(/(\d{7})/);
+  if (compactSeven) {
+    const d = compactSeven[1];
+    const intPart = parseInt(d.slice(0, 6), 10);
+    const tenthsPart = parseInt(d.slice(6, 7), 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
   }
   const compactSix = compactDigits.match(/(\d{6})/);
   if (compactSix) {
@@ -590,7 +662,7 @@ export function extractMeterDigitsFromOcrText(rawText: string): number | null {
     return Math.round((intPart + tenthsPart / 10) * 10) / 10;
   }
 
-  // Step 5: Check for 5-digit integer sub-meter reading (e.g. "12623", "02523")
+  // Step 7: Check for 5-digit integer sub-meter reading (e.g. "12623", "02523")
   const fiveMatches = cleanedText.match(/\b\d{5}\b/g);
   if (fiveMatches && fiveMatches.length > 0) {
     for (const m of fiveMatches) {
@@ -601,7 +673,7 @@ export function extractMeterDigitsFromOcrText(rawText: string): number | null {
     }
   }
 
-  // Step 6: General 3-to-4 digit integer sub-meter reading (excluding common spec constants)
+  // Step 8: General 3-to-4 digit integer sub-meter reading (excluding common spec constants)
   const blacklistedConstants = new Set([
     10, 20, 30, 50, 60, 100, 120, 168, 220, 230, 240, 480, 1000, 1600, 2018,
     3200, 10000,
