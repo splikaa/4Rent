@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E242E" />
+      <stop offset="50%" stop-color="#0E1218" />
+      <stop offset="100%" stop-color="#05070A" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="25" y1="22" x2="72" y2="75" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FDE047" />
+      <stop offset="50%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#B45309" />
+    </linearGradient>
+    <linearGradient id="silverGrad" x1="55" y1="28" x2="95" y2="85" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC" />
+      <stop offset="100%" stop-color="#94A3B8" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="112" height="112" rx="28" fill="#07090D" stroke="#222936" stroke-width="3" />
+  <rect x="12" y="12" width="96" height="96" rx="22" fill="url(#bgGrad)" stroke="#2E3748" stroke-width="1.5" />
+  <!-- Golden '4' integrated with House Roof -->
+  <path d="M58 26 L30 60 H62" stroke="url(#goldGrad)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M58 26 V72" stroke="url(#goldGrad)" stroke-width="5.5" stroke-linecap="round" />
+  <!-- House Right Roof & Wall -->
+  <path d="M58 26 L86 52 V72" stroke="url(#silverGrad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- 4-Pane Window inside House -->
+  <rect x="65" y="51" width="5" height="5" rx="1" fill="#F59E0B" />
+  <rect x="72" y="51" width="5" height="5" rx="1" fill="#F59E0B" />
+  <rect x="65" y="58" width="5" height="5" rx="1" fill="#F59E0B" />
+  <rect x="72" y="58" width="5" height="5" rx="1" fill="#F59E0B" />
+  <!-- 4Rent Text -->
+  <text x="60" y="92" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="18" letter-spacing="0.5">
+    <tspan fill="#F59E0B">4</tspan><tspan fill="#E2E8F0">Rent</tspan>
+  </text>
+</svg>
+
