@@ -7,6 +7,7 @@ import {
   Cpu,
   FileCheck2,
   ImagePlus,
+  Info,
   Loader2,
   Lock,
   RefreshCw,
@@ -92,6 +93,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [showPinUnlockModal, setShowPinUnlockModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
+  const [showRegisterGuide, setShowRegisterGuide] = useState(false);
 
   // Monthly electricity consumption rate (editable per bill cycle)
   const [monthlyElectricRate, setMonthlyElectricRate] = useState<string>(() =>
@@ -548,17 +550,28 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 Sub-Meter OCR & Bill Generator
               </h2>
               <p className="text-xs text-slate-400">
-                Auto-reads meter drums & LCD • Rate: {formatPeso(rateNum)}/kWh
+                Specifically reads the Mechanical Cyclometer Register • Rate: {formatPeso(rateNum)}/kWh
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-9 h-9 rounded-xl bg-[#10151F] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowRegisterGuide(true)}
+              className="px-2.5 py-1.5 rounded-xl bg-[#141A25] hover:bg-[#1E2638] border border-amber-500/35 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+              title="View Mechanical Cyclometer Register Guide & Breakdown"
+            >
+              <Info className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Register Guide</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-9 h-9 rounded-xl bg-[#10151F] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <form
@@ -831,7 +844,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-3">
                           <div className="w-11/12 max-w-[340px] h-24 border-2 border-dashed border-amber-400 rounded-xl relative flex items-center justify-center bg-black/25 backdrop-blur-[0.5px]">
                             <span className="text-[10px] font-extrabold text-amber-300 bg-slate-950/85 px-2 py-0.5 rounded shadow border border-amber-500/30">
-                              Align Sub-Meter Register (5 Black + 1 Red Tenths)
+                              Align Mechanical Cyclometer Register (5 Black + 1 Red Drums)
                             </span>
                             <div className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-amber-400" />
                             <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-amber-400" />
@@ -927,7 +940,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         : 'Sub-Meter #2 (Current)'}
                     </p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Accurately reads 5 black + 1 red drums and digital displays
+                      Specifically reads the Mechanical Cyclometer Register (5 Black + 1 Red Drums)
                     </p>
                     <div className="flex items-center justify-center gap-2 mt-3">
                       <button
@@ -1497,6 +1510,99 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Mechanical Cyclometer Register Guide Modal */}
+      {showRegisterGuide && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl bg-[#141A25] border border-amber-500/40 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <Info className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white">
+                    Mechanical Cyclometer Register
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    How sub-meter readings are specifically extracted
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRegisterGuide(false)}
+                className="w-7 h-7 rounded-lg bg-[#1B2333] hover:bg-[#25324A] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Visual Drum Counter Demonstration */}
+            <div className="rounded-2xl bg-[#090D14] border border-[#232F42] p-4 text-center space-y-3">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-amber-400">
+                Register (Counter) Mechanism Breakdown
+              </span>
+              <div className="flex items-center justify-center gap-1 font-mono-num py-2">
+                {/* 5 Black Drums */}
+                <div className="flex gap-1 bg-[#121824] p-1.5 rounded-xl border border-slate-700">
+                  {['0', '0', '0', '0', '0'].map((digit, idx) => (
+                    <div
+                      key={idx}
+                      className="w-7 h-10 rounded-lg bg-[#05070B] border border-slate-600 text-white font-extrabold text-lg flex items-center justify-center shadow-inner"
+                    >
+                      {digit}
+                    </div>
+                  ))}
+                </div>
+                {/* 1 Red Drum */}
+                <div className="bg-red-950/40 p-1.5 rounded-xl border border-red-500/50">
+                  <div className="w-7 h-10 rounded-lg bg-red-600 border border-red-400 text-white font-extrabold text-lg flex items-center justify-center shadow-inner">
+                    1
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-between text-[11px] px-2 text-slate-300">
+                <span className="text-slate-400 font-semibold">
+                  5 Black Drums = Whole kWh (00000)
+                </span>
+                <span className="text-red-400 font-bold">
+                  1 Red Drum = Tenths (.1)
+                </span>
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono text-xs font-bold">
+                Reading = 00000 + 0.1 = 0.1 kWh
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs text-slate-300">
+              <p className="font-semibold text-white">What the OCR System Reads:</p>
+              <ul className="space-y-1.5 text-[11px] text-slate-400 list-disc list-inside">
+                <li>
+                  <strong className="text-slate-200">Register (Counter) Only:</strong> Specifically crops and reads the 6 rotating cyclometer drums.
+                </li>
+                <li>
+                  <strong className="text-emerald-400">Whole Units:</strong> The 5 black drums record total kilowatt-hours.
+                </li>
+                <li>
+                  <strong className="text-red-400">Fractional Tenths:</strong> The far-right red drum records 0.1 kWh increments.
+                </li>
+                <li>
+                  <strong className="text-amber-300">Strict Spec Exclusion:</strong> Serial numbers (e.g. No. 2018-18120672), barcode, 1600imp/kWh, and voltage ratings are completely filtered out.
+                </li>
+              </ul>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowRegisterGuide(false)}
+              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition"
+            >
+              Understood
+            </button>
           </div>
         </div>
       )}

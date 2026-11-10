@@ -47,7 +47,7 @@ const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
     id: 'safari_sy168_0_1',
     reading: 0.1,
     confidence: 99,
-    cropBox: { x: 0.21, y: 0.18, w: 0.58, h: 0.18 },
+    cropBox: { x: 0.33, y: 0.29, w: 0.25, h: 0.08 },
     sig: [
       211, 209, 210, 208, 206, 207, 204, 202, 203, 202, 200, 201, 203, 201, 202,
       209, 207, 208, 212, 211, 211, 212, 212, 212, 215, 213, 214, 209, 208, 209,
@@ -65,8 +65,8 @@ const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
     ],
     inspection: {
       brandModel: 'Safari SY-168 Electronic kWh Meter',
-      registerType: '6-Drum Cyclometer (5 Black + 1 Red Tenths)',
-      registerBreakdown: 'Black: 00000 • Red: .1 → 0.1 kWh',
+      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)',
+      registerBreakdown: 'Register (Counter): Black Drums: 00000 • Red Tenths Drum: .1 → 0.1 kWh',
       serialOrBarcode: 'No. 2018-18120672 (Excluded)',
       electricalSpecs: '220/240V • 10(60)A • 60Hz • 1600 imp/kWh',
     },
@@ -93,8 +93,8 @@ const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
     ],
     inspection: {
       brandModel: 'Static Watthour Meter TYPE-SP1',
-      registerType: '6-Drum Cyclometer (5 Black + 1 Red 1/10)',
-      registerBreakdown: 'Black: 00003 • Red: .4 → 3.4 kWh',
+      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red 1/10)',
+      registerBreakdown: 'Register (Counter): Black Drums: 00003 • Red Tenths Drum: .4 → 3.4 kWh',
       serialOrBarcode: 'S.No. 470946 (Excluded)',
       electricalSpecs: '240V • 5-30A • 50Hz • 3200 imp/kWh',
     },
@@ -150,8 +150,8 @@ const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
     ],
     inspection: {
       brandModel: 'Safari SY-168 Electronic kWh Meter',
-      registerType: '6-Drum Cyclometer (5 Black + 1 Red 0.1)',
-      registerBreakdown: 'Black: 00000 • Red: .3 → 0.3 kWh',
+      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)',
+      registerBreakdown: 'Register (Counter): Black Drums: 00000 • Red Tenths Drum: .3 → 0.3 kWh',
       serialOrBarcode: 'No. KW2151075721 (Excluded)',
       electricalSpecs: '240V • 10(60)A • 60Hz • 1600 imp/kWh',
     },
@@ -207,8 +207,8 @@ const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
     ],
     inspection: {
       brandModel: 'Round Electromechanical Sub-Meter',
-      registerType: 'Cyclometer Register (5 Black + 1 Red Tenths)',
-      registerBreakdown: 'Black: 00003 • Red: .4 → 3.4 kWh',
+      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)',
+      registerBreakdown: 'Register (Counter): Black Drums: 00003 • Red Tenths Drum: .4 → 3.4 kWh',
       serialOrBarcode: 'Faceplate Serial Excluded',
       electricalSpecs: '240V • 5-30A • 50/60Hz',
     },
@@ -715,13 +715,13 @@ function analyzeRegisterWindowOffline(
     inspection: {
       brandModel:
         redRightPixels > 25
-          ? 'Cyclometer kWh Sub-Meter (5 Black + 1 Red Drum)'
+          ? 'Mechanical Cyclometer kWh Sub-Meter'
           : 'Digital kWh Sub-Meter',
       registerType:
         redRightPixels > 25
-          ? '6-Drum Cyclometer Register'
+          ? 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)'
           : 'Digital Register Window',
-      registerBreakdown: `Black: ${digits.slice(0, 5).join('')} • Tenths: .${digits[5]} → ${reading.toFixed(1)} kWh`,
+      registerBreakdown: `Register (Counter): Black Drums: ${digits.slice(0, 5).join('')} • Red Tenths Drum: .${digits[5]} → ${reading.toFixed(1)} kWh`,
       serialOrBarcode: 'Faceplate Serial Excluded',
       electricalSpecs: '220-240V • 60Hz Single-Phase',
     },

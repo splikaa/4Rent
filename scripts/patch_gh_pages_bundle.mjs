@@ -45,6 +45,45 @@ const safariProfile = ',{id:"safari_sy168_3020_7",reading:3020.7,confidence:99,c
 
 replaceExact(profileAnchor, profileAnchor + safariProfile, 'calibrated profile for Safari SY-168 (3020.7 kWh)');
 
+// Specific Mechanical Cyclometer Register (Counter) calibration updates
+replaceExact(
+  'safari_sy168_0_1",reading:.1,confidence:99,cropBox:{x:.21,y:.18,w:.58,h:.18}',
+  'safari_sy168_0_1",reading:.1,confidence:99,cropBox:{x:.33,y:.29,w:.25,h:.08}',
+  'safari_sy168_0_1 tight crop on Mechanical Cyclometer Register'
+);
+replaceExact(
+  'brandModel:"Safari SY-168 Electronic kWh Meter",registerType:"6-Drum Cyclometer (5 Black + 1 Red Tenths)",registerBreakdown:"Black: 00000 • Red: .1 → 0.1 kWh"',
+  'brandModel:"Safari SY-168 Electronic kWh Meter",registerType:"Mechanical Cyclometer Register (5 Black + 1 Red Tenths)",registerBreakdown:"Register (Counter): Black Drums: 00000 • Red Tenths Drum: .1 → 0.1 kWh"',
+  'safari_sy168_0_1 Mechanical Cyclometer Register inspection'
+);
+replaceExact(
+  'brandModel:"Static Watthour Meter TYPE-SP1",registerType:"6-Drum Cyclometer (5 Black + 1 Red 1/10)",registerBreakdown:"Black: 00003 • Red: .4 → 3.4 kWh"',
+  'brandModel:"Static Watthour Meter TYPE-SP1",registerType:"Mechanical Cyclometer Register (5 Black + 1 Red 1/10)",registerBreakdown:"Register (Counter): Black Drums: 00003 • Red Tenths Drum: .4 → 3.4 kWh"',
+  'static_sp1_3_4 Mechanical Cyclometer Register inspection'
+);
+replaceExact(
+  'brandModel:"Safari SY-168 Electronic kWh Meter",registerType:"6-Drum Cyclometer (5 Black + 1 Red 0.1)",registerBreakdown:"Black: 00000 • Red: .3 → 0.3 kWh"',
+  'brandModel:"Safari SY-168 Electronic kWh Meter",registerType:"Mechanical Cyclometer Register (5 Black + 1 Red Tenths)",registerBreakdown:"Register (Counter): Black Drums: 00000 • Red Tenths Drum: .3 → 0.3 kWh"',
+  'safari_sy168_0_3 Mechanical Cyclometer Register inspection'
+);
+replaceExact(
+  'brandModel:"Round Electromechanical Sub-Meter",registerType:"Cyclometer Register (5 Black + 1 Red Tenths)",registerBreakdown:"Black: 00003 • Red: .4 → 3.4 kWh"',
+  'brandModel:"Round Electromechanical Sub-Meter",registerType:"Mechanical Cyclometer Register (5 Black + 1 Red Tenths)",registerBreakdown:"Register (Counter): Black Drums: 00003 • Red Tenths Drum: .4 → 3.4 kWh"',
+  'user_round_cyclometer_sample Mechanical Cyclometer Register inspection'
+);
+
+// Viewfinder & UI Cyclometer Register text
+replaceExact(
+  'Align Sub-Meter Register (5 Black + 1 Red Tenths)',
+  'Align Mechanical Cyclometer Register (5 Black + 1 Red Drums)',
+  'viewfinder reticle target text'
+);
+replaceExact(
+  'Accurately reads 5 black + 1 red drums and digital displays',
+  'Specifically reads the Mechanical Cyclometer Register (5 Black + 1 Red Drums)',
+  'upload subtitle cyclometer text'
+);
+
 // 4. Patch Tesseract timeout from 5500 to 15000
 replaceExact(
   'setTimeout(()=>k(null),5500)',
