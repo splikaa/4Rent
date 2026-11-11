@@ -3,7 +3,21 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
+
+[assembly: AssemblyTitle("4Rent Management System")]
+[assembly: AssemblyDescription("Official Desktop Launcher & Standalone Client for 4Rent")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("4Rent Systems")]
+[assembly: AssemblyProduct("4Rent Management System")]
+[assembly: AssemblyCopyright("Copyright © 2026 4Rent Systems. All rights reserved.")]
+[assembly: AssemblyTrademark("4Rent")]
+[assembly: AssemblyCulture("")]
+[assembly: ComVisible(false)]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace FourRent.Launcher
 {

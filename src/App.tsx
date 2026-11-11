@@ -87,6 +87,19 @@ export function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
 
   // Runtime environment detection (Desktop Launcher vs. Android Mobile APK vs. Web Browser)
   const isDesktop = isRunningInDesktopApp();
@@ -1911,6 +1924,21 @@ export function App() {
         isOpen={isDownloadModalOpen}
         onClose={() => setIsDownloadModalOpen(false)}
         propertyCode={settings.cloudSync.propertyCode || '4RENT-MAIN'}
+        canInstallPwa={Boolean(deferredInstallPrompt)}
+        onInstallPwa={async () => {
+          if (deferredInstallPrompt) {
+            deferredInstallPrompt.prompt();
+            const choiceResult = await deferredInstallPrompt.userChoice;
+            if (choiceResult?.outcome === 'accepted') {
+              triggerFeedback(
+                '4Rent Desktop App Installed!',
+                '4Rent was installed directly to your system with an official desktop shortcut.',
+                'success'
+              );
+              setDeferredInstallPrompt(null);
+            }
+          }
+        }}
       />
     </div>
   );

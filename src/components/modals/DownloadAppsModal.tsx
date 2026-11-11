@@ -4,11 +4,14 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FolderArchive,
   Laptop,
   QrCode,
   Share2,
+  ShieldAlert,
   ShieldCheck,
   Smartphone,
+  Sparkles,
   X,
   Zap,
 } from 'lucide-react';
@@ -18,14 +21,19 @@ interface DownloadAppsModalProps {
   isOpen: boolean;
   onClose: () => void;
   propertyCode?: string;
+  canInstallPwa?: boolean;
+  onInstallPwa?: () => void;
 }
 
 export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   isOpen,
   onClose,
   propertyCode = '4RENT-MAIN',
+  canInstallPwa = false,
+  onInstallPwa,
 }) => {
   const [copiedExeLink, setCopiedExeLink] = useState(false);
+  const [copiedZipLink, setCopiedZipLink] = useState(false);
   const [copiedApkLink, setCopiedApkLink] = useState(false);
   const [copiedPairLink, setCopiedPairLink] = useState(false);
   const [activeTab, setActiveTab] = useState<'downloads' | 'instructions'>(
@@ -35,6 +43,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   if (!isOpen) return null;
 
   const baseUrl = window.location.origin + window.location.pathname.replace(/\/+$/, '');
+  const zipUrl = `${baseUrl}/4Rent-Desktop-Windows.zip`;
   const exeUrl = `${baseUrl}/4Rent-Launcher.exe`;
   const apkUrl = `${baseUrl}/4Rent-v1.0.0-release.apk`;
   const pairUrl = `${baseUrl}/?prop=${encodeURIComponent(propertyCode)}`;
@@ -124,6 +133,39 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
         <div className="p-5 sm:p-6 space-y-5 overflow-y-auto">
           {activeTab === 'downloads' ? (
             <>
+              {/* Option 1: 1-Click Native Desktop App (Zero Download • Zero Warnings) */}
+              {canInstallPwa && onInstallPwa && (
+                <div className="rounded-2xl bg-gradient-to-r from-amber-500/15 via-[#1A2438] to-[#121B2B] border border-amber-500/40 p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40 shadow-inner">
+                      <Sparkles className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-extrabold text-white text-base">
+                          1-Click Desktop App (Instant Install)
+                        </h3>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold border border-emerald-500/40">
+                          Recommended
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-1">
+                        Directly installs 4Rent to your Windows Desktop &amp; Start Menu. No files to download, zero security warnings, and opens in a dedicated window!
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={onInstallPwa}
+                    className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <Sparkles className="w-4 h-4 fill-slate-950" />
+                    <span>Install 4Rent Desktop</span>
+                  </button>
+                </div>
+              )}
+
               {/* Windows Desktop Launcher Card */}
               <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-amber-500/50 transition duration-300">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
@@ -138,11 +180,11 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                         <h3 className="font-extrabold text-white text-base">
                           4Rent Windows Desktop Launcher
                         </h3>
-                        <span className="px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-400 font-mono text-[10px] font-bold">
-                          .EXE
+                        <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-[10px] font-bold">
+                          .ZIP / .EXE
                         </span>
                         <span className="px-2 py-0.5 rounded-md bg-[#1E293B] text-slate-400 text-[10px] font-semibold">
-                          ~39 KB
+                          ~41 KB
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-1">
@@ -164,45 +206,56 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                         </li>
                         <li className="flex items-center gap-1.5">
                           <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Works on Windows 10 & 11 (x64/x86)</span>
+                          <span>Works on Windows 10 &amp; 11 (x64/x86)</span>
                         </li>
                       </ul>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-[#1E293B] flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
-                    File: <span className="text-slate-200">4Rent-Launcher.exe</span>
+                {/* Download Options */}
+                <div className="mt-4 pt-4 border-t border-[#1E293B] space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
+                      Package: <span className="text-amber-300">4Rent-Desktop-Windows.zip</span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={zipUrl}
+                        download="4Rent-Desktop-Windows.zip"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95"
+                      >
+                        <FolderArchive className="w-4 h-4" />
+                        <span>Download Portable (.ZIP)</span>
+                      </a>
+
+                      <a
+                        href={exeUrl}
+                        download="4Rent-Launcher.exe"
+                        className="px-3.5 py-2 rounded-xl bg-[#1A2438] hover:bg-[#22304A] border border-[#2E3F5C] text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                        title="Direct executable file"
+                      >
+                        <Laptop className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Direct .EXE</span>
+                      </a>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(exeUrl, setCopiedExeLink)}
-                      className="px-3 py-2 rounded-xl bg-[#1A2438] hover:bg-[#22304A] border border-[#2E3F5C] text-slate-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      {copiedExeLink ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-400">Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Link</span>
-                        </>
-                      )}
-                    </button>
-
-                    <a
-                      href={exeUrl}
-                      download="4Rent-Launcher.exe"
-                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download .EXE</span>
-                    </a>
+                  {/* Chrome Safe Browsing Guidance Notice */}
+                  <div className="rounded-xl bg-[#141B28] border border-amber-500/25 p-3 text-[11px] text-slate-300 leading-relaxed flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-amber-300">
+                        Why does Chrome say &quot;This file isn&apos;t commonly downloaded&quot;?
+                      </strong>
+                      <p className="mt-0.5 text-slate-300">
+                        Google Chrome automatically shows this standard precaution for newly uploaded <code className="text-amber-300">.exe</code> files from GitHub until they reach high global download counts.
+                      </p>
+                      <p className="mt-1 text-slate-200">
+                        👉 <strong>To proceed:</strong> Click <strong className="text-amber-300">&quot;Download suspicious file&quot;</strong> in Chrome, or use the <strong className="text-white">Portable (.ZIP)</strong> button above which downloads cleanly with zero prompts.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -335,19 +388,22 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                 </div>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs leading-relaxed">
                   <li>
-                    Click <strong className="text-white">Download .EXE</strong> above to save <code className="text-amber-300">4Rent-Launcher.exe</code>.
+                    Click <strong className="text-white">Download Portable (.ZIP)</strong> above for an instant, warning-free download, or click <strong className="text-white">Download .EXE</strong>.
                   </li>
                   <li>
-                    Place the file anywhere (Desktop, Downloads, or Documents) — no installation is required.
+                    If downloading the raw .EXE, Chrome may show a standard safety prompt (&quot;This file isn&apos;t commonly downloaded&quot;). Simply click <strong className="text-amber-300">&quot;Download suspicious file&quot;</strong> to complete the download.
                   </li>
                   <li>
-                    Double-click <code className="text-amber-300">4Rent-Launcher.exe</code>. If Windows SmartScreen appears, click <strong className="text-white">More info &gt; Run anyway</strong>.
+                    Extract the ZIP (or place the .EXE anywhere on your PC) — zero installation is required.
+                  </li>
+                  <li>
+                    Double-click <code className="text-amber-300">4Rent-Launcher.exe</code>. If Windows SmartScreen appears on first run, click <strong className="text-white">More info &gt; Run anyway</strong>.
                   </li>
                   <li>
                     Enter your <strong className="text-white">Property Space Code</strong> (default: <code className="text-amber-300">{propertyCode}</code>).
                   </li>
                   <li>
-                    Click <strong className="text-amber-400">LAUNCH 4RENT STANDALONE DESKTOP APP</strong> to open in dedicated window mode. Click <strong className="text-slate-200">Pin to Desktop</strong> to save a permanent shortcut!
+                    Click <strong className="text-amber-400">LAUNCH 4RENT STANDALONE DESKTOP APP</strong> to open in dedicated window mode, or click <strong className="text-slate-200">Pin to Desktop</strong> to save a permanent shortcut!
                   </li>
                 </ol>
               </div>
