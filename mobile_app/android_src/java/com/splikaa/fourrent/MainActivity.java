@@ -329,6 +329,32 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public boolean hasCameraPermission() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                return checkSelfPermission("android.permission.CAMERA") == PackageManager.PERMISSION_GRANTED;
+            }
+            return true;
+        }
+
+        @JavascriptInterface
+        public void requestCameraPermission() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        if (checkSelfPermission("android.permission.CAMERA") != PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{"android.permission.CAMERA"}, CAMERA_PERMISSION_REQUEST_CODE);
+                        } else {
+                            notifyCameraPermissionResult(true);
+                        }
+                    } else {
+                        notifyCameraPermissionResult(true);
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
         public boolean requestAndVerifyNotification(final String title, final String body) {
             runOnUiThread(new Runnable() {
                 @Override
@@ -406,6 +432,22 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void notifyCameraPermissionResult(final boolean granted) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (webView != null) {
+                    String js = "if (window.__onAndroidCameraPermissionResult) { window.__onAndroidCameraPermissionResult(" + granted + "); }";
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        webView.evaluateJavascript(js, null);
+                    } else {
+                        webView.loadUrl("javascript:" + js);
+                    }
+                }
+            }
+        });
+    }
+
     private void notifyNotificationResult(final boolean granted) {
         runOnUiThread(new Runnable() {
             @Override
@@ -434,6 +476,7 @@ public class MainActivity extends Activity {
                 }
                 pendingWebPermissionRequest = null;
             }
+            notifyCameraPermissionResult(granted);
         } else if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
             boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
             if (granted) {

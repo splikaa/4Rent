@@ -96,6 +96,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const [showRegisterGuide, setShowRegisterGuide] = useState(false);
+  const [cameraPermissionNotice, setCameraPermissionNotice] = useState(false);
 
   // Monthly electricity consumption rate (editable per bill cycle)
   const [monthlyElectricRate, setMonthlyElectricRate] = useState<string>(() =>
@@ -208,6 +209,20 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   }, [selectedRoom?.id]);
 
   useEffect(() => {
+    const win = window as any;
+    win.__onAndroidCameraPermissionResult = (granted: boolean) => {
+      if (granted) {
+        startCamera();
+      }
+    };
+    return () => {
+      if (win.__onAndroidCameraPermissionResult) {
+        delete win.__onAndroidCameraPermissionResult;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isOpen) {
       stopCamera();
     }
@@ -231,37 +246,63 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const startCamera = async () => {
     setOcrStatusMsg(null);
+    setCameraPermissionNotice(false);
+
+    // Call native Android bridge if available to prompt for OS CAMERA permission
+    const win = window as any;
+    if (win.AndroidNative?.requestCameraPermission) {
+      try {
+        win.AndroidNative.requestCameraPermission();
+      } catch {}
+    }
+
     if (!navigator.mediaDevices?.getUserMedia) {
-      setOcrStatusMsg(
-        'Live stream unavailable in this browser. Please use Device Camera App below.'
-      );
+      setCameraPermissionNotice(true);
+      nativeCameraInputRef.current?.click();
       return;
     }
-    try {
-      let stream: MediaStream;
+
+    const candidateConstraints: MediaStreamConstraints[] = [
+      {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      },
+      { video: { facingMode: 'environment' } },
+      { video: { facingMode: { ideal: 'environment' } } },
+      { video: true },
+    ];
+
+    let stream: MediaStream | null = null;
+    let lastError: any = null;
+
+    for (const constraints of candidateConstraints) {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 },
-          },
-        });
-      } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (stream) break;
+      } catch (err: any) {
+        lastError = err;
+        if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+          break;
+        }
       }
+    }
+
+    if (stream) {
       streamRef.current = stream;
       setIsCameraActive(true);
+      setCameraPermissionNotice(false);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.play().catch(() => {});
       }
-    } catch {
+    } else {
       setIsCameraActive(false);
+      setCameraPermissionNotice(true);
       setOcrStatusMsg(
-        'Camera permission was denied or device camera is busy. You can snap a photo with your device camera app.'
+        'Camera permission is required for live stream. Please allow Camera or tap "Snap with Phone Camera" below.'
       );
     }
   };
@@ -1007,24 +1048,70 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       <p className="text-[11px] text-slate-400 mt-0.5 max-w-sm mx-auto">
                         Viewfinder auto-sharpens blurry or dim sub-meter drums and digital LCD displays.
                       </p>
-                      <div className="flex flex-wrap items-center justify-center gap-2 mt-3.5">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2 mt-3.5 max-w-sm mx-auto">
                         <button
                           type="button"
                           onClick={startCamera}
-                          className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs inline-flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 transition"
+                          className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs inline-flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20 transition active:scale-95"
+                          title="Start live video stream inside app"
                         >
-                          <Camera className="w-3.5 h-3.5" />
+                          <Camera className="w-4 h-4" />
                           <span>Start Live Camera</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => nativeCameraInputRef.current?.click()}
-                          className="px-3.5 py-2 rounded-xl bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-200 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
+                          className="px-3.5 py-2.5 rounded-xl bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-200 font-bold text-xs inline-flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
+                          title="Open phone camera with auto-focus & flash"
                         >
                           <Camera className="w-3.5 h-3.5 text-amber-400" />
                           <span>Snap via Device Camera App</span>
                         </button>
                       </div>
+
+                      {cameraPermissionNotice && (
+                        <div className="mt-3.5 p-3.5 bg-amber-500/10 border border-amber-500/40 rounded-xl text-left max-w-sm mx-auto animate-card-in">
+                          <div className="flex items-start gap-2.5">
+                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <div className="text-[11px] text-slate-300">
+                              <strong className="text-amber-300 block mb-0.5 font-bold">
+                                Camera Permission Required
+                              </strong>
+                              <span>
+                                Please allow 4Rent to access your device camera when prompted by Android ("Allow 4Rent to take pictures and record video?").
+                              </span>
+                              <div className="mt-2 space-y-1 text-[10px] text-slate-300">
+                                <div>• <strong>Tap Allow</strong> on the system prompt to activate live stream.</div>
+                                <div>• Or snap a photo directly using your phone's built-in camera app below:</div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 mt-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const win = window as any;
+                                if (win.AndroidNative?.requestCameraPermission) {
+                                  win.AndroidNative.requestCameraPermission();
+                                }
+                                startCamera();
+                              }}
+                              className="py-2 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Allow & Retry</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => nativeCameraInputRef.current?.click()}
+                              className="py-2 px-2.5 rounded-lg bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                            >
+                              <Camera className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Device App</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 ) : (

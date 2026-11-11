@@ -36,6 +36,7 @@ const newZip = new JSZip();
  */
 
 // 1. Copy required Android binary runtime files without binary mangling
+const updatedDexPath = join(rootDir, 'mobile_app', 'classes.dex');
 const binaryEntries = [
   'AndroidManifest.xml',
   'resources.arsc',
@@ -45,11 +46,17 @@ const binaryEntries = [
 ];
 
 for (const name of binaryEntries) {
-  const entry = baseZip.file(name);
-  if (!entry) {
-    throw new Error(`Required Android entry missing from base APK: ${name}`);
+  let content;
+  if (name === 'classes.dex' && existsSync(updatedDexPath)) {
+    content = readFileSync(updatedDexPath);
+    console.log(`[4Rent APK Signer] Using updated compiled classes.dex (${content.length} bytes) with camera permission handlers.`);
+  } else {
+    const entry = baseZip.file(name);
+    if (!entry) {
+      throw new Error(`Required Android entry missing from base APK: ${name}`);
+    }
+    content = await entry.async('nodebuffer');
   }
-  const content = await entry.async('nodebuffer');
 
   // resources.arsc must remain uncompressed (STORE) for Android OS
   if (name === 'resources.arsc') {
