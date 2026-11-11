@@ -154,6 +154,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     link.href = dataUrl;
     link.click();
     setShareFeedback(`Receipt PNG downloaded: ${filename}`);
+    setTimeout(() => {
+      setShareFeedback((prev) => (prev?.startsWith('Receipt PNG') ? null : prev));
+    }, 4500);
   };
 
   const handleCopySummary = async () => {
@@ -177,21 +180,32 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setCopiedText(true);
     setShareFeedback('Bill summary copied! Ready to paste into Messenger.');
     setTimeout(() => setCopiedText(false), 3000);
+    setTimeout(() => {
+      setShareFeedback((prev) => (prev?.startsWith('Bill summary') ? null : prev));
+    }, 4500);
   };
 
   const handleShareToMessenger = async () => {
     setShareFeedback(null);
     const summary = formatMessengerBillSummary(bill, settings.apartmentName);
 
+    // Pre-generate the official receipt PNG image for mobile Web Share file attachment
+    const pngData = await generateReceiptPngDataUrl();
+
     const res = await openMessengerAppWithReceipt({
       textSummary: summary,
+      pngDataUrl: pngData || undefined,
       receiptNo: bill.receiptNo,
       tenantName: bill.tenantName,
       roomName: bill.roomName,
       messengerHandle: bill.tenantMessenger,
+      shareUrl: window.location.href,
       autoDownloadPng: false,
     });
     setShareFeedback(res.message);
+    setTimeout(() => {
+      setShareFeedback((prev) => (prev === res.message ? null : prev));
+    }, 4500);
   };
 
   const formattedIssueDate = new Date(bill.createdAt).toLocaleDateString(
@@ -254,19 +268,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         </div>
 
+        {/* Floating Notification Toast (Does not push header off-screen) */}
         {shareFeedback && (
-          <div className="no-print px-4 py-2 bg-amber-500/15 border-b border-amber-500/30 text-xs font-semibold text-amber-300 text-center animate-view-enter">
-            {shareFeedback}
+          <div className="no-print absolute top-14 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs shadow-2xl border border-amber-400 flex items-center gap-2 animate-modal-pop">
+            <Check className="w-4 h-4 text-slate-950 shrink-0" />
+            <span>{shareFeedback}</span>
           </div>
         )}
 
         {/* Printable White-Paper Sheet Container */}
-        <div className="receipt-sheet-container flex-1 overflow-y-auto p-2 sm:p-5 md:p-6 pb-28 sm:pb-36 bg-[#090D15] flex justify-center">
+        <div className="receipt-sheet-container flex-1 overflow-y-auto p-2.5 sm:p-5 md:p-6 pb-6 sm:pb-8 bg-[#090D15] flex justify-center">
           {/* Authentic Typeset Document Container — 100% White Surface with High-Contrast Typography */}
           <div
             ref={receiptRef}
             id="receipt-printable-sheet"
-            className="receipt-white-sheet w-full max-w-2xl bg-white text-slate-900 rounded-2xl p-5 sm:p-7 md:p-8 shadow-2xl font-sans border border-slate-200"
+            className="receipt-white-sheet w-full max-w-2xl bg-white text-slate-900 rounded-2xl p-5 sm:p-7 md:p-8 shadow-2xl font-sans border border-slate-300 relative"
           >
             {/* Header: Brand, Title, Status & OR Number */}
             <div className="flex items-start justify-between gap-3 border-b-2 border-slate-900 pb-4">
@@ -568,14 +584,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             </div>
 
-            {/* Anti-Tamper Verification Seal & Payment Policy (Signatures removed) */}
-            <div className="mt-4 pt-3 border-t border-dashed border-slate-300 flex flex-wrap items-center justify-between gap-2 text-[9px] text-slate-500 font-mono-num">
-              <span>
-                Payment Window: Every 1st–10th of the Month • 4Rent Management System v1.0.0
-              </span>
-              <span className="font-extrabold text-slate-800">
-                Verification Seal: {verificationSeal}
-              </span>
+            {/* Official Anti-Tamper Verification Seal & Payment Policy Footer */}
+            <div className="mt-4 p-3 sm:p-3.5 rounded-xl bg-slate-50 border border-slate-300 flex flex-wrap items-center justify-between gap-2.5 text-[10px] text-slate-600 font-mono-num">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-semibold truncate">
+                  Payment Window: Every 1st–10th of the Month • 4Rent Management System v1.0.0
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 font-black text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-300 shadow-2xs shrink-0">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">
+                  Seal:
+                </span>
+                <span className="font-mono-num text-emerald-700 tracking-wider">
+                  {verificationSeal}
+                </span>
+              </div>
             </div>
           </div>
         </div>

@@ -1410,8 +1410,13 @@ export async function requestAndVerifyNotifications(): Promise<{
 }
 
 /**
- * Opens the native Messenger application on Mobile (Android APK / iOS / Android Web) and Desktop
- * without forcing unwanted background file downloads.
+ * Official Meta App ID for 4Rent Messenger & Send Dialog Integration
+ */
+export const META_MESSENGER_APP_ID = '1127838943497464';
+
+/**
+ * Opens the native Messenger application / System Share sheet on Mobile (Android APK / iOS / Android Web)
+ * and Desktop using Meta App ID 1127838943497464 and Web Share API.
  */
 export async function openMessengerAppWithReceipt(options: {
   textSummary: string;
@@ -1420,6 +1425,7 @@ export async function openMessengerAppWithReceipt(options: {
   tenantName?: string;
   roomName?: string;
   messengerHandle?: string;
+  shareUrl?: string;
   autoDownloadPng?: boolean;
 }): Promise<{ openedApp: boolean; message: string }> {
   const {
@@ -1429,16 +1435,16 @@ export async function openMessengerAppWithReceipt(options: {
     tenantName,
     roomName,
     messengerHandle,
+    shareUrl,
     autoDownloadPng = false,
   } = options;
 
-  // Always copy text summary to clipboard first
+  // 1. Always copy text summary to clipboard first so user can paste immediately
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(textSummary);
     }
   } catch {
-    // fallback clipboard
     try {
       const ta = document.createElement('textarea');
       ta.value = textSummary;
@@ -1468,6 +1474,12 @@ export async function openMessengerAppWithReceipt(options: {
     .replace(/[^a-zA-Z0-9_-]/g, '_');
   const customFileName = `Receipt_${safeTenant}_${safeRoom}_${receiptNo}.png`;
 
+  const fallbackUrl =
+    typeof window !== 'undefined'
+      ? window.location.origin + window.location.pathname
+      : 'https://splikaa.github.io/4Rent/';
+  const finalShareUrl = shareUrl || fallbackUrl;
+
   const win = window as unknown as {
     AndroidNative?: {
       shareToMessenger?: (
@@ -1479,7 +1491,7 @@ export async function openMessengerAppWithReceipt(options: {
     };
   };
 
-  // 1. Native Android APK Bridge -> Directly launches installed Messenger app
+  // 2. Native Android APK Bridge -> Directly launches installed Messenger app / share chooser
   if (win.AndroidNative && typeof win.AndroidNative.shareToMessenger === 'function') {
     try {
       const launched = win.AndroidNative.shareToMessenger(
@@ -1490,7 +1502,7 @@ export async function openMessengerAppWithReceipt(options: {
       if (launched) {
         return {
           openedApp: true,
-          message: 'Opened Messenger app with receipt ready to send!',
+          message: 'Opened native share drawer with Messenger contacts!',
         };
       }
     } catch {
@@ -1498,13 +1510,39 @@ export async function openMessengerAppWithReceipt(options: {
     }
   }
 
-  // 2. Web Share API (Mobile Chrome, Safari, Android WebView) -> Opens system share sheet with Messenger
+  // 3. Web Share API (Android Chrome, iOS Safari, Mobile Web)
+  // Supports sharing image file + text directly to Messenger contacts & installed apps
   if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
     try {
-      await navigator.share({
-        title: `4Rent Official Receipt #${receiptNo}`,
+      let shareData: ShareData = {
+        title: `4Rent Official Statement & Receipt #${receiptNo} - ${safeRoom}`,
         text: textSummary,
-      });
+        url: finalShareUrl,
+      };
+
+      if (pngDataUrl) {
+        try {
+          const res = await fetch(pngDataUrl);
+          const blob = await res.blob();
+          const receiptFile = new File([blob], customFileName, {
+            type: 'image/png',
+          });
+          if (
+            typeof navigator.canShare === 'function' &&
+            navigator.canShare({ files: [receiptFile] })
+          ) {
+            shareData = {
+              files: [receiptFile],
+              title: `4Rent Official Statement & Receipt #${receiptNo} - ${safeRoom}`,
+              text: textSummary,
+            };
+          }
+        } catch {
+          // fallback to text + url shareData
+        }
+      }
+
+      await navigator.share(shareData);
       return {
         openedApp: true,
         message: 'Receipt shared successfully! Summary copied to clipboard.',
@@ -1513,64 +1551,63 @@ export async function openMessengerAppWithReceipt(options: {
       if ((err as Error)?.name === 'AbortError') {
         return {
           openedApp: false,
-          message: 'Share cancelled.',
+          message: 'Share dismissed.',
         };
       }
-      // If Web Share fails or is restricted, continue to fallback
+      // If Web Share fails or is restricted, proceed to Meta Messenger fallbacks
     }
   }
+
+  // 4. Meta Official Messenger Custom Share/Send Endpoints
+  const appId = META_MESSENGER_APP_ID;
+  const currentHref = typeof window !== 'undefined' ? window.location.href : finalShareUrl;
+  const messengerWebUrl = `https://www.facebook.com/dialog/send?app_id=${appId}&link=${encodeURIComponent(
+    finalShareUrl
+  )}&redirect_uri=${encodeURIComponent(currentHref)}`;
+  const messengerMobileUri = `fb-messenger://share/?link=${encodeURIComponent(
+    finalShareUrl
+  )}&app_id=${appId}`;
 
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
   const isAndroid = /Android/i.test(ua);
   const isIOS = /iPhone|iPad|iPod/i.test(ua);
   const isMobile = isAndroid || isIOS;
 
-  // 3. Mobile Deep Link / Intent to Messenger App (Fallback)
-  const messengerUrl = cleanHandle
-    ? `https://m.me/${encodeURIComponent(cleanHandle)}`
-    : 'https://m.me';
+  if (isMobile) {
+    if (cleanHandle) {
+      window.location.href = `https://m.me/${encodeURIComponent(cleanHandle)}`;
+      return {
+        openedApp: true,
+        message: `Bill summary copied! Opening Messenger chat with @${cleanHandle}...`,
+      };
+    }
 
-  if (isAndroid) {
-    // Safely attempt app launch without destroying the WebView page
-    try {
-      const a = document.createElement('a');
-      a.href = cleanHandle
-        ? `intent://user/${encodeURIComponent(cleanHandle)}#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(`https://m.me/${cleanHandle}`)};end`
-        : `intent://share/#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent('https://m.me')};end`;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.click();
-    } catch {
-      window.open(messengerUrl, '_blank', 'noopener,noreferrer');
+    if (isAndroid) {
+      try {
+        const intentUri = `intent://share/?link=${encodeURIComponent(
+          finalShareUrl
+        )}&app_id=${appId}#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(
+          'https://m.me'
+        )};end`;
+        const a = document.createElement('a');
+        a.href = intentUri;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.click();
+      } catch {
+        window.location.href = messengerMobileUri;
+      }
+    } else {
+      window.location.href = messengerMobileUri;
     }
 
     return {
       openedApp: true,
-      message: cleanHandle
-        ? `Bill summary copied! Opening Messenger chat with @${cleanHandle}...`
-        : 'Bill summary copied to clipboard! Opening Messenger...',
+      message: 'Bill summary copied to clipboard! Opening Messenger app...',
     };
   }
 
-  if (isIOS) {
-    const iosScheme = cleanHandle
-      ? `fb-messenger://user-thread/${encodeURIComponent(cleanHandle)}`
-      : `fb-messenger://`;
-    try {
-      window.location.href = iosScheme;
-    } catch {
-      window.open(messengerUrl, '_blank', 'noopener,noreferrer');
-    }
-    return {
-      openedApp: true,
-      message: cleanHandle
-        ? `Bill summary copied! Opening Messenger chat with @${cleanHandle}...`
-        : 'Bill summary copied to clipboard! Opening Messenger...',
-    };
-  }
-
-  // 4. Desktop (Windows / macOS)
-  // Only download if explicitly asked (not during ordinary Messenger share)
+  // 5. Desktop (Windows / macOS Web)
   if (autoDownloadPng && pngDataUrl) {
     try {
       const a = document.createElement('a');
@@ -1582,38 +1619,24 @@ export async function openMessengerAppWithReceipt(options: {
     }
   }
 
-  // Attempt desktop protocol or open web Messenger directly
-  const desktopWebUrl = cleanHandle
-    ? `https://m.me/${encodeURIComponent(cleanHandle)}`
-    : 'https://www.messenger.com';
-
-  try {
-    const desktopScheme = cleanHandle
-      ? `fb-messenger://user-thread/${encodeURIComponent(cleanHandle)}`
-      : `fb-messenger://`;
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = desktopScheme;
-    document.body.appendChild(iframe);
-    setTimeout(() => {
-      try {
-        document.body.removeChild(iframe);
-      } catch {
-        // ignore
-      }
-    }, 2000);
-  } catch {
-    // ignore
+  // If specific username exists, open m.me; otherwise open official Meta Send dialog popup
+  if (cleanHandle) {
+    window.open(
+      `https://m.me/${encodeURIComponent(cleanHandle)}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  } else {
+    window.open(
+      messengerWebUrl,
+      'messenger-share',
+      'width=600,height=500,status=no,resizable=yes,scrollbars=yes'
+    );
   }
-
-  // Open web tab so user is guaranteed to land in Messenger
-  window.open(desktopWebUrl, '_blank', 'noopener,noreferrer');
 
   return {
     openedApp: true,
-    message: cleanHandle
-      ? `Bill summary copied! Opening Messenger chat with @${cleanHandle}...`
-      : 'Bill summary copied! Opening Messenger in new tab...',
+    message: 'Bill summary copied! Opening Messenger Send dialog...',
   };
 }
 

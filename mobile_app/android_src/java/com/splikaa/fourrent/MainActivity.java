@@ -378,23 +378,25 @@ public class MainActivity extends Activity {
                 @Override
                 public void run() {
                     try {
+                        // If specific handle is provided, open direct m.me chat thread
+                        if (handle != null && !handle.trim().isEmpty()) {
+                            try {
+                                Intent directIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://m.me/" + handle.trim()));
+                                startActivity(directIntent);
+                                return;
+                            } catch (Exception ignored) {
+                            }
+                        }
+
+                        // Open native system share chooser (displays direct Messenger contacts, Signal, etc.)
                         Intent sendIntent = new Intent(Intent.ACTION_SEND);
                         sendIntent.setType("text/plain");
                         sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
 
-                        boolean hasOrca = isPackageInstalled("com.facebook.orca");
-                        boolean hasLite = isPackageInstalled("com.facebook.mlite");
-
-                        if (hasOrca) {
-                            sendIntent.setPackage("com.facebook.orca");
-                        } else if (hasLite) {
-                            sendIntent.setPackage("com.facebook.mlite");
-                        }
-
-                        Intent chooser = Intent.createChooser(sendIntent, "Share Receipt to Messenger");
+                        Intent chooser = Intent.createChooser(sendIntent, "Share Receipt via Messenger or System");
                         startActivity(chooser);
                     } catch (Exception e) {
-                        // If direct intent failed, attempt deep link
+                        // If direct intent failed, attempt web messenger
                         try {
                             String target = (handle != null && !handle.trim().isEmpty())
                                     ? "https://m.me/" + handle.trim()
