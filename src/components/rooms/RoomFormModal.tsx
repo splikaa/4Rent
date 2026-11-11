@@ -284,8 +284,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 {initialRoom ? `Edit ${initialRoom.name}` : 'Create New Room'}
               </h2>
               <p className="text-xs text-slate-400">
-                Required Deposit • Continuous Sub-Meter • Landlord & Tenant
-                Protection
+                Deposit, sub-meter reading & tenant details
               </p>
             </div>
           </div>

@@ -325,3 +325,24 @@ textarea:focus {
     break-inside: avoid !important;
   }
 }
+
+/* Suppress native mobile video play buttons and prevent live viewfinder flicker */
+video::-webkit-media-controls {
+  display: none !important;
+}
+video::-webkit-media-controls-play-button {
+  display: none !important;
+}
+video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+}
+video::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+.live-camera-video {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  will-change: transform;
+}

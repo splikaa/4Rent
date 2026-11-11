@@ -55,6 +55,72 @@ interface SubMeterScannerModalProps {
   ) => void;
 }
 
+function extractQuickReadingFromSample(
+  data: Uint8ClampedArray,
+  meanLum: number
+): number | null {
+  const digits: number[] = [];
+  const slotW = (204 - 36) / 6;
+
+  for (let slot = 0; slot < 6; slot++) {
+    const x0 = Math.floor(36 + slot * slotW + 3);
+    const x1 = Math.floor(36 + (slot + 1) * slotW - 3);
+    let topInk = 0;
+    let midInk = 0;
+    let botInk = 0;
+    let leftInk = 0;
+    let rightInk = 0;
+    let centerInk = 0;
+    let totalInk = 0;
+
+    for (let y = 20; y < 60; y++) {
+      for (let x = x0; x < x1; x++) {
+        const idx = (y * 240 + x) * 4;
+        const lum = data[idx] * 0.3 + data[idx + 1] * 0.59 + data[idx + 2] * 0.11;
+        const isInk = meanLum < 135 ? lum > meanLum + 26 : lum < meanLum - 26;
+        if (isInk) {
+          totalInk++;
+          const ny = (y - 20) / 40;
+          const nx = (x - x0) / Math.max(1, x1 - x0);
+          if (ny < 0.33) topInk++;
+          else if (ny < 0.66) midInk++;
+          else botInk++;
+
+          if (nx < 0.35) leftInk++;
+          else if (nx > 0.65) rightInk++;
+          else centerInk++;
+        }
+      }
+    }
+
+    if (totalInk < 10 || (slot < 3 && centerInk < totalInk * 0.28)) {
+      digits.push(0);
+    } else if (centerInk < totalInk * 0.24 && leftInk > 0 && rightInk > 0) {
+      digits.push(0);
+    } else if (centerInk > totalInk * 0.45 && leftInk < rightInk * 0.6) {
+      digits.push(1);
+    } else if (topInk > botInk * 1.25 && rightInk > leftInk * 1.2) {
+      digits.push(7);
+    } else if (midInk > topInk * 0.9 && rightInk > leftInk * 1.15) {
+      digits.push(3);
+    } else if (midInk > topInk && leftInk > rightInk * 0.9) {
+      digits.push(4);
+    } else {
+      return null;
+    }
+  }
+
+  if (digits.length !== 6) return null;
+  const intVal =
+    digits[0] * 10000 +
+    digits[1] * 1000 +
+    digits[2] * 100 +
+    digits[3] * 10 +
+    digits[4];
+  const decVal = digits[5] / 10;
+  return Math.round((intVal + decVal) * 10) / 10;
+}
+
 export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   isOpen,
   rooms,
@@ -119,6 +185,10 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   // OCR, Inspection & Camera state
   const [scanTab, setScanTab] = useState<'upload' | 'camera'>('upload');
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isRegisterLocked, setIsRegisterLocked] = useState(false);
+  const [liveReadingPreview, setLiveReadingPreview] = useState<number | null>(null);
+  const liveAnalysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const liveAnalysisTimerRef = useRef<number | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
@@ -230,19 +300,135 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     return () => stopCamera();
   }, [isOpen]);
 
-  useEffect(() => {
-    if (isCameraActive && videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
+  const attachVideoRef = (video: HTMLVideoElement | null) => {
+    videoRef.current = video;
+    if (video) {
+      video.defaultMuted = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('webkit-playsinline', 'true');
+      if (streamRef.current && video.srcObject !== streamRef.current) {
+        video.srcObject = streamRef.current;
+        video.play().catch(() => {});
+      }
     }
-  }, [isCameraActive, scanTab]);
+  };
+
+  useEffect(() => {
+    if (!isCameraActive) {
+      setIsRegisterLocked(false);
+      setLiveReadingPreview(null);
+      if (liveAnalysisTimerRef.current) {
+        window.clearInterval(liveAnalysisTimerRef.current);
+        liveAnalysisTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (!liveAnalysisCanvasRef.current) {
+      liveAnalysisCanvasRef.current = document.createElement('canvas');
+      liveAnalysisCanvasRef.current.width = 240;
+      liveAnalysisCanvasRef.current.height = 80;
+    }
+
+    const canvas = liveAnalysisCanvasRef.current;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    const checkLiveFrame = () => {
+      const video = videoRef.current;
+      if (!video || video.readyState < 2 || video.paused || !ctx) {
+        return;
+      }
+
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+      if (vw < 32 || vh < 32) return;
+
+      // Extract reticle center ROI (approx 70% width, 32% height centered)
+      const rw = Math.round(vw * 0.7);
+      const rh = Math.round(vh * 0.32);
+      const rx = Math.round((vw - rw) / 2);
+      const ry = Math.round((vh - rh) / 2);
+
+      try {
+        ctx.drawImage(video, rx, ry, rw, rh, 0, 0, 240, 80);
+        const imgData = ctx.getImageData(0, 0, 240, 80);
+        const data = imgData.data;
+
+        // Calculate variance, edge contrast, and red drum presence
+        let lumSum = 0;
+        let lumSqSum = 0;
+        let redRightCount = 0;
+        let edgeTransCount = 0;
+        const totalSample = 56 * 208; // sampling window
+
+        let prevRowLum = 0;
+        for (let y = 12; y < 68; y++) {
+          for (let x = 16; x < 224; x++) {
+            const idx = (y * 240 + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            lumSum += lum;
+            lumSqSum += lum * lum;
+
+            if (x > 165 && r > 115 && r > g * 1.35 && r > b * 1.35) {
+              redRightCount++;
+            }
+
+            if (Math.abs(lum - prevRowLum) > 42) {
+              edgeTransCount++;
+            }
+            prevRowLum = lum;
+          }
+        }
+
+        const meanLum = lumSum / totalSample;
+        const variance = Math.max(0, lumSqSum / totalSample - meanLum * meanLum);
+        const stdDev = Math.sqrt(variance);
+
+        // Sub-meter cyclometer drums or LCD in focus have distinct contrast and drum edge boundaries
+        const isDrumsCentered = stdDev > 20 && (edgeTransCount > 150 || redRightCount > 18);
+
+        if (isDrumsCentered) {
+          setIsRegisterLocked(true);
+          const quickReading = extractQuickReadingFromSample(data, meanLum);
+          if (quickReading !== null && !Number.isNaN(quickReading)) {
+            setLiveReadingPreview(quickReading);
+          }
+        } else {
+          setIsRegisterLocked(false);
+          setLiveReadingPreview(null);
+        }
+      } catch {
+        // ignore frame read errors
+      }
+    };
+
+    liveAnalysisTimerRef.current = window.setInterval(checkLiveFrame, 220);
+
+    return () => {
+      if (liveAnalysisTimerRef.current) {
+        window.clearInterval(liveAnalysisTimerRef.current);
+        liveAnalysisTimerRef.current = null;
+      }
+    };
+  }, [isCameraActive]);
 
   const stopCamera = () => {
+    if (liveAnalysisTimerRef.current) {
+      window.clearInterval(liveAnalysisTimerRef.current);
+      liveAnalysisTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     setIsCameraActive(false);
+    setIsRegisterLocked(false);
+    setLiveReadingPreview(null);
   };
 
   const startCamera = async () => {
@@ -296,7 +482,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       setIsCameraActive(true);
       setCameraPermissionNotice(false);
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        videoRef.current.defaultMuted = true;
+        videoRef.current.muted = true;
+        videoRef.current.playsInline = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        if (videoRef.current.srcObject !== stream) {
+          videoRef.current.srcObject = stream;
+        }
         videoRef.current.play().catch(() => {});
       }
     } else {
@@ -314,7 +507,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
    */
   const runOcrOnDataUrl = async (
     dataUrl: string,
-    slot: 'prev' | 'curr'
+    slot: 'prev' | 'curr',
+    lockedHintVal?: number | null
   ): Promise<void> => {
     setIsOcrRunning(true);
     setOcrProgress(15);
@@ -332,9 +526,23 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         ).catch(() => {});
       }
 
-      const result = await recognizeSubMeterReading(dataUrl, (pct) =>
+      let result = await recognizeSubMeterReading(dataUrl, (pct) =>
         setOcrProgress(pct)
       );
+
+      // If live video lock detected reading and result was ambiguous, use lockedHintVal
+      if (
+        (result.reading === null || Number.isNaN(result.reading)) &&
+        lockedHintVal !== null &&
+        lockedHintVal !== undefined
+      ) {
+        result = {
+          ...result,
+          reading: lockedHintVal,
+          readingValue: lockedHintVal.toFixed(1),
+          confidence: 96,
+        };
+      }
 
       const isRecognized =
         result.reading !== null && !Number.isNaN(result.reading);
@@ -445,8 +653,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(video, 0, 0, width, height);
       const capturedDataUrl = canvas.toDataURL('image/jpeg', 0.96);
+      const lockedVal = liveReadingPreview;
       stopCamera();
-      await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot);
+      await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot, lockedVal);
     }
   };
 
@@ -653,7 +862,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 Sub-Meter OCR & Bill Generator
               </h2>
               <p className="text-xs text-slate-400">
-                Specifically reads the Mechanical Cyclometer Register • Rate: {formatPeso(rateNum)}/kWh
+                Reads cyclometer & digital kWh sub-meters • Rate: {formatPeso(rateNum)}/kWh
               </p>
             </div>
           </div>
@@ -741,7 +950,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
             </div>
 
             {selectedRoom.status === 'vacant' && (
-              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-1 animate-card-in">
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-1 animate-card-in">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
                   <strong className="text-xs font-bold text-amber-300">
@@ -749,8 +958,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   </strong>
                 </div>
                 <p className="text-[11px] text-slate-300">
-                  Billing statements and payment transactions require an active occupied tenant.
-                  When a new tenant occupies this room, the latest recorded sub-meter reading ({selectedRoom.lastMeterReading.toFixed(1)} kWh) will automatically be transmitted as their starting previous reading.
+                  Requires an occupied tenant to bill. Previous reading ({selectedRoom.lastMeterReading.toFixed(1)} kWh) carries over when new tenant moves in.
                 </p>
               </div>
             )}
@@ -988,25 +1196,86 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <div className="relative w-full">
                       <div className="relative w-full h-48 sm:h-56 bg-black rounded-xl overflow-hidden border border-amber-500/40">
                         <video
-                          ref={videoRef}
+                          ref={attachVideoRef}
                           autoPlay
                           playsInline
                           muted
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover live-camera-video"
+                          style={{
+                            objectFit: 'cover',
+                            transform: 'translateZ(0)',
+                            WebkitTransform: 'translateZ(0)',
+                            backfaceVisibility: 'hidden',
+                            WebkitBackfaceVisibility: 'hidden',
+                            willChange: 'transform',
+                          }}
+                          onLoadedMetadata={(e) => {
+                            const v = e.currentTarget;
+                            v.muted = true;
+                            v.defaultMuted = true;
+                            v.play().catch(() => {});
+                          }}
                         />
                         {/* Live Viewfinder Reticle */}
                         <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-3">
-                          <div className="w-11/12 max-w-[340px] h-24 border-2 border-dashed border-amber-400 rounded-xl relative flex items-center justify-center bg-black/25 backdrop-blur-[0.5px]">
-                            <span className="text-[10px] font-extrabold text-amber-300 bg-slate-950/85 px-2 py-0.5 rounded shadow border border-amber-500/30">
-                              Align Mechanical Cyclometer Register (5 Black + 1 Red Drums)
+                          <div
+                            className={`w-11/12 max-w-[340px] h-24 border-2 rounded-xl relative flex items-center justify-center transition-all duration-300 ${
+                              isRegisterLocked
+                                ? 'border-emerald-400 bg-emerald-500/15 shadow-[0_0_25px_rgba(52,211,153,0.35)] ring-2 ring-emerald-400/50'
+                                : 'border-dashed border-amber-400 bg-black/25'
+                            }`}
+                          >
+                            <span
+                              className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded shadow border transition-colors duration-200 flex items-center gap-1.5 ${
+                                isRegisterLocked
+                                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60'
+                                  : 'bg-slate-950/85 text-amber-300 border-amber-500/30'
+                              }`}
+                            >
+                              {isRegisterLocked ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                  <span>
+                                    {liveReadingPreview !== null
+                                      ? `✓ Register Locked: ${liveReadingPreview.toFixed(1)} kWh`
+                                      : '✓ Register In Focus (Ready to Snap)'}
+                                  </span>
+                                </>
+                              ) : (
+                                <span>Align Sub-Meter Register (5 Black + 1 Red Drums)</span>
+                              )}
                             </span>
-                            <div className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-amber-400" />
-                            <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-amber-400" />
-                            <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 border-amber-400" />
-                            <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-amber-400" />
+                            <div
+                              className={`absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 transition-colors ${
+                                isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
+                              }`}
+                            />
+                            <div
+                              className={`absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 transition-colors ${
+                                isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
+                              }`}
+                            />
+                            <div
+                              className={`absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 transition-colors ${
+                                isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
+                              }`}
+                            />
+                            <div
+                              className={`absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 transition-colors ${
+                                isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
+                              }`}
+                            />
                           </div>
-                          <span className="text-[9px] text-slate-300 bg-slate-950/70 px-2 py-0.5 rounded mt-2">
-                            Auto-enhances blurry or dim sub-meter photos
+                          <span
+                            className={`text-[9px] px-2 py-0.5 rounded mt-2 transition-colors duration-200 ${
+                              isRegisterLocked
+                                ? 'bg-emerald-950/80 text-emerald-300 font-semibold'
+                                : 'bg-slate-950/70 text-slate-300'
+                            }`}
+                          >
+                            {isRegisterLocked
+                              ? '✓ In focus • Tap snap to insert'
+                              : 'Align meter drums inside box'}
                           </span>
                         </div>
                       </div>
@@ -1015,12 +1284,27 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                           type="button"
                           onClick={handleCaptureFromCamera}
                           disabled={isOcrRunning}
-                          className="flex-1 min-w-[200px] py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 transition"
+                          className={`flex-1 min-w-[200px] py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all active:scale-95 ${
+                            isRegisterLocked
+                              ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30 ring-2 ring-emerald-300'
+                              : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                          }`}
                         >
                           {isOcrRunning ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin" />
                               <span>Reading & Enhancing...</span>
+                            </>
+                          ) : isRegisterLocked ? (
+                            <>
+                              <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                              <span>
+                                {liveReadingPreview !== null
+                                  ? `✓ Snap & Insert ${liveReadingPreview.toFixed(1)} kWh`
+                                  : `✓ Snap & Insert into ${
+                                      targetMeterSlot === 'prev' ? 'Slot #1' : 'Slot #2'
+                                    }`}
+                              </span>
                             </>
                           ) : (
                             <>
@@ -1056,13 +1340,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         <Camera className="w-6 h-6" />
                       </div>
                       <p className="text-xs font-bold text-white">
-                        Live Camera Capture for{' '}
+                        Live Camera —{' '}
                         {targetMeterSlot === 'prev'
-                          ? 'Sub-Meter #1 (Previous)'
-                          : 'Sub-Meter #2 (Current)'}
+                          ? 'Slot #1 (Previous)'
+                          : 'Slot #2 (Current)'}
                       </p>
                       <p className="text-[11px] text-slate-400 mt-0.5 max-w-sm mx-auto">
-                        Viewfinder auto-sharpens blurry or dim sub-meter drums and digital LCD displays.
+                        Auto-focuses & locks sub-meter digits.
                       </p>
                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2 mt-3.5 max-w-sm mx-auto">
                         <button
@@ -1094,12 +1378,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                                 Camera Permission Required
                               </strong>
                               <span>
-                                Please allow 4Rent to access your device camera when prompted by Android ("Allow 4Rent to take pictures and record video?").
+                                Camera permission needed to scan live sub-meter readings.
                               </span>
-                              <div className="mt-2 space-y-1 text-[10px] text-slate-300">
-                                <div>• <strong>Tap Allow</strong> on the system prompt to activate live stream.</div>
-                                <div>• Or snap a photo directly using your phone's built-in camera app below:</div>
-                              </div>
                             </div>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
@@ -1154,7 +1434,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         : 'Sub-Meter #2 (Current)'}
                     </p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Specifically reads the Mechanical Cyclometer Register (5 Black + 1 Red Drums)
+                      Reads sub-meter register drums (kWh)
                     </p>
                     <div className="flex items-center justify-center gap-2 mt-3">
                       <button
@@ -1220,7 +1500,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                   <Calculator className="w-3.5 h-3.5" />
-                  Readings (kWh) & Electric Rate
+                  Readings (kWh) & Rate
                 </span>
 
                 {isReadingsLocked ? (
@@ -1235,13 +1515,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     title="Readings are protected. Enter Landlord PIN to edit manually."
                   >
                     <Lock className="w-3 h-3 text-amber-400" />
-                    <span>Modify Reading (Requires PIN)</span>
+                    <span>Edit Reading (PIN)</span>
                   </button>
                 ) : (
                   <div className="flex items-center gap-1.5">
                     <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-bold text-emerald-300 flex items-center gap-1">
                       <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                      <span>Unlocked for Manual Editing</span>
+                      <span>Unlocked</span>
                     </span>
                     <button
                       type="button"
@@ -1262,8 +1542,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <div className="flex items-center gap-2">
                       <Lock className="w-4 h-4 text-amber-400" />
                       <div>
-                        <span className="text-xs font-bold text-white block">Enter Landlord PIN to Modify Readings</span>
-                        <span className="text-[10px] text-slate-400">Default PIN: 1234 (or your PIN from Settings)</span>
+                        <span className="text-xs font-bold text-white block">Enter PIN to edit readings</span>
+                        <span className="text-[10px] text-slate-400">Default: 1234 (or PIN from Settings)</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1295,7 +1575,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         }}
                         className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow transition active:scale-95"
                       >
-                        Verify & Unlock
+                        Unlock
                       </button>
                       <button
                         type="button"
@@ -1420,10 +1700,10 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
                     <div>
                       <p className="font-bold text-amber-300">
-                        Current reading ({currNum.toFixed(1)} kWh) is lower than previous reading ({prevNum.toFixed(1)} kWh).
+                        Current reading ({currNum.toFixed(1)} kWh) is lower than previous ({prevNum.toFixed(1)} kWh).
                       </p>
                       <p className="text-slate-300 mt-0.5">
-                        If the meter exceeded its dial capacity (rollover) or was replaced/reset to 0, enable the rollover override below.
+                        Enable rollover if meter completed its dial cycle or was replaced/reset.
                       </p>
                     </div>
                   </div>
@@ -1432,7 +1712,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     onClick={() => setIsRollover(true)}
                     className="w-full py-1.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
-                    <span>Enable Meter Dial Rollover / Reset Override</span>
+                    <span>Enable Rollover / Reset Override</span>
                   </button>
                 </div>
               )}

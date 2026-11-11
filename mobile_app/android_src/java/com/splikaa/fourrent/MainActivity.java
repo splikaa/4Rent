@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.hardware.biometrics.BiometricPrompt;
 import android.net.ConnectivityManager;
@@ -17,6 +19,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.provider.MediaStore;
+import android.util.Log;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -401,41 +404,70 @@ public class MainActivity extends Activity {
                 @Override
                 public void run() {
                     try {
-                        // If specific handle is provided, open direct m.me chat thread
+                        Uri contentUri = null;
+                        if (pngBase64 != null && pngBase64.contains(",")) {
+                            try {
+                                String b64 = pngBase64.substring(pngBase64.indexOf(",") + 1);
+                                byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                                if (bitmap != null) {
+                                    String savedPath = MediaStore.Images.Media.insertImage(
+                                            getContentResolver(),
+                                            bitmap,
+                                            "4Rent_Receipt_" + System.currentTimeMillis(),
+                                            "4Rent Official Statement & Receipt"
+                                    );
+                                    if (savedPath != null) {
+                                        contentUri = Uri.parse(savedPath);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                Log.e("4Rent", "Failed to save receipt image to MediaStore", e);
+                            }
+                        }
+
+                        // If user has a specific Messenger handle, open direct thread or m.me
                         if (handle != null && !handle.trim().isEmpty()) {
                             try {
                                 Intent directIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://m.me/" + handle.trim()));
+                                if (isPackageInstalled("com.facebook.orca")) {
+                                    directIntent.setPackage("com.facebook.orca");
+                                }
                                 startActivity(directIntent);
                                 return;
                             } catch (Exception ignored) {
                             }
                         }
 
-                        Intent sendIntent = new Intent(Intent.ACTION_SEND);
-                        if (pngBase64 != null && pngBase64.contains(",")) {
+                        // If Messenger app is installed, attempt direct share to Messenger
+                        if (isPackageInstalled("com.facebook.orca") && contentUri != null) {
                             try {
-                                String b64 = pngBase64.substring(pngBase64.indexOf(",") + 1);
-                                byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
-                                java.io.File cacheDir = getCacheDir();
-                                java.io.File imgFile = new java.io.File(cacheDir, "4Rent_Receipt.png");
-                                java.io.FileOutputStream fos = new java.io.FileOutputStream(imgFile);
-                                fos.write(bytes);
-                                fos.close();
-                                imgFile.setReadable(true, false);
-                                Uri fileUri = Uri.fromFile(imgFile);
-                                sendIntent.setType("image/png");
-                                sendIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
-                                sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                Intent directMessenger = new Intent(Intent.ACTION_SEND);
+                                directMessenger.setType("image/png");
+                                directMessenger.putExtra(Intent.EXTRA_STREAM, contentUri);
+                                directMessenger.setPackage("com.facebook.orca");
+                                directMessenger.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                startActivity(directMessenger);
+                                return;
                             } catch (Exception e) {
-                                sendIntent.setType("text/plain");
-                                sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                                Log.e("4Rent", "Direct Messenger share failed, showing chooser", e);
                             }
+                        }
+
+                        Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                        if (contentUri != null) {
+                            sendIntent.setType("image/png");
+                            sendIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+                            sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
                         } else {
                             sendIntent.setType("text/plain");
-                            sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                            if (summaryText != null && !summaryText.isEmpty()) {
+                                sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                            }
                         }
 
                         Intent chooser = Intent.createChooser(sendIntent, "Share Receipt Image");
+                        chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                         startActivity(chooser);
                     } catch (Exception e) {
                         try {

@@ -118,7 +118,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-400 truncate mt-0.5">
-                Room Overview • Continuous Sub-Meter • Official Receipt & History
+                Room details, sub-meter reading & bills
               </p>
             </div>
           </div>
