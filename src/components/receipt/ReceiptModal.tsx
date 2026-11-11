@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileDown,
   Loader2,
   MessageCircle,
   Printer,
@@ -26,6 +27,7 @@ import {
   isRunningInMobileApp,
   maskPhoneNumber,
 } from '../../utils/billingCalculator';
+import { buildSinglePageReceiptPdfBlob } from '../../utils/pdfReceiptGenerator';
 import {
   generateSimulatedSubMeterDataUrl,
   generateSimulatedValueCropDataUrl,
@@ -220,27 +222,103 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
-  const handleDownloadPng = async () => {
-    setShareFeedback(null);
-    const dataUrl = await generateReceiptPngDataUrl();
-    if (!dataUrl) {
-      setShareFeedback('Could not generate PNG. Use Print / PDF instead.');
-      return;
-    }
+  const getSafeReceiptBaseFilename = () => {
     const safeTenant = (bill.tenantName || 'Tenant')
       .trim()
       .replace(/[^a-zA-Z0-9_-]/g, '_');
     const safeRoom = bill.roomName.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filename = `Receipt_${safeTenant}_${safeRoom}_${bill.receiptNo}.png`;
+    return `Receipt_${safeTenant}_${safeRoom}_${bill.receiptNo}`;
+  };
+
+  const handleDownloadPng = async () => {
+    setShareFeedback(null);
+    const dataUrl = await generateReceiptPngDataUrl();
+    if (!dataUrl) {
+      setShareFeedback('Could not generate PNG receipt.');
+      return;
+    }
+    const filename = `${getSafeReceiptBaseFilename()}.png`;
 
     const link = document.createElement('a');
     link.download = filename;
     link.href = dataUrl;
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
+    link.remove();
     setShareFeedback(`Saved PNG: ${filename}`);
     setTimeout(() => {
       setShareFeedback((prev) => (prev?.startsWith('Saved PNG') ? null : prev));
     }, 4500);
+  };
+
+  const handleDownloadPdf = async () => {
+    setShareFeedback(null);
+    const pngDataUrl = await generateReceiptPngDataUrl();
+    if (!pngDataUrl) {
+      setShareFeedback('Could not generate PDF receipt.');
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      const { blob, dataUrl } = await buildSinglePageReceiptPdfBlob(pngDataUrl);
+      const filename = `${getSafeReceiptBaseFilename()}.pdf`;
+
+      // iOS Safari mobile browsers prefer system Files/Share sheet for PDF blobs
+      const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
+      if (isIOS && typeof File !== 'undefined' && typeof navigator.share === 'function') {
+        try {
+          const pdfFile = new File([blob], filename, { type: 'application/pdf' });
+          if (navigator.canShare?.({ files: [pdfFile] })) {
+            await navigator.share({
+              files: [pdfFile],
+              title: filename,
+            });
+            setShareFeedback(`PDF ready: ${filename}`);
+            return;
+          }
+        } catch (err: any) {
+          if (err?.name === 'AbortError') return;
+        }
+      }
+
+      // Direct .pdf file download (works cleanly on Mobile Chrome/Edge & Desktop)
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = blobUrl;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      // If running inside Android APK WebView where <a download> isn't intercepted by OS DownloadManager,
+      // also offer fallback open of PDF data URL if WebView ignores blob download.
+      if (isRunningInMobileApp() && dataUrl) {
+        const win = window as any;
+        if (win.AndroidNative?.shareToMessenger) {
+          setShareFeedback(
+            `PDF generated (${filename}). Use "Download PNG" or "Messenger" on Android App if WebView skips Downloads.`
+          );
+          setTimeout(() => {
+            URL.revokeObjectURL(blobUrl);
+            setShareFeedback((prev) => (prev?.includes(filename) ? null : prev));
+          }, 6000);
+          return;
+        }
+      }
+
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      setShareFeedback(`Downloaded PDF: ${filename}`);
+      setTimeout(() => {
+        setShareFeedback((prev) => (prev?.startsWith('Downloaded PDF') ? null : prev));
+      }, 4500);
+    } catch {
+      setShareFeedback('Could not build PDF file. Try Download PNG instead.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleShareToMessenger = async () => {
@@ -813,12 +891,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <ExternalLink className="w-3.5 h-3.5 opacity-80" />
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={handleDownloadPng}
               disabled={isExporting}
-              className="h-11 py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/15 transition cursor-pointer btn-fluid"
+              className="flex-1 sm:flex-none h-11 py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/15 transition cursor-pointer btn-fluid"
             >
               <Download className="w-4 h-4" />
               <span>Download PNG</span>
@@ -826,12 +904,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
             <button
               type="button"
-              onClick={() => window.print()}
-              className="h-11 py-2.5 px-4 rounded-xl bg-[#1A2335] hover:bg-[#24314A] border border-[#2A3955] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+              onClick={handleDownloadPdf}
+              disabled={isExporting}
+              className="flex-1 sm:flex-none h-11 py-2.5 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/15 transition cursor-pointer btn-fluid"
             >
-              <Printer className="w-4 h-4 text-amber-400" />
-              <span>Print / PDF</span>
+              <FileDown className="w-4 h-4" />
+              <span>Download PDF</span>
             </button>
+
+            {!isMobileDevice() && !isRunningInMobileApp() && (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="h-11 py-2.5 px-3.5 rounded-xl bg-[#1A2335] hover:bg-[#24314A] border border-[#2A3955] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+              >
+                <Printer className="w-4 h-4 text-amber-400" />
+                <span>Print</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

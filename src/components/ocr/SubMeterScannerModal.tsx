@@ -119,13 +119,32 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const isMobileApp = isRunningInMobileApp();
 
-  // OCR, Inspection & Camera state
+  // OCR, Inspection & Snapshot Camera state
   const [scanTab, setScanTab] = useState<'upload' | 'camera'>('upload');
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isRegisterLocked, setIsRegisterLocked] = useState(false);
+  const [autoSnapEnabled, setAutoSnapEnabled] = useState(false);
+  const [showShutterFlash, setShowShutterFlash] = useState(false);
+  const [collectedSnapshots, setCollectedSnapshots] = useState<
+    Array<{
+      id: string;
+      dataUrl: string;
+      slot: 'prev' | 'curr';
+      reading: number | null;
+      isAuthentic: boolean;
+      statusLabel: string;
+      capturedAt: string;
+    }>
+  >([]);
   const isLockedRef = useRef(false);
-  const liveAnalysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const liveAnalysisTimerRef = useRef<number | null>(null);
+  const autoSnapRef = useRef(false);
+  const autoSnapCooldownRef = useRef(false);
+  const isOcrRunningRef = useRef(false);
+  const pendingPermissionRetryRef = useRef(false);
+  const isStartingCameraRef = useRef(false);
+  const imageCaptureRef = useRef<any>(null);
+  const viewfinderCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const viewfinderTimerRef = useRef<number | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
@@ -137,6 +156,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    autoSnapRef.current = autoSnapEnabled;
+  }, [autoSnapEnabled]);
+
+  useEffect(() => {
+    isOcrRunningRef.current = isOcrRunning;
+  }, [isOcrRunning]);
 
   // 1:1 Pixel Inspection Lightbox State
   const [lightboxState, setLightboxState] = useState<{
@@ -204,6 +231,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       setOcrStatusMsg(null);
       setMeterInspection(null);
+      setCollectedSnapshots([]);
 
       // Reset rollover override state and reading lock when switching rooms
       setIsRollover(false);
@@ -219,11 +247,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   useEffect(() => {
     const win = window as any;
     win.__onAndroidCameraPermissionResult = (granted: boolean) => {
+      // Only resume camera once when an explicit native permission prompt just resolved
+      if (!pendingPermissionRetryRef.current) return;
+      pendingPermissionRetryRef.current = false;
       if (granted) {
         startCamera();
+      } else {
+        setCameraPermissionNotice(true);
       }
     };
     return () => {
+      pendingPermissionRetryRef.current = false;
       if (win.__onAndroidCameraPermissionResult) {
         delete win.__onAndroidCameraPermissionResult;
       }
@@ -237,7 +271,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     return () => stopCamera();
   }, [isOpen]);
 
-  const attachVideoRef = (video: HTMLVideoElement | null) => {
+  const attachOffscreenVideoRef = (video: HTMLVideoElement | null) => {
     videoRef.current = video;
     if (video) {
       video.defaultMuted = true;
@@ -255,28 +289,24 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   useEffect(() => {
     if (!isCameraActive) {
       isLockedRef.current = false;
+      autoSnapCooldownRef.current = false;
       setIsRegisterLocked(false);
-      if (liveAnalysisTimerRef.current) {
-        window.clearInterval(liveAnalysisTimerRef.current);
-        liveAnalysisTimerRef.current = null;
+      if (viewfinderTimerRef.current) {
+        window.clearInterval(viewfinderTimerRef.current);
+        viewfinderTimerRef.current = null;
       }
       return;
     }
 
-    if (!liveAnalysisCanvasRef.current) {
-      liveAnalysisCanvasRef.current = document.createElement('canvas');
-      liveAnalysisCanvasRef.current.width = 240;
-      liveAnalysisCanvasRef.current.height = 80;
-    }
-
-    const canvas = liveAnalysisCanvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
+    let frameCounter = 0;
     let lockStreak = 0;
+    let unlockStreak = 0;
 
-    const checkLiveFrame = () => {
+    // Render steady still snapshots onto a 2D <canvas> (~110ms cadence) instead of exposing a WebView <video> layer.
+    const tickSnapshotViewfinder = () => {
       const video = videoRef.current;
-      if (!video || video.readyState < 2 || video.paused || !ctx) {
+      const canvas = viewfinderCanvasRef.current;
+      if (!video || !canvas || video.readyState < 2 || video.paused) {
         return;
       }
 
@@ -284,31 +314,57 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       const vh = video.videoHeight || 480;
       if (vw < 32 || vh < 32) return;
 
-      // Extract reticle center ROI (approx 70% width, 32% height centered)
-      const rw = Math.round(vw * 0.7);
-      const rh = Math.round(vh * 0.32);
-      const rx = Math.round((vw - rw) / 2);
-      const ry = Math.round((vh - rh) / 2);
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+
+      const cw = canvas.width;
+      const ch = canvas.height;
+      const videoAspect = vw / vh;
+      const canvasAspect = cw / ch;
+
+      let sx = 0;
+      let sy = 0;
+      let sw = vw;
+      let sh = vh;
+      if (videoAspect > canvasAspect) {
+        sw = vh * canvasAspect;
+        sx = (vw - sw) / 2;
+      } else {
+        sh = vw / canvasAspect;
+        sy = (vh - sh) / 2;
+      }
 
       try {
-        ctx.drawImage(video, rx, ry, rw, rh, 0, 0, 240, 80);
-        const imgData = ctx.getImageData(0, 0, 240, 80);
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+      } catch {
+        return;
+      }
+
+      frameCounter++;
+      // Inspect alignment every ~440ms using ROI directly from the drawn canvas
+      if (frameCounter % 4 !== 0) return;
+
+      try {
+        const roiW = 240;
+        const roiH = 80;
+        const roiX = Math.max(0, Math.round((cw - roiW) / 2));
+        const roiY = Math.max(0, Math.round((ch - roiH) / 2));
+        const imgData = ctx.getImageData(roiX, roiY, roiW, roiH);
         const data = imgData.data;
 
-        // Check for genuine cyclometer register characteristics:
-        // Tenths drum is RED on the right (x > 170), dark drums on the left (x < 165)
         let lumSum = 0;
         let lumSqSum = 0;
         let redRightCount = 0;
         let redLeftCount = 0;
         let darkDrumsCount = 0;
+        let neonRgbCount = 0;
         let edgeTransCount = 0;
-        const totalSample = 56 * 208; // sampling window
+        const totalSample = 56 * 208;
 
         let prevRowLum = 0;
         for (let y = 12; y < 68; y++) {
           for (let x = 16; x < 224; x++) {
-            const idx = (y * 240 + x) * 4;
+            const idx = (y * roiW + x) * 4;
             const r = data[idx];
             const g = data[idx + 1];
             const b = data[idx + 2];
@@ -327,6 +383,10 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               darkDrumsCount++;
             }
 
+            if ((b > 155 && b > g * 1.3 && b > r * 1.1) || (r > 155 && b > 140 && g < 90)) {
+              neonRgbCount++;
+            }
+
             if (Math.abs(lum - prevRowLum) > 38) {
               edgeTransCount++;
             }
@@ -337,154 +397,198 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         const meanLum = lumSum / totalSample;
         const variance = Math.max(0, lumSqSum / totalSample - meanLum * meanLum);
         const stdDev = Math.sqrt(variance);
+        const neonRatio = neonRgbCount / totalSample;
 
-        // Sub-meter cyclometer: red drum strictly on the right, dark drums on the left
         const isCyclometerAligned =
-          redRightCount >= 25 &&
-          redRightCount > redLeftCount * 2.0 &&
-          darkDrumsCount > 200 &&
-          edgeTransCount > 60;
+          redRightCount >= 28 &&
+          redRightCount > redLeftCount * 2.2 &&
+          darkDrumsCount > 220 &&
+          edgeTransCount > 65;
 
-        // Digital LCD sub-meter in focus (high contrast segment boundaries within faceplate)
         const isLcdAligned =
-          stdDev > 22 &&
-          edgeTransCount > 180 &&
-          meanLum > 40 &&
-          meanLum < 190 &&
-          redLeftCount === 0;
+          stdDev > 24 &&
+          edgeTransCount > 210 &&
+          meanLum > 55 &&
+          meanLum < 185 &&
+          redLeftCount === 0 &&
+          neonRatio < 0.12;
 
         const isMeterAligned = isCyclometerAligned || isLcdAligned;
 
         if (isMeterAligned) {
+          unlockStreak = 0;
           lockStreak++;
-          if (lockStreak >= 2) {
-            if (!isLockedRef.current) {
-              isLockedRef.current = true;
-              setIsRegisterLocked(true);
-            }
+          if (lockStreak >= 2 && !isLockedRef.current) {
+            isLockedRef.current = true;
+            setIsRegisterLocked(true);
+          }
+          // Optional hands-free Auto-Snap once meter stays stably locked (~1.3s)
+          if (
+            autoSnapRef.current &&
+            lockStreak >= 3 &&
+            !isOcrRunningRef.current &&
+            !autoSnapCooldownRef.current
+          ) {
+            autoSnapCooldownRef.current = true;
+            void captureHighResSnapshotAndScan(false);
           }
         } else {
           lockStreak = 0;
-          if (isLockedRef.current) {
+          unlockStreak++;
+          if (unlockStreak >= 3 && isLockedRef.current) {
             isLockedRef.current = false;
+            autoSnapCooldownRef.current = false;
             setIsRegisterLocked(false);
           }
         }
       } catch {
-        // ignore frame read errors
+        // Ignore transient frame read error
       }
     };
 
-    // Throttled frame inspection (350ms) without speculative live guessing avoids WebView video flickering
-    liveAnalysisTimerRef.current = window.setInterval(checkLiveFrame, 350);
+    viewfinderTimerRef.current = window.setInterval(tickSnapshotViewfinder, 110);
 
     return () => {
-      if (liveAnalysisTimerRef.current) {
-        window.clearInterval(liveAnalysisTimerRef.current);
-        liveAnalysisTimerRef.current = null;
+      if (viewfinderTimerRef.current) {
+        window.clearInterval(viewfinderTimerRef.current);
+        viewfinderTimerRef.current = null;
       }
     };
   }, [isCameraActive]);
 
   const stopCamera = () => {
-    if (liveAnalysisTimerRef.current) {
-      window.clearInterval(liveAnalysisTimerRef.current);
-      liveAnalysisTimerRef.current = null;
+    pendingPermissionRetryRef.current = false;
+    imageCaptureRef.current = null;
+    if (viewfinderTimerRef.current) {
+      window.clearInterval(viewfinderTimerRef.current);
+      viewfinderTimerRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     isLockedRef.current = false;
+    autoSnapCooldownRef.current = false;
     setIsCameraActive(false);
     setIsRegisterLocked(false);
   };
 
   const startCamera = async () => {
+    if (isStartingCameraRef.current) return;
+    isStartingCameraRef.current = true;
     setOcrStatusMsg(null);
     setCameraPermissionNotice(false);
 
-    // Call native Android bridge if available to prompt for OS CAMERA permission
-    const win = window as any;
-    if (win.AndroidNative?.requestCameraPermission) {
-      try {
+    try {
+      const win = window as any;
+      if (win.AndroidNative?.hasCameraPermission && !win.AndroidNative.hasCameraPermission()) {
+        pendingPermissionRetryRef.current = true;
         win.AndroidNative.requestCameraPermission();
-      } catch {}
-    }
+        return;
+      }
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraPermissionNotice(true);
-      nativeCameraInputRef.current?.click();
-      return;
-    }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraPermissionNotice(true);
+        nativeCameraInputRef.current?.click();
+        return;
+      }
 
-    const candidateConstraints: MediaStreamConstraints[] = [
-      {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+      // Stop any existing stream before opening a fresh rear-camera snapshot feed
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+
+      const candidateConstraints: MediaStreamConstraints[] = [
+        {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
         },
-      },
-      { video: { facingMode: 'environment' } },
-      { video: { facingMode: { ideal: 'environment' } } },
-      { video: true },
-    ];
+        { video: { facingMode: 'environment' }, audio: false },
+        { video: { facingMode: { ideal: 'environment' } }, audio: false },
+        { video: true, audio: false },
+      ];
 
-    let stream: MediaStream | null = null;
-    let lastError: any = null;
-
-    for (const constraints of candidateConstraints) {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        if (stream) break;
-      } catch (err: any) {
-        lastError = err;
-        if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
-          break;
+      let stream: MediaStream | null = null;
+      for (const constraints of candidateConstraints) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (stream) break;
+        } catch (err: any) {
+          if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+            break;
+          }
         }
       }
-    }
 
-    if (stream) {
-      streamRef.current = stream;
-      setIsCameraActive(true);
-      setCameraPermissionNotice(false);
-      if (videoRef.current) {
-        videoRef.current.defaultMuted = true;
-        videoRef.current.muted = true;
-        videoRef.current.playsInline = true;
-        videoRef.current.setAttribute('playsinline', 'true');
-        videoRef.current.setAttribute('webkit-playsinline', 'true');
-        if (videoRef.current.srcObject !== stream) {
-          videoRef.current.srcObject = stream;
+      if (stream) {
+        streamRef.current = stream;
+        const [videoTrack] = stream.getVideoTracks();
+        if (videoTrack && 'ImageCapture' in window) {
+          try {
+            imageCaptureRef.current = new (window as any).ImageCapture(videoTrack);
+          } catch {
+            imageCaptureRef.current = null;
+          }
+        } else {
+          imageCaptureRef.current = null;
         }
-        videoRef.current.play().catch(() => {});
+
+        setIsCameraActive(true);
+        setCameraPermissionNotice(false);
+
+        if (videoRef.current) {
+          videoRef.current.defaultMuted = true;
+          videoRef.current.muted = true;
+          videoRef.current.playsInline = true;
+          videoRef.current.setAttribute('playsinline', 'true');
+          videoRef.current.setAttribute('webkit-playsinline', 'true');
+          if (videoRef.current.srcObject !== stream) {
+            videoRef.current.srcObject = stream;
+          }
+          videoRef.current.play().catch(() => {});
+        }
+      } else {
+        setIsCameraActive(false);
+        setCameraPermissionNotice(true);
+        setOcrStatusMsg(
+          'Camera permission is required for snapshots. Please allow Camera or tap "Phone Camera App".'
+        );
       }
-    } else {
-      setIsCameraActive(false);
-      setCameraPermissionNotice(true);
-      setOcrStatusMsg(
-        'Camera permission is required for live stream. Please allow Camera or tap "Snap with Phone Camera" below.'
-      );
+    } finally {
+      isStartingCameraRef.current = false;
     }
   };
 
   /**
-   * Reads photo, automatically inserts value into the target slot,
-   * crops the register value screenshot, and verifies hardware specifications.
+   * Reads photo, validates authentic electric sub-meter hardware,
+   * records it in the Collected Snapshots list, and inserts kWh into the target slot.
    */
   const runOcrOnDataUrl = async (
     dataUrl: string,
-    slot: 'prev' | 'curr'
+    slot: 'prev' | 'curr',
+    existingSnapshotId?: string
   ): Promise<void> => {
     setIsOcrRunning(true);
     setOcrProgress(15);
     setOcrStatusMsg(
-      `Reading & inspecting sub-meter dial for ${
+      `Inspecting sub-meter screenshot for ${
         slot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'
       }...`
     );
+
+    const snapshotId = existingSnapshotId || `snap_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const timeLabel = new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
 
     try {
       if (selectedRoom) {
@@ -503,6 +607,18 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         setOcrConfidence(0);
         setMeterInspection(result.inspection || null);
         setIsReadingsLocked(false);
+        setCollectedSnapshots((prev) => [
+          {
+            id: snapshotId,
+            dataUrl,
+            slot,
+            reading: null,
+            isAuthentic: false,
+            statusLabel: 'Rejected (Not Meter)',
+            capturedAt: timeLabel,
+          },
+          ...prev.filter((s) => s.id !== snapshotId),
+        ].slice(0, 6));
         setOcrStatusMsg(
           '⚠️ No Electric Sub-Meter Detected. Please frame a physical electric sub-meter dial.'
         );
@@ -513,14 +629,30 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         result.reading !== null && !Number.isNaN(result.reading);
       const detectedVal = isRecognized ? result.reading! : 0.0;
 
+      setCollectedSnapshots((prev) => [
+        {
+          id: snapshotId,
+          dataUrl: result.processedImageDataUrl || dataUrl,
+          slot,
+          reading: isRecognized ? detectedVal : null,
+          isAuthentic: true,
+          statusLabel: isRecognized
+            ? `${detectedVal.toFixed(1)} kWh`
+            : 'Meter Verified',
+          capturedAt: timeLabel,
+        },
+        ...prev.filter((s) => s.id !== snapshotId),
+      ].slice(0, 6));
+
       if (slot === 'prev') {
         setPrevMeterSnapshotUrl(result.processedImageDataUrl);
         setPrevMeterCropUrl(result.registerCropDataUrl);
         if (isRecognized) {
           setPrevReading(String(detectedVal));
         }
-        // Automatically switch focus to Current slot for convenient next step
+        // Automatically switch focus to Current slot for convenient next snapshot
         setTargetMeterSlot('curr');
+        autoSnapCooldownRef.current = false;
       } else {
         setCurrMeterSnapshotUrl(result.processedImageDataUrl);
         setCurrMeterCropUrl(result.registerCropDataUrl);
@@ -536,17 +668,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       if (isRecognized) {
         setOcrStatusMsg(
-          `✓ Verified & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
-            slot === 'prev' ? 'Previous Sub-Meter (#1)' : 'Current Sub-Meter (#2)'
-          }! Bill calculations updated.`
+          `✓ Collected & read ${detectedVal.toFixed(1)} kWh into ${
+            slot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'
+          }!`
         );
       } else {
         setOcrStatusMsg(
-          '✓ Sub-meter attached. Dial digits are blurry or obstructed. Please enter the kWh reading manually.'
+          '✓ Sub-meter snapshot collected. Digits are unclear—please verify kWh manually.'
         );
       }
     } catch {
-      setOcrStatusMsg('Photo attached. Please verify the kWh value below.');
+      setOcrStatusMsg('Snapshot attached. Please verify the kWh value below.');
     } finally {
       setIsOcrRunning(false);
       setOcrProgress(100);
@@ -604,23 +736,68 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     );
   };
 
-  const handleCaptureFromCamera = async () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const width = video.videoWidth || 1920;
-    const height = video.videoHeight || 1080;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(video, 0, 0, width, height);
-      const capturedDataUrl = canvas.toDataURL('image/jpeg', 0.96);
-      stopCamera();
-      await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot);
+  const readBlobAsDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') resolve(reader.result);
+        else reject(new Error('Failed to read captured photo blob'));
+      };
+      reader.onerror = () => reject(new Error('Blob FileReader error'));
+      reader.readAsDataURL(blob);
+    });
+
+  const captureHighResSnapshotAndScan = async (keepCameraOpen = true) => {
+    if (isOcrRunningRef.current) return;
+
+    // Brief visual shutter flash (no looping animations)
+    setShowShutterFlash(true);
+    window.setTimeout(() => setShowShutterFlash(false), 160);
+
+    let capturedDataUrl: string | null = null;
+
+    // 1. Prefer native hardware still capture via ImageCapture.takePhoto() for crisp autofocus
+    if (imageCaptureRef.current?.takePhoto) {
+      try {
+        const photoBlob: Blob = await Promise.race([
+          imageCaptureRef.current.takePhoto(),
+          new Promise<never>((_, reject) =>
+            window.setTimeout(() => reject(new Error('takePhoto timeout')), 1600)
+          ),
+        ]);
+        capturedDataUrl = await readBlobAsDataUrl(photoBlob);
+      } catch {
+        capturedDataUrl = null;
+      }
     }
+
+    // 2. Fallback to full-resolution offscreen camera frame capture
+    if (!capturedDataUrl && videoRef.current && videoRef.current.readyState >= 2) {
+      const video = videoRef.current;
+      const width = video.videoWidth || 1280;
+      const height = video.videoHeight || 720;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(video, 0, 0, width, height);
+        capturedDataUrl = canvas.toDataURL('image/jpeg', 0.96);
+      }
+    }
+
+    // 3. Final fallback to current 2D viewfinder canvas
+    if (!capturedDataUrl && viewfinderCanvasRef.current) {
+      capturedDataUrl = viewfinderCanvasRef.current.toDataURL('image/jpeg', 0.95);
+    }
+
+    if (!capturedDataUrl) return;
+    if (!keepCameraOpen) {
+      stopCamera();
+    }
+    await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1159,7 +1336,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     }`}
                   >
                     <Camera className="w-3.5 h-3.5" />
-                    <span>Live Camera Capture</span>
+                    <span>Snapshot Camera</span>
                   </button>
                 </div>
               )}
@@ -1185,50 +1362,32 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
                 {isMobileApp && scanTab === 'camera' ? (
                   isCameraActive ? (
-                    <div className="relative w-full">
-                      <div className="relative w-full h-48 sm:h-56 bg-black rounded-xl overflow-hidden border border-amber-500/40">
-                        <video
-                          ref={attachVideoRef}
-                          autoPlay
-                          playsInline
-                          muted
-                          controls={false}
-                          disablePictureInPicture
-                          {...({
-                            'webkit-playsinline': 'true',
-                            'x5-playsinline': 'true',
-                            'x5-video-player-type': 'h5-page',
-                            'x5-video-player-fullscreen': 'true',
-                            controlsList: 'nodownload nofullscreen noremoteplayback',
-                          } as React.HTMLAttributes<HTMLVideoElement>)}
-                          className="w-full h-full object-cover live-camera-video pointer-events-none"
-                          style={{
-                            objectFit: 'cover',
-                            transform: 'translateZ(0)',
-                            WebkitTransform: 'translateZ(0)',
-                            backfaceVisibility: 'hidden',
-                            WebkitBackfaceVisibility: 'hidden',
-                            willChange: 'transform',
-                            contain: 'paint',
-                          }}
-                          onLoadedMetadata={(e) => {
-                            const v = e.currentTarget;
-                            v.muted = true;
-                            v.defaultMuted = true;
-                            v.play().catch(() => {});
-                          }}
+                    <div className="relative w-full space-y-2.5">
+                      {/* Steady 2D Canvas Snapshot Viewfinder (no <video> layer in modal = zero flicker) */}
+                      <div className="relative w-full h-52 sm:h-60 bg-black rounded-xl overflow-hidden border border-amber-500/40">
+                        <canvas
+                          ref={viewfinderCanvasRef}
+                          width={640}
+                          height={360}
+                          className="w-full h-full object-cover block"
                         />
-                        {/* Live Viewfinder Reticle */}
+
+                        {/* Brief Still-Capture Shutter Cue */}
+                        {showShutterFlash && (
+                          <div className="absolute inset-0 bg-white/75 pointer-events-none" />
+                        )}
+
+                        {/* Snapshot Guide Box */}
                         <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-3">
                           <div
-                            className={`w-11/12 max-w-[340px] h-24 border-2 rounded-xl relative flex items-center justify-center transition-all duration-300 ${
+                            className={`w-11/12 max-w-[340px] h-24 border-2 rounded-xl relative flex items-center justify-center transition-colors duration-200 ${
                               isRegisterLocked
-                                ? 'border-emerald-400 bg-emerald-500/15 shadow-[0_0_25px_rgba(52,211,153,0.35)] ring-2 ring-emerald-400/50'
-                                : 'border-dashed border-amber-400 bg-black/25'
+                                ? 'border-emerald-400 bg-emerald-500/10'
+                                : 'border-dashed border-amber-400 bg-black/20'
                             }`}
                           >
                             <span
-                              className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded shadow border transition-colors duration-200 flex items-center gap-1.5 ${
+                              className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded shadow border flex items-center gap-1.5 ${
                                 isRegisterLocked
                                   ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60'
                                   : 'bg-slate-950/85 text-amber-300 border-amber-500/30'
@@ -1237,96 +1396,109 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                               {isRegisterLocked ? (
                                 <>
                                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                  <span>✓ Sub-Meter Dials Aligned (Ready to Snap)</span>
+                                  <span>✓ Meter Detected • Ready to Screenshot</span>
                                 </>
                               ) : (
-                                <span>Align Sub-Meter Register (5 Black + 1 Red Drums)</span>
+                                <span>Frame 5 Black + 1 Red Sub-Meter Drums</span>
                               )}
                             </span>
                             <div
-                              className={`absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 transition-colors ${
+                              className={`absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 ${
                                 isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
                               }`}
                             />
                             <div
-                              className={`absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 transition-colors ${
+                              className={`absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 ${
                                 isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
                               }`}
                             />
                             <div
-                              className={`absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 transition-colors ${
+                              className={`absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 ${
                                 isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
                               }`}
                             />
                             <div
-                              className={`absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 transition-colors ${
+                              className={`absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 ${
                                 isRegisterLocked ? 'border-emerald-400' : 'border-amber-400'
                               }`}
                             />
                           </div>
                           <span
-                            className={`text-[9px] px-2 py-0.5 rounded mt-2 transition-colors duration-200 ${
+                            className={`text-[9px] px-2 py-0.5 rounded mt-2 ${
                               isRegisterLocked
-                                ? 'bg-emerald-950/80 text-emerald-300 font-semibold'
-                                : 'bg-slate-950/70 text-slate-300'
+                                ? 'bg-emerald-950/85 text-emerald-300 font-semibold'
+                                : 'bg-slate-950/75 text-slate-300'
                             }`}
                           >
                             {isRegisterLocked
-                              ? '✓ Sub-meter detected • Tap snap to scan'
-                              : 'Center dial drums inside guide box'}
+                              ? autoSnapEnabled
+                                ? 'Auto-Snap armed • Holding steady captures photo'
+                                : 'Tap Screenshot below to collect image'
+                              : 'Zero-video still viewfinder • Hold steady on kWh dial'}
                           </span>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 mt-2.5">
+
+                      {/* Primary Snapshot Capture Button + Compact 3-Column Utility Row */}
+                      <div className="space-y-2">
                         <button
                           type="button"
-                          onClick={handleCaptureFromCamera}
+                          onClick={() => void captureHighResSnapshotAndScan(true)}
                           disabled={isOcrRunning}
-                          className={`flex-1 min-w-[200px] py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all active:scale-95 ${
+                          className={`w-full py-2.5 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-colors active:scale-95 ${
                             isRegisterLocked
-                              ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30 ring-2 ring-emerald-300'
+                              ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/25'
                               : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
                           }`}
                         >
                           {isOcrRunning ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin" />
-                              <span>Reading & Inspecting...</span>
-                            </>
-                          ) : isRegisterLocked ? (
-                            <>
-                              <CheckCircle2 className="w-4 h-4 text-slate-950" />
-                              <span>
-                                ✓ Snap & Scan Sub-Meter into{' '}
-                                {targetMeterSlot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'}
-                              </span>
+                              <span>Analyzing Screenshot...</span>
                             </>
                           ) : (
                             <>
                               <Camera className="w-4 h-4" />
                               <span>
-                                Snap & Scan Sub-Meter into{' '}
-                                {targetMeterSlot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'}
+                                {isRegisterLocked ? '✓ Take Meter Screenshot → ' : 'Take Screenshot → '}
+                                {targetMeterSlot === 'prev' ? 'Slot #1 (Prev)' : 'Slot #2 (Curr)'}
                               </span>
                             </>
                           )}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => nativeCameraInputRef.current?.click()}
-                          className="px-3 py-2.5 rounded-xl bg-[#1B2333] hover:bg-[#25324A] border border-[#28364F] text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
-                          title="Open device native camera app"
-                        >
-                          <Camera className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Device App</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={stopCamera}
-                          className="px-3 py-2.5 rounded-xl bg-[#141A25] hover:bg-[#1E2738] border border-slate-700 text-slate-400 hover:text-white text-xs font-bold cursor-pointer transition"
-                        >
-                          Close
-                        </button>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setAutoSnapEnabled((prev) => !prev)}
+                            className={`py-2 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center cursor-pointer transition whitespace-nowrap ${
+                              autoSnapEnabled
+                                ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
+                                : 'bg-[#141A25] border-[#28364F] text-slate-300 hover:text-white'
+                            }`}
+                            title="Automatically take a snapshot once sub-meter locks steady"
+                          >
+                            Auto-Snap: {autoSnapEnabled ? 'ON' : 'OFF'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => nativeCameraInputRef.current?.click()}
+                            className="py-2 px-2 rounded-xl bg-[#1B2333] hover:bg-[#25324A] border border-[#28364F] text-slate-300 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition whitespace-nowrap"
+                            title="Open device native camera app"
+                          >
+                            <Camera className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>Phone Cam</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={stopCamera}
+                            className="py-2 px-2 rounded-xl bg-[#141A25] hover:bg-[#1E2738] border border-slate-700 text-slate-400 hover:text-white text-[11px] font-bold flex items-center justify-center cursor-pointer transition"
+                          >
+                            Close
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -1335,32 +1507,32 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         <Camera className="w-6 h-6" />
                       </div>
                       <p className="text-xs font-bold text-white">
-                        Live Camera —{' '}
+                        Snapshot Camera —{' '}
                         {targetMeterSlot === 'prev'
                           ? 'Slot #1 (Previous)'
                           : 'Slot #2 (Current)'}
                       </p>
                       <p className="text-[11px] text-slate-400 mt-0.5 max-w-sm mx-auto">
-                        Auto-focuses & locks sub-meter digits.
+                        Non-flickering viewfinder collects clear meter screenshots for Slot #1 &amp; Slot #2.
                       </p>
                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2 mt-3.5 max-w-sm mx-auto">
                         <button
                           type="button"
                           onClick={startCamera}
                           className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs inline-flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20 transition active:scale-95"
-                          title="Start live video stream inside app"
+                          title="Open zero-flicker snapshot viewfinder"
                         >
                           <Camera className="w-4 h-4" />
-                          <span>Start Live Camera</span>
+                          <span>Open Snapshot Camera</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => nativeCameraInputRef.current?.click()}
                           className="px-3.5 py-2.5 rounded-xl bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-200 font-bold text-xs inline-flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
-                          title="Open phone camera with auto-focus & flash"
+                          title="Open phone native camera app to take a photo"
                         >
                           <Camera className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Snap via Device Camera App</span>
+                          <span>Phone Camera App</span>
                         </button>
                       </div>
 
@@ -1373,24 +1545,18 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                                 Camera Permission Required
                               </strong>
                               <span>
-                                Camera permission needed to scan live sub-meter readings.
+                                Camera permission is needed to take sub-meter screenshots.
                               </span>
                             </div>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
                             <button
                               type="button"
-                              onClick={() => {
-                                const win = window as any;
-                                if (win.AndroidNative?.requestCameraPermission) {
-                                  win.AndroidNative.requestCameraPermission();
-                                }
-                                startCamera();
-                              }}
+                              onClick={startCamera}
                               className="py-2 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
                             >
                               <Camera className="w-3.5 h-3.5" />
-                              <span>Allow & Retry</span>
+                              <span>Allow &amp; Retry</span>
                             </button>
                             <button
                               type="button"
@@ -1398,7 +1564,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                               className="py-2 px-2.5 rounded-lg bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
                             >
                               <Camera className="w-3.5 h-3.5 text-amber-400" />
-                              <span>Device App</span>
+                              <span>Phone Cam</span>
                             </button>
                             <button
                               type="button"
@@ -1459,6 +1625,87 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         <Camera className="w-3.5 h-3.5 text-amber-400" />
                         <span>Snap Photo</span>
                       </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Collected Screenshots Tray */}
+                {collectedSnapshots.length > 0 && (
+                  <div className="w-full mt-3 pt-3 border-t border-[#1E2638] space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-slate-200">
+                        Collected Meter Snapshots ({collectedSnapshots.length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCollectedSnapshots([])}
+                        className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {collectedSnapshots.map((snap) => (
+                        <div
+                          key={snap.id}
+                          className={`rounded-xl border p-1.5 bg-[#0E131D] flex flex-col gap-1.5 ${
+                            snap.isAuthentic
+                              ? 'border-emerald-500/40'
+                              : 'border-red-500/40 opacity-85'
+                          }`}
+                        >
+                          <div className="relative h-14 rounded-lg overflow-hidden bg-black">
+                            <img
+                              src={snap.dataUrl}
+                              alt="Collected meter snapshot"
+                              className="w-full h-full object-cover"
+                            />
+                            <span
+                              className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                snap.isAuthentic
+                                  ? 'bg-emerald-950/90 text-emerald-300'
+                                  : 'bg-red-950/90 text-red-300'
+                              }`}
+                            >
+                              {snap.statusLabel}
+                            </span>
+                          </div>
+                          {snap.isAuthentic ? (
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void runOcrOnDataUrl(snap.dataUrl, 'prev', snap.id)
+                                }
+                                className="py-1 rounded bg-[#182132] hover:bg-amber-500 hover:text-slate-950 text-[10px] font-bold text-slate-200 cursor-pointer transition"
+                              >
+                                Use #1
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void runOcrOnDataUrl(snap.dataUrl, 'curr', snap.id)
+                                }
+                                className="py-1 rounded bg-[#182132] hover:bg-amber-500 hover:text-slate-950 text-[10px] font-bold text-slate-200 cursor-pointer transition"
+                              >
+                                Use #2
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCollectedSnapshots((prev) =>
+                                  prev.filter((item) => item.id !== snap.id)
+                                )
+                              }
+                              className="py-1 rounded bg-red-950/50 hover:bg-red-900/60 text-[10px] font-bold text-red-300 cursor-pointer transition"
+                            >
+                              Dismiss
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -2106,6 +2353,35 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         roiCropUrl={lightboxState.roiCropUrl}
         readingValue={lightboxState.readingValue}
       />
+
+      {/* Hidden offscreen camera stream feeder (never visible in modal UI = zero WebView video flicker) */}
+      {isCameraActive && (
+        <video
+          ref={attachOffscreenVideoRef}
+          aria-hidden="true"
+          autoPlay
+          playsInline
+          muted
+          controls={false}
+          disablePictureInPicture
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            right: 0,
+            width: '2px',
+            height: '2px',
+            opacity: 0.005,
+            pointerEvents: 'none',
+            zIndex: -1,
+          }}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            v.muted = true;
+            v.defaultMuted = true;
+            v.play().catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 };
