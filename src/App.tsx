@@ -65,6 +65,7 @@ import { ArchiveCenterView } from './components/archive/ArchiveCenterView';
 import { SubMeterScannerModal } from './components/ocr/SubMeterScannerModal';
 import { ReceiptModal } from './components/receipt/ReceiptModal';
 import { SettingsView } from './components/settings/SettingsView';
+import { DownloadAppsModal } from './components/modals/DownloadAppsModal';
 
 const DEVICE_NOTIFICATION_PROMPTED_KEY = '4rent_notification_prompted_device';
 
@@ -82,6 +83,7 @@ export function App() {
 
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [showBootSplash, setShowBootSplash] = useState<boolean>(true);
   const [showUnlockSplash, setShowUnlockSplash] = useState<boolean>(false);
   const [isLocked, setIsLocked] = useState<boolean>(
@@ -1633,6 +1635,7 @@ export function App() {
         onTogglePrivacyMask={handleTogglePrivacyMask}
         onLockApp={() => setIsLocked(true)}
         hasRooms={rooms.filter((r) => !r.isArchived).length > 0}
+        onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
       />
 
       <main className="flex-1 min-w-0">
@@ -1657,6 +1660,7 @@ export function App() {
             }
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onOpenWalkthrough={() => setIsWalkthroughOpen(true)}
+            onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
           />
         )}
 
@@ -1754,6 +1758,7 @@ export function App() {
             onReloadAllData={handleReloadAllData}
             onOpenSecuritySetup={() => setShowSecuritySetup(true)}
             onInstallDesktopApp={handleInstallDesktopApp}
+            onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
           />
         )}
       </main>
@@ -1886,6 +1891,13 @@ export function App() {
       <FeedbackToastBar
         notification={feedbackToast}
         onDismiss={() => setFeedbackToast(null)}
+      />
+
+      {/* Official System Apps (Windows .EXE & Android .APK) Download Center Modal */}
+      <DownloadAppsModal
+        isOpen={isDownloadModalOpen}
+        onClose={() => setIsDownloadModalOpen(false)}
+        propertyCode={settings.cloudSync.propertyCode || '4RENT-MAIN'}
       />
     </div>
   );

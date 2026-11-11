@@ -15,28 +15,30 @@
 
 Landlords do **not** need to install Node.js, Python, Git, or any complex developer tools:
 
-### 🖥️ Windows Desktop (100% Zero-Installation Full-Screen App)
-1. Download **`4Rent Launcher.bat`** from the [`packages/desktop/`](./packages/desktop/) directory.
-2. Double-click **`4Rent Launcher.bat`**.
-3. It automatically creates an official **4Rent Management System** shortcut directly on the landlord's Windows Desktop and launches 4Rent in **Full-Screen Standalone App Mode** via built-in Microsoft Edge / Google Chrome!
+### 🖥️ Windows Desktop Launcher (Official Portable Standalone `.EXE`)
+1. Download **`4Rent-Launcher.exe`** directly from the live web app or the [`packages/desktop/`](./packages/desktop/) directory.
+2. Double-click **`4Rent-Launcher.exe`** (no installation required).
+3. The sleek launcher lets you enter your **Property Space Code**, creates an official **4Rent Management System** desktop shortcut with the high-resolution system logo, and opens 4Rent in an isolated, borderless standalone desktop window host!
 
-### 📱 Android Mobile App (Offline / Mobile Data / Wi-Fi)
-1. Download **`4Rent-v1.0.0-release.apk`** from the [`packages/mobile/`](./packages/mobile/) directory.
-2. Install the APK on your Android phone or tablet.
-3. The app runs fully standalone with offline IndexedDB local storage, camera permissions for sub-meter capture, OS notification reminders, and real-time cloud synchronization.
+### 📱 Android Mobile App (Offline-First `.APK`)
+1. Download **`4Rent-v1.0.0-release.apk`** directly from the live web app or the [`packages/mobile/`](./packages/mobile/) directory.
+2. Install the APK on your Android device (Android 7.0+).
+3. Features real-time Sub-Meter OCR live camera with auto-reticle green lock, direct 1-tap Facebook Messenger receipt forwarding, offline IndexedDB storage, and instant cloud sync.
 
 ---
 
-## 📦 Packages Directory (Ready for GitHub Distribution)
+## 📦 Packages Directory (Ready for Direct Download)
 
-All distributables are cleanly isolated in the [`packages/`](./packages/) directory:
+All official distributables are cleanly compiled and hosted for direct download:
 
 ```text
 packages/
 ├── desktop/
-│   └── 4Rent Launcher.bat          # Standalone full-screen Desktop launcher
+│   ├── 4Rent-Launcher.exe          # Official standalone Windows Desktop launcher (~39 KB)
+│   ├── 4rent-icon.ico              # Multi-resolution official system icon
+│   └── src/LauncherProgram.cs      # Portable C# WinForms source
 └── mobile/
-    └── 4Rent-v1.0.0-release.apk     # Standalone Android release APK
+    └── 4Rent-v1.0.0-release.apk     # Standalone cryptographically signed Android APK (~323 KB)
 ```
 
 ---

@@ -3,6 +3,7 @@ import {
   Archive,
   CalendarCheck,
   DoorOpen,
+  Download,
   Eye,
   EyeOff,
   LayoutGrid,
@@ -10,6 +11,7 @@ import {
   ReceiptText,
   Settings,
   ShieldCheck,
+  Smartphone,
   X,
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
@@ -24,6 +26,7 @@ interface NavigationDrawerProps {
   onTogglePrivacyMask?: () => void;
   onLockApp: () => void;
   hasRooms: boolean;
+  onOpenDownloadModal?: () => void;
 }
 
 export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
@@ -34,6 +37,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
   onSelectTab,
   onTogglePrivacyMask,
   onLockApp,
+  onOpenDownloadModal,
 }) => {
   const navItems: {
     id: NavigationTab;
@@ -156,6 +160,33 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
               >
                 {privacyMaskEnabled ? 'Masked' : 'Visible'}
               </span>
+            </button>
+          </div>
+        )}
+
+        {/* Direct Download Apps Card */}
+        {onOpenDownloadModal && (
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                onCloseMobile();
+                onOpenDownloadModal();
+              }}
+              className="w-full text-left p-3.5 rounded-2xl bg-gradient-to-br from-[#162133] to-[#121A28] border border-amber-500/35 hover:border-amber-500/70 shadow-lg shadow-amber-500/10 transition-all duration-300 cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2.5 text-xs font-extrabold text-white group-hover:text-amber-400 transition-colors">
+                  <Download className="w-4 h-4 text-amber-400 group-hover:animate-bounce" />
+                  <span>Download Apps</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-mono text-[9px] font-black border border-amber-500/40">
+                  EXE &amp; APK
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                Windows Launcher &amp; Offline Android App
+              </p>
             </button>
           </div>
         )}

@@ -9,14 +9,17 @@ import {
   Camera,
   ChevronRight,
   DoorOpen,
+  Download,
   Eye,
   EyeOff,
   Home,
+  Laptop,
   Menu,
   Plus,
   ReceiptText,
   Settings,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   TrendingUp,
   User,
@@ -51,6 +54,7 @@ interface DashboardViewProps {
   onSelectBillForReceipt: (bill: BillRecord) => void;
   onOpenAdvanceBalanceModal: (room: Room) => void;
   onSelectRoomDetails: (room: Room) => void;
+  onOpenDownloadModal?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -68,6 +72,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectBillForReceipt,
   onOpenAdvanceBalanceModal,
   onSelectRoomDetails,
+  onOpenDownloadModal,
 }) => {
   const [now, setNow] = useState(new Date());
 
@@ -168,6 +173,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5">
+          {onOpenDownloadModal && (
+            <button
+              type="button"
+              onClick={onOpenDownloadModal}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
+              title="Download 4Rent Windows Launcher (.exe) & Android Mobile App (.apk)"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              <span>Get Apps</span>
+              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold">
+                EXE/APK
+              </span>
+            </button>
+          )}
+
           {onOpenWalkthrough && (
             <button
               type="button"
@@ -323,6 +343,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           >
             Review Balances
           </button>
+        </section>
+      )}
+
+      {/* 4Rent System Apps Direct Download Banner */}
+      {onOpenDownloadModal && (
+        <section className="rounded-3xl bg-gradient-to-r from-[#141C2B] via-[#162133] to-[#121A28] border border-[#26354D] p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-xl">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0 shadow-inner">
+              <Download className="w-6 h-6 text-amber-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-extrabold text-white">
+                  Get Official 4Rent Windows &amp; Android Apps
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold">
+                  v1.1.0
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-slate-300 mt-1">
+                Install the zero-setup Windows Desktop Launcher (.exe) and offline-first Android App (.apk) with live Sub-Meter OCR scanner.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenDownloadModal}
+              className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download EXE / APK</span>
+            </button>
+          </div>
         </section>
       )}
 
