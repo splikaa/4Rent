@@ -507,15 +507,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="text-xs font-bold text-white flex items-center gap-2">
-                <span>Property Sync Code:</span>
-                <code className="px-2 py-0.5 rounded bg-[#182235] text-amber-400 font-mono-num font-bold">
-                  {form.cloudSync.propertyCode || '4RENT-MAIN'}
-                </code>
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-white mb-1.5">
+                Property Space Code (Multi-User Partition):
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={form.cloudSync.propertyCode || '4RENT-MAIN'}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      cloudSync: {
+                        ...form.cloudSync,
+                        propertyCode: e.target.value.trim().toUpperCase(),
+                        enabled: true,
+                      },
+                    })
+                  }
+                  placeholder="e.g. 4R-7K2M"
+                  className="h-9 px-3 rounded-xl bg-[#151B26] border border-amber-500/40 text-amber-400 font-mono font-bold text-xs uppercase focus:outline-none focus:border-amber-400 min-w-[140px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const randomCode = '4R-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+                    setForm({
+                      ...form,
+                      cloudSync: {
+                        ...form.cloudSync,
+                        propertyCode: randomCode,
+                        enabled: true,
+                      },
+                    });
+                  }}
+                  className="px-2.5 py-2 rounded-xl bg-[#1A2334] hover:bg-[#233047] border border-[#2B3B59] text-[11px] font-bold text-amber-300 transition cursor-pointer"
+                  title="Generate a unique random property space code for this device"
+                >
+                  Generate New Code
+                </button>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                All records, meter proofs, and payments sync between Mobile and Desktop using this code.
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                Each code creates an isolated property partition in Firebase so multiple landlords never share or overwrite data. Share this code to pair your phone and PC.
               </p>
             </div>
 

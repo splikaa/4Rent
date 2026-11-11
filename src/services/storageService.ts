@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     requirePinForSensitiveActions: true,
   },
   cloudSync: {
-    enabled: false,
+    enabled: true,
     provider: 'firebase',
     firebaseProjectId: DEV_FIREBASE_PROJECT_ID,
     firebaseApiKey: DEV_FIREBASE_API_KEY,

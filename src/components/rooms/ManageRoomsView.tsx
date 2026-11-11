@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Trash2,
   UserMinus,
+  UserPlus,
   Wallet,
 } from 'lucide-react';
 import { BillRecord, Room } from '../../types/rental';
@@ -346,14 +347,26 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onOpenScanMeter(room)}
-                        className="px-4 py-2.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/15 btn-fluid"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>Scan Meter & Bill</span>
-                      </button>
+                      {isOccupied ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenScanMeter(room)}
+                          className="px-4 py-2.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/15 btn-fluid"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Scan Meter & Bill</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onOpenEditRoom(room)}
+                          className="px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-emerald-500/20 btn-fluid"
+                          title="Assign a tenant to this vacant room"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                          <span>Assign Tenant / Occupy</span>
+                        </button>
+                      )}
 
                       {isOccupied && (
                         <button

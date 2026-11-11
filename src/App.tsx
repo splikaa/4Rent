@@ -1781,6 +1781,7 @@ export function App() {
       <RoomFormModal
         isOpen={isRoomModalOpen}
         initialRoom={editingRoom}
+        existingRooms={rooms}
         defaultRent={settings.defaultMonthlyRent}
         globalElectricRate={settings.defaultElectricRate}
         onClose={() => {

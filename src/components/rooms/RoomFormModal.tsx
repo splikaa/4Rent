@@ -24,6 +24,7 @@ interface RoomFormModalProps {
   initialRoom?: Room | null;
   defaultRent: number;
   globalElectricRate: number; // Strictly controlled from Settings
+  existingRooms?: Room[];
   onClose: () => void;
   onSave: (
     roomData: Omit<Room, 'id' | 'updatedAt'>,
@@ -37,6 +38,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   initialRoom,
   defaultRent,
   globalElectricRate,
+  existingRooms,
   onClose,
   onSave,
 }) => {
@@ -153,12 +155,47 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    if (!name.trim()) return;
+
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setFormError('Please enter a Room Name or Number (e.g. "Room 1", "Unit 202").');
+      return;
+    }
+
+    if (existingRooms && existingRooms.length > 0) {
+      const isDuplicate = existingRooms.some(
+        (r) =>
+          r.id !== initialRoom?.id &&
+          !r.isArchived &&
+          r.name.trim().toLowerCase() === cleanName.toLowerCase()
+      );
+      if (isDuplicate) {
+        setFormError(`A room with the name "${cleanName}" already exists. Please choose a unique room name or number.`);
+        return;
+      }
+    }
+
+    const rentNum = parseFloat(monthlyRent) || 0;
+    if (rentNum <= 0) {
+      setFormError('Monthly Base Rent must be greater than ₱0.00.');
+      return;
+    }
 
     if (reqDepNum <= 0) {
       setFormError(
         'A Security Deposit (> ₱0.00) is required for every apartment room.'
       );
+      return;
+    }
+
+    const meterNum = parseFloat(lastMeterReading) || 0;
+    if (meterNum < 0) {
+      setFormError('Sub-Meter reading cannot be negative.');
+      return;
+    }
+
+    if (status === 'occupied' && !tenantName.trim()) {
+      setFormError('Occupied rooms require a Registered Tenant Full Name. If the room is vacant, set Room Status to "Vacant".');
       return;
     }
 

@@ -1,0 +1,34 @@
+========================================================================
+   4Rent Management System v1.0.0 — Official Windows Desktop Launcher
+========================================================================
+
+ABOUT:
+`4Rent-Launcher.exe` is the native standalone Windows desktop launcher for the 
+4Rent Apartment & Sub-Meter Management System. It runs directly on any Windows 
+10 or Windows 11 PC with zero installation or administrative rights required.
+
+HOW TO USE:
+1. Double-click `4Rent-Launcher.exe`.
+2. The 4Rent Desktop Launcher window will open with the official system logo.
+3. Click "▶ Launch 4Rent Standalone Desktop App":
+   - Launches 4Rent in an isolated, distraction-free desktop window (using 
+     built-in Microsoft Edge or Google Chrome app runtime).
+   - Runs in maximized full-screen with zero browser address bars or tabs.
+4. Click "📌 Pin / Create Windows Desktop Shortcut":
+   - Automatically places a shortcut named "4Rent Management System" on your 
+     Windows Desktop with the official 4Rent system icon.
+
+MULTI-USER DATA PARTITIONING:
+- In the "Property Space Code" box, you can specify your property's unique code 
+  (defaults to `4RENT-MAIN`, or enter your custom code like `4R-PROPERTY1`).
+- All rooms, sub-meter readings, tenant profiles, and receipts are isolated to 
+  that Property Code.
+- To sync between your Windows PC and your Android Mobile APK, use the same 
+  Property Code on both devices!
+
+COMMAND-LINE SHORTCUTS:
+- `4Rent-Launcher.exe --launch`
+  Launches directly into the standalone application without showing the setup dialog.
+- `4Rent-Launcher.exe --silent 4RENT-MAIN`
+  Launches directly into the specified Property Space Code.
+========================================================================

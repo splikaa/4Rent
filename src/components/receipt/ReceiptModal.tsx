@@ -124,7 +124,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       setIsExporting(true);
       const dataUrl = await toPng(receiptRef.current, {
         cacheBust: true,
-        pixelRatio: 2.5,
+        pixelRatio: 2,
+        skipFonts: true,
         backgroundColor: '#FFFFFF',
       });
       return dataUrl;
@@ -260,7 +261,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         )}
 
         {/* Printable White-Paper Sheet Container */}
-        <div className="receipt-sheet-container flex-1 overflow-y-auto p-2 sm:p-5 md:p-6 bg-[#090D15] flex justify-center">
+        <div className="receipt-sheet-container flex-1 overflow-y-auto p-2 sm:p-5 md:p-6 pb-28 sm:pb-36 bg-[#090D15] flex justify-center">
           {/* Authentic Typeset Document Container — 100% White Surface with High-Contrast Typography */}
           <div
             ref={receiptRef}
@@ -380,7 +381,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               {/* Dual Sub-Meter Columns: Slot 1 Previous vs Slot 2 Current */}
               <div className="grid grid-cols-2 gap-3 mb-2.5">
                 {/* Previous Reading */}
-                <div className="rounded-lg border border-slate-300 bg-white p-2 sm:p-2.5">
+                <div className="rounded-lg border border-slate-300 bg-white p-2 sm:p-2.5 flex flex-col justify-between">
                   <div className="flex items-center justify-between text-[10px] mb-1.5 pb-1 border-b border-slate-200">
                     <span className="font-bold uppercase text-slate-600">
                       1. Previous Reading
@@ -389,43 +390,34 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       {bill.prevReading.toFixed(1)} kWh
                     </span>
                   </div>
-                  <div className="space-y-1.5">
-                    {prevMeterProofImg && (
-                      <div
-                        onClick={() =>
-                          openLightbox(
-                            prevMeterProofImg,
-                            `Previous Sub-Meter Photo Proof — ${bill.roomName}`,
-                            prevMeterCropImg,
-                            `${bill.prevReading.toFixed(1)} kWh`
-                          )
-                        }
-                        className="relative group cursor-zoom-in overflow-hidden rounded bg-slate-100 border border-slate-200"
-                        title="Click to inspect full-resolution 1:1 proof photo"
-                      >
-                        <img
-                          src={prevMeterProofImg}
-                          alt="Previous Sub-Meter Photo Proof"
-                          className="w-full h-24 sm:h-32 object-contain group-hover:scale-105 transition duration-150"
-                        />
-                        <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1.5 text-xs font-bold text-white transition">
-                          <ZoomIn className="w-4 h-4 text-amber-400" />
-                          <span>100% Lossless Inspect</span>
-                        </div>
-                      </div>
-                    )}
-                    {prevMeterCropImg && (
+                  {prevMeterProofImg && (
+                    <div
+                      onClick={() =>
+                        openLightbox(
+                          prevMeterProofImg,
+                          `Previous Sub-Meter Proof — ${bill.roomName}`,
+                          prevMeterCropImg,
+                          `${bill.prevReading.toFixed(1)} kWh`
+                        )
+                      }
+                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 sm:h-28"
+                      title="Click to inspect full 1:1 HD sub-meter proof"
+                    >
                       <img
-                        src={prevMeterCropImg}
-                        alt="Previous Value Zoomed Crop"
-                        className="w-full h-12 sm:h-14 object-contain rounded bg-slate-950 border border-emerald-600/60 shadow-sm"
+                        src={prevMeterProofImg}
+                        alt="Previous Sub-Meter Reading Proof"
+                        className="w-full h-full object-contain group-hover:scale-105 transition duration-150"
                       />
-                    )}
-                  </div>
+                      <div className="absolute bottom-1 right-1.5 px-2 py-0.5 rounded bg-slate-950/75 text-[9px] font-bold text-amber-300 flex items-center gap-1 shadow-sm backdrop-blur-xs">
+                        <ZoomIn className="w-3 h-3 text-amber-400" />
+                        <span>Inspect HD Proof</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Current Reading */}
-                <div className="rounded-lg border border-slate-300 bg-white p-2 sm:p-2.5">
+                <div className="rounded-lg border border-slate-300 bg-white p-2 sm:p-2.5 flex flex-col justify-between">
                   <div className="flex items-center justify-between text-[10px] mb-1.5 pb-1 border-b border-slate-200">
                     <span className="font-bold uppercase text-slate-600">
                       2. Current Reading
@@ -434,46 +426,37 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       {bill.currReading.toFixed(1)} kWh
                     </span>
                   </div>
-                  <div className="space-y-1.5">
-                    {currMeterProofImg && (
-                      <div
-                        onClick={() =>
-                          openLightbox(
-                            currMeterProofImg,
-                            `Current Sub-Meter Photo Proof — ${bill.roomName}`,
-                            currMeterCropImg,
-                            `${bill.currReading.toFixed(1)} kWh`
-                          )
-                        }
-                        className="relative group cursor-zoom-in overflow-hidden rounded bg-slate-100 border border-slate-200"
-                        title="Click to inspect full-resolution 1:1 proof photo"
-                      >
-                        <img
-                          src={currMeterProofImg}
-                          alt="Current Sub-Meter Photo Proof"
-                          className="w-full h-24 sm:h-32 object-contain group-hover:scale-105 transition duration-150"
-                        />
-                        <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1.5 text-xs font-bold text-white transition">
-                          <ZoomIn className="w-4 h-4 text-amber-400" />
-                          <span>100% Lossless Inspect</span>
-                        </div>
-                      </div>
-                    )}
-                    {currMeterCropImg && (
+                  {currMeterProofImg && (
+                    <div
+                      onClick={() =>
+                        openLightbox(
+                          currMeterProofImg,
+                          `Current Sub-Meter Proof — ${bill.roomName}`,
+                          currMeterCropImg,
+                          `${bill.currReading.toFixed(1)} kWh`
+                        )
+                      }
+                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 sm:h-28"
+                      title="Click to inspect full 1:1 HD sub-meter proof"
+                    >
                       <img
-                        src={currMeterCropImg}
-                        alt="Current Value Zoomed Crop"
-                        className="w-full h-12 sm:h-14 object-contain rounded bg-slate-950 border border-amber-600/60 shadow-sm"
+                        src={currMeterProofImg}
+                        alt="Current Sub-Meter Reading Proof"
+                        className="w-full h-full object-contain group-hover:scale-105 transition duration-150"
                       />
-                    )}
-                  </div>
+                      <div className="absolute bottom-1 right-1.5 px-2 py-0.5 rounded bg-slate-950/75 text-[9px] font-bold text-amber-300 flex items-center gap-1 shadow-sm backdrop-blur-xs">
+                        <ZoomIn className="w-3 h-3 text-amber-400" />
+                        <span>Inspect HD Proof</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Exact Formula & Calculation Breakdown */}
               <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-1 text-xs text-slate-800">
                 <span>
-                  Consumption Computation:{' '}
+                  Computation:{' '}
                   <strong className="font-mono-num text-slate-950 font-bold">
                     {bill.currReading.toFixed(1)} kWh − {bill.prevReading.toFixed(1)} kWh ={' '}
                     {bill.consumptionKwh.toFixed(1)} kWh
@@ -495,7 +478,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               <div className="divide-y divide-slate-200 text-xs">
                 {/* Base Rent */}
                 <div className="px-3 py-2 flex justify-between text-slate-800">
-                  <span>1. Monthly Apartment Unit Base Rent</span>
+                  <span>1. Monthly Base Rent</span>
                   <span className="font-mono-num font-bold text-slate-950">
                     {formatPeso(bill.baseRent)}
                   </span>
@@ -504,7 +487,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {/* Sub-Meter Electricity */}
                 <div className="px-3 py-2 flex justify-between text-slate-800">
                   <span>
-                    2. Electric Sub-Meter Consumption ({bill.consumptionKwh.toFixed(1)}{' '}
+                    2. Sub-Meter Electricity ({bill.consumptionKwh.toFixed(1)}{' '}
                     kWh @ {formatPeso(bill.electricRate)}/kWh)
                   </span>
                   <span className="font-mono-num font-bold text-slate-950">
@@ -515,7 +498,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {/* Carried Over Unpaid Balance */}
                 {bill.previousBalanceCarryOver > 0 && (
                   <div className="px-3 py-2 flex justify-between text-red-700 font-bold bg-red-50/50">
-                    <span>3. Previous Unpaid Balance (Carried Over)</span>
+                    <span>3. Unpaid Balance Carried Over</span>
                     <span className="font-mono-num">
                       {formatPeso(bill.previousBalanceCarryOver)}
                     </span>
@@ -525,7 +508,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {/* Advance Balance Applied */}
                 {bill.depositApplied > 0 && (
                   <div className="px-3 py-2 flex justify-between text-emerald-700 font-bold bg-emerald-50/50">
-                    <span>4. Advance Balance Deducted / Applied</span>
+                    <span>4. Advance Balance Deducted</span>
                     <span className="font-mono-num">
                       −{formatPeso(bill.depositApplied)}
                     </span>
@@ -537,7 +520,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   <div className="px-3 py-1.5 flex justify-between text-[11px] text-slate-600 bg-slate-50/60">
                     <span className="inline-flex items-center gap-1">
                       <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      Security Deposit Held on File (Non-Deductible Reference)
+                      Security Deposit (Reference Only)
                     </span>
                     <span className="font-mono-num font-semibold">
                       {formatPeso(bill.securityDepositRequired)}

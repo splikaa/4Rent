@@ -7,6 +7,7 @@ import {
   Calendar,
   CalendarCheck,
   Camera,
+  ChevronRight,
   DoorOpen,
   Eye,
   EyeOff,
@@ -19,6 +20,7 @@ import {
   Sparkles,
   TrendingUp,
   User,
+  UserPlus,
   Wallet,
   Zap,
 } from 'lucide-react';
@@ -538,14 +540,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => onOpenScanMeter(room)}
-                        className="flex-1 py-3 px-3.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid"
-                      >
-                        <Camera className="w-4 h-4" />
-                        <span>OCR Sub-Meter & Bill</span>
-                      </button>
+                      {isOccupied ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenScanMeter(room)}
+                          className="flex-1 py-3 px-3.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-lg shadow-amber-500/15"
+                        >
+                          <Camera className="w-4 h-4" />
+                          <span>OCR Sub-Meter & Bill</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onSelectRoomDetails(room)}
+                          className="flex-1 py-3 px-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-lg shadow-emerald-500/20"
+                          title="Room is vacant. Assign an active tenant to begin billing and transactions."
+                        >
+                          <UserPlus className="w-4 h-4" />
+                          <span>Assign Tenant / Occupy</span>
+                        </button>
+                      )}
 
                       {isOccupied && activeReceipt ? (
                         <button
@@ -593,9 +607,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <button
                   type="button"
                   onClick={() => onNavigate('payments')}
-                  className="text-xs font-bold text-amber-400 hover:underline cursor-pointer whitespace-nowrap shrink-0"
+                  className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-black text-amber-300 inline-flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95 shrink-0"
+                  title="View All Payment History & Records"
                 >
-                  All Payments →
+                  <ReceiptText className="w-3.5 h-3.5 text-amber-400" />
+                  <span>All Payments</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-amber-400" />
                 </button>
               </div>
 
@@ -744,9 +761,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenScanMeter(activeRooms[0])}
-                  className="font-extrabold text-amber-400 hover:underline cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs inline-flex items-center gap-1.5 cursor-pointer shadow transition active:scale-95"
                 >
-                  Open OCR Reader →
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Open OCR Reader</span>
                 </button>
               </div>
             </div>

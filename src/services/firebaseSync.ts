@@ -23,6 +23,12 @@ export const FIREBASE_RULES_JSON = `{
         ".read": true,
         ".write": true
       }
+    },
+    "system_registry": {
+      ".read": true,
+      "$propertyCode": {
+        ".write": true
+      }
     }
   }
 }`;
@@ -91,6 +97,28 @@ export async function pushSnapshotToFirebase(
         message: `Firebase Error (${response.status}): ${errText || response.statusText}`,
       };
     }
+
+    // Simultaneously register this property in system_registry so property owners/admins can see all active users in Firebase Console
+    try {
+      let regUrl = `${baseUrl}/system_registry/${encodeURIComponent(propCode)}.json`;
+      if (apiKey && apiKey.trim()) {
+        regUrl += `?auth=${encodeURIComponent(apiKey.trim())}`;
+      }
+      fetch(regUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          propertyCode: propCode,
+          apartmentName: snapshot.settings?.apartmentName || '4Rent Property',
+          landlordName: snapshot.settings?.landlordName || 'Administrator',
+          roomsCount: snapshot.rooms?.length || 0,
+          billsCount: snapshot.bills?.length || 0,
+          inquiriesCount: snapshot.inquiries?.length || 0,
+          lastActiveAt: syncedAt,
+          clientVersion: '1.0.0',
+        }),
+      }).catch(() => {});
+    } catch {}
 
     return {
       ok: true,

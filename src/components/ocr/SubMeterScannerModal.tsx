@@ -739,6 +739,21 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               </div>
             </div>
 
+            {selectedRoom.status === 'vacant' && (
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-1 animate-card-in">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <strong className="text-xs font-bold text-amber-300">
+                    Room is Currently Vacant
+                  </strong>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Billing statements and payment transactions require an active occupied tenant.
+                  When a new tenant occupies this room, the latest recorded sub-meter reading ({selectedRoom.lastMeterReading.toFixed(1)} kWh) will automatically be transmitted as their starting previous reading.
+                </p>
+              </div>
+            )}
+
             {/* Sub-Meter Slots & Next-Month Rollover Action */}
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -1226,6 +1241,69 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 )}
               </div>
 
+              {showPinUnlockModal && (
+                <div className="mb-3 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/40 animate-card-in">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-amber-400" />
+                      <div>
+                        <span className="text-xs font-bold text-white block">Enter Landlord PIN to Modify Readings</span>
+                        <span className="text-[10px] text-slate-400">Default PIN: 1234 (or your PIN from Settings)</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="password"
+                        maxLength={6}
+                        autoFocus
+                        value={pinInput}
+                        onChange={(e) => {
+                          setPinInput(e.target.value);
+                          setPinError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleVerifyPinToUnlock();
+                          }
+                        }}
+                        placeholder="••••"
+                        className="w-20 rounded-xl bg-[#0B0E14] border border-[#2B3A54] px-3 py-1.5 text-center text-sm font-mono text-amber-400 focus:outline-none focus:border-amber-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleVerifyPinToUnlock();
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow transition active:scale-95"
+                      >
+                        Verify & Unlock
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPinUnlockModal(false);
+                          setPinInput('');
+                          setPinError(null);
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-[#1B2333] hover:bg-[#25324A] text-slate-400 hover:text-white text-xs font-bold cursor-pointer transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                  {pinError && (
+                    <p className="text-xs text-red-400 flex items-center gap-1 font-medium mt-2">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{pinError}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
                 <div className={`rounded-xl border p-2.5 transition ${
                   isReadingsLocked
@@ -1600,103 +1678,41 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={!subMeterCheck.isValid}
-              className={`w-full py-3 px-4 rounded-2xl disabled:opacity-40 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl transition cursor-pointer ${
-                isRolloverActive
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
-                  : 'bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 shadow-amber-500/20'
-              }`}
-            >
-              <FileCheck2 className="w-4 h-4" />
-              <span>
-                {isRolloverActive
-                  ? 'Save & Generate Receipt (Rollover Verified)'
-                  : 'Save & Generate Receipt'}
-              </span>
-            </button>
+            {selectedRoom.status === 'vacant' ? (
+              <div className="p-3.5 rounded-2xl bg-[#141A25] border border-amber-500/30 text-center space-y-1.5 animate-card-in">
+                <button
+                  type="button"
+                  disabled
+                  className="w-full py-3 px-4 rounded-2xl opacity-60 bg-[#1A2334] text-slate-400 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-not-allowed border border-slate-700"
+                >
+                  <AlertCircle className="w-4 h-4 text-amber-400" />
+                  <span>Room is Vacant — Assign Tenant to Bill</span>
+                </button>
+                <p className="text-[11px] text-slate-400">
+                  Vacant rooms cannot generate monthly billing receipts. Assign an active tenant in Room Management to start transactions.
+                </p>
+              </div>
+            ) : (
+              <button
+                type="submit"
+                disabled={!subMeterCheck.isValid}
+                className={`w-full py-3 px-4 rounded-2xl disabled:opacity-40 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl transition cursor-pointer ${
+                  isRolloverActive
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
+                    : 'bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 shadow-amber-500/20'
+                }`}
+              >
+                <FileCheck2 className="w-4 h-4" />
+                <span>
+                  {isRolloverActive
+                    ? 'Save & Generate Receipt (Rollover Verified)'
+                    : 'Save & Generate Receipt'}
+                </span>
+              </button>
+            )}
           </div>
         </form>
       </div>
-
-      {/* PIN Unlock Modal for Manual Reading Override */}
-      {showPinUnlockModal && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm rounded-3xl bg-[#141A25] border border-amber-500/40 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-white">Modify Meter Reading</h3>
-                  <p className="text-[11px] text-slate-400">Enter Landlord PIN to unlock manual edits</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPinUnlockModal(false);
-                  setPinInput('');
-                  setPinError(null);
-                }}
-                className="w-7 h-7 rounded-lg bg-[#1B2333] hover:bg-[#25324A] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleVerifyPinToUnlock} className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1.5">
-                  4-Digit Security PIN
-                </label>
-                <input
-                  type="password"
-                  maxLength={6}
-                  autoFocus
-                  value={pinInput}
-                  onChange={(e) => {
-                    setPinInput(e.target.value);
-                    setPinError(null);
-                  }}
-                  placeholder="••••"
-                  className="w-full rounded-xl bg-[#0B0E14] border border-[#2B3A54] px-4 py-3 text-center text-xl font-mono tracking-widest text-amber-400 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              {pinError && (
-                <p className="text-xs text-red-400 flex items-center gap-1 font-medium">
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  <span>{pinError}</span>
-                </p>
-              )}
-
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 transition"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Unlock Readings</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPinUnlockModal(false);
-                    setPinInput('');
-                    setPinError(null);
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-[#1B2333] hover:bg-[#25324A] text-slate-300 font-bold text-xs cursor-pointer transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Mechanical Cyclometer Register Guide Modal */}
       {showRegisterGuide && (

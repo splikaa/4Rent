@@ -606,6 +606,21 @@ public class MainActivity extends Activity {
                 String dataString = data.getDataString();
                 if (dataString != null) {
                     results = new Uri[]{Uri.parse(dataString)};
+                } else if (data.getClipData() != null && data.getClipData().getItemCount() > 0) {
+                    results = new Uri[]{data.getClipData().getItemAt(0).getUri()};
+                } else if (data.getExtras() != null && data.getExtras().get("data") instanceof android.graphics.Bitmap) {
+                    android.graphics.Bitmap bmp = (android.graphics.Bitmap) data.getExtras().get("data");
+                    if (bmp != null) {
+                        try {
+                            java.io.File cacheFile = new java.io.File(getCacheDir(), "submeter_snap_" + System.currentTimeMillis() + ".jpg");
+                            java.io.FileOutputStream fos = new java.io.FileOutputStream(cacheFile);
+                            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 96, fos);
+                            fos.flush();
+                            fos.close();
+                            results = new Uri[]{Uri.fromFile(cacheFile)};
+                        } catch (Exception ignored) {
+                        }
+                    }
                 }
             }
             filePathCallback.onReceiveValue(results);
