@@ -19,12 +19,14 @@ import {
   ReceiptText,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Smartphone,
   Sparkles,
   TrendingUp,
   User,
   UserPlus,
   Wallet,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -77,6 +79,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   isInstalledStandalone = false,
 }) => {
   const [now, setNow] = useState(new Date());
+  const [showMobileControls, setShowMobileControls] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -175,11 +178,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5">
+          {/* Mobile-Only Controls (Consolidated to eliminate button clutter) */}
+          {onTogglePrivacyMask && (
+            <button
+              type="button"
+              onClick={onTogglePrivacyMask}
+              className={`sm:hidden w-11 h-11 rounded-2xl border flex items-center justify-center transition cursor-pointer btn-fluid shadow-sm ${
+                privacyMaskEnabled
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                  : 'bg-[#151D2C] hover:bg-[#1E293E] border-[#26334D] text-slate-300'
+              }`}
+              title="Toggle Landlord & Tenant Privacy Shield"
+            >
+              {privacyMaskEnabled ? (
+                <EyeOff className="w-5 h-5 text-emerald-400" />
+              ) : (
+                <Eye className="w-5 h-5 text-amber-400" />
+              )}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowMobileControls(true)}
+            className="sm:hidden w-11 h-11 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-amber-500/35 flex items-center justify-center text-amber-400 transition cursor-pointer btn-fluid shadow-sm"
+            title="Mobile Quick Actions & Controls"
+          >
+            <SlidersHorizontal className="w-5 h-5" />
+          </button>
+
+          {/* Desktop-Only Full Actions */}
           {!isInstalledStandalone && onOpenDownloadModal && (
             <button
               type="button"
               onClick={onOpenDownloadModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
               title="Download 4Rent Windows Launcher (.exe) & Android Mobile App (.apk)"
             >
               <Download className="w-3.5 h-3.5 text-amber-400" />
@@ -194,7 +227,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               type="button"
               onClick={onOpenWalkthrough}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-amber-500/12 hover:bg-amber-500/20 border border-amber-500/35 text-amber-300 text-xs font-extrabold transition cursor-pointer btn-fluid"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-amber-500/12 hover:bg-amber-500/20 border border-amber-500/35 text-amber-300 text-xs font-extrabold transition cursor-pointer btn-fluid"
               title="Open 4Rent Easy Go-Through Guide"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -206,7 +239,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               type="button"
               onClick={onTogglePrivacyMask}
-              className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-xs font-bold transition cursor-pointer btn-fluid ${
+              className={`hidden sm:inline-flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-xs font-bold transition cursor-pointer btn-fluid ${
                 privacyMaskEnabled
                   ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
                   : 'bg-[#151D2C] hover:bg-[#1C2639] border-[#26334D] text-slate-300'
@@ -240,7 +273,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               type="button"
               onClick={() => onOpenScanMeter(activeRooms[0])}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition cursor-pointer btn-fluid"
+              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition cursor-pointer btn-fluid"
             >
               <Camera className="w-4 h-4" />
               <span>OCR Sub-Meter Reader</span>
@@ -251,7 +284,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             type="button"
             onClick={() => onNavigate('settings')}
             aria-label="Open Settings"
-            className="w-11 h-11 rounded-2xl bg-[#151D2C] hover:bg-[#1C2639] border border-[#26334D] flex items-center justify-center text-slate-300 hover:text-white transition shrink-0 cursor-pointer btn-fluid"
+            className="hidden sm:flex w-11 h-11 rounded-2xl bg-[#151D2C] hover:bg-[#1C2639] border border-[#26334D] items-center justify-center text-slate-300 hover:text-white transition shrink-0 cursor-pointer btn-fluid"
           >
             <Settings className="w-5 h-5" />
           </button>
@@ -398,7 +431,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <button
             type="button"
             onClick={onOpenAddRoom}
-            className="px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-[#28354E] text-xs font-bold text-amber-400 flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+            className="px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-amber-500/35 text-xs font-bold text-amber-400 flex items-center gap-1.5 transition cursor-pointer btn-fluid shadow-sm"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Room</span>
@@ -406,14 +439,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <button
             type="button"
             onClick={() => onNavigate('inquiries')}
-            className="px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-[#28354E] text-xs font-bold text-blue-300 hover:text-white transition cursor-pointer btn-fluid"
+            className="hidden sm:inline-flex px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-[#28354E] text-xs font-bold text-blue-300 hover:text-white transition cursor-pointer btn-fluid"
           >
             Bookings ({pendingBookings.length})
           </button>
           <button
             type="button"
             onClick={() => onNavigate('archive')}
-            className="px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-[#28354E] text-xs font-bold text-slate-300 hover:text-white flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+            className="hidden sm:inline-flex px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-[#28354E] text-xs font-bold text-slate-300 hover:text-white flex items-center gap-1.5 transition cursor-pointer btn-fluid"
           >
             <Archive className="w-3.5 h-3.5" />
             <span>Archive</span>
@@ -421,7 +454,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <button
             type="button"
             onClick={() => onNavigate('rooms')}
-            className="px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-[#28354E] text-xs font-bold text-slate-200 hover:text-white transition cursor-pointer btn-fluid"
+            className="hidden sm:inline-flex px-4 py-2 rounded-full bg-[#151D2C] hover:bg-[#1E293E] border border-[#28354E] text-xs font-bold text-slate-200 hover:text-white transition cursor-pointer btn-fluid"
           >
             Manage Rooms
           </button>
@@ -591,52 +624,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     )}
                   </div>
 
-                  {/* 1 Room = 1 Receipt Direct Access + Scan Button */}
+                  {/* Room Card Action Footer */}
                   <div
-                    className="mt-5 pt-4 border-t border-[#222E44] flex flex-col gap-2"
+                    className="mt-4 pt-3.5 border-t border-[#202B40] flex flex-col gap-2"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2">
                       {isOccupied ? (
-                        <button
-                          type="button"
-                          onClick={() => onOpenScanMeter(room)}
-                          className="flex-1 py-3 px-3.5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-lg shadow-amber-500/15"
-                        >
-                          <Camera className="w-4 h-4" />
-                          <span>OCR Sub-Meter & Bill</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onOpenScanMeter(room)}
+                            className="flex-1 py-2.5 px-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-md shadow-amber-500/15"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>OCR Sub-Meter</span>
+                          </button>
+                          {activeReceipt ? (
+                            <button
+                              type="button"
+                              onClick={() => onSelectBillForReceipt(activeReceipt)}
+                              className="py-2.5 px-3 rounded-2xl bg-[#1A2334] hover:bg-[#233047] border border-[#2B3A56] text-amber-400 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                              title="Open receipt"
+                            >
+                              <ReceiptText className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Receipt</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onSelectRoomDetails(room)}
+                              className="py-2.5 px-3 rounded-2xl bg-[#1A2334] hover:bg-[#233047] border border-[#2B3A56] text-slate-300 font-bold text-xs transition cursor-pointer btn-fluid"
+                            >
+                              Details
+                            </button>
+                          )}
+                        </>
                       ) : (
                         <button
                           type="button"
                           onClick={() => onSelectRoomDetails(room)}
-                          className="flex-1 py-3 px-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-lg shadow-emerald-500/20"
-                          title="Room is vacant. Assign an active tenant to begin billing and transactions."
+                          className="flex-1 py-2.5 px-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-md shadow-emerald-500/20"
+                          title="Room is vacant. Assign an active tenant."
                         >
-                          <UserPlus className="w-4 h-4" />
+                          <UserPlus className="w-3.5 h-3.5" />
                           <span>Assign Tenant / Occupy</span>
                         </button>
                       )}
+                    </div>
 
-                      {isOccupied && activeReceipt ? (
-                        <button
-                          type="button"
-                          onClick={() => onSelectBillForReceipt(activeReceipt)}
-                          className="py-3 px-3.5 rounded-2xl bg-[#1A2334] hover:bg-[#233047] border border-[#2B3A56] text-amber-400 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
-                          title="Open this room's official receipt"
-                        >
-                          <ReceiptText className="w-4 h-4" />
-                          <span>Receipt</span>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => onSelectRoomDetails(room)}
-                          className="py-3 px-3.5 rounded-2xl bg-[#1A2334] hover:bg-[#233047] border border-[#2B3A56] text-slate-200 font-semibold text-xs transition cursor-pointer btn-fluid"
-                        >
-                          Details
-                        </button>
-                      )}
+                    <div className="text-[10px] text-slate-400 text-center font-medium sm:hidden flex items-center justify-center gap-1">
+                      <span>Tap card for details &amp; logs</span>
+                      <ChevronRight className="w-3 h-3 text-slate-400" />
                     </div>
                   </div>
                 </div>
@@ -827,6 +866,150 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </section>
         </>
+      )}
+
+      {/* Mobile Perspective Quick Controls Bottom Sheet */}
+      {showMobileControls && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-end sm:hidden bg-black/75 backdrop-blur-xs animate-fade-in"
+          onClick={() => setShowMobileControls(false)}
+        >
+          <div
+            className="w-full bg-[#111723] border-t border-[#253248] rounded-t-3xl p-6 shadow-2xl space-y-4 animate-modal-pop"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-[#202C3F]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
+                  <SlidersHorizontal className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white">
+                    Quick Controls &amp; Options
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    4Rent Mobile Management Hub
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileControls(false)}
+                className="w-8 h-8 rounded-xl bg-[#1A2333] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {/* Privacy Shield Toggle */}
+              {onTogglePrivacyMask && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onTogglePrivacyMask();
+                    setShowMobileControls(false);
+                  }}
+                  className={`w-full p-3.5 rounded-2xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                    privacyMaskEnabled
+                      ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                      : 'bg-[#151D2C] hover:bg-[#1E293E] border-[#253248] text-slate-200'
+                  }`}
+                >
+                  <span className="flex items-center gap-3">
+                    {privacyMaskEnabled ? (
+                      <EyeOff className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <Eye className="w-4 h-4 text-amber-400" />
+                    )}
+                    <span>Landlord Privacy Shield</span>
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                      privacyMaskEnabled
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-[#0E131C] text-slate-400'
+                    }`}
+                  >
+                    {privacyMaskEnabled ? 'Active' : 'Off'}
+                  </span>
+                </button>
+              )}
+
+              {/* Easy Guide */}
+              {onOpenWalkthrough && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileControls(false);
+                    onOpenWalkthrough();
+                  }}
+                  className="w-full p-3.5 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-[#253248] text-xs font-bold text-slate-200 flex items-center justify-between transition cursor-pointer"
+                >
+                  <span className="flex items-center gap-3">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>Easy Go-Through Guide</span>
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-slate-400" />
+                </button>
+              )}
+
+              {/* Inquiries & Bookings */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileControls(false);
+                  onNavigate('inquiries');
+                }}
+                className="w-full p-3.5 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-[#253248] text-xs font-bold text-slate-200 flex items-center justify-between transition cursor-pointer"
+              >
+                <span className="flex items-center gap-3">
+                  <CalendarCheck className="w-4 h-4 text-blue-400" />
+                  <span>Inquiries &amp; Bookings</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 text-[10px] font-bold">
+                  {pendingBookings.length}
+                </span>
+              </button>
+
+              {/* Archive Center */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileControls(false);
+                  onNavigate('archive');
+                }}
+                className="w-full p-3.5 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-[#253248] text-xs font-bold text-slate-200 flex items-center justify-between transition cursor-pointer"
+              >
+                <span className="flex items-center gap-3">
+                  <Archive className="w-4 h-4 text-slate-400" />
+                  <span>Archive &amp; Tenant History</span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </button>
+
+              {/* Download App links for web visitors */}
+              {!isInstalledStandalone && onOpenDownloadModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileControls(false);
+                    onOpenDownloadModal();
+                  }}
+                  className="w-full p-3.5 rounded-2xl bg-[#151D2C] hover:bg-[#1E293E] border border-amber-500/35 text-xs font-bold text-amber-300 flex items-center justify-between transition cursor-pointer"
+                >
+                  <span className="flex items-center gap-3">
+                    <Download className="w-4 h-4 text-amber-400" />
+                    <span>Download Desktop Launcher &amp; APK</span>
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-amber-400" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

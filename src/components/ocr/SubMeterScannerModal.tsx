@@ -888,6 +888,19 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
         <form
           onSubmit={handleConfirmGenerateBill}
+          onKeyDown={(e) => {
+            // Prevent accidental Enter key submission while modifying readings or PIN
+            if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+              const inputEl = e.target as HTMLInputElement;
+              if (inputEl.type === 'password') {
+                e.preventDefault();
+                e.stopPropagation();
+                handleVerifyPinToUnlock();
+                return;
+              }
+              e.preventDefault();
+            }
+          }}
           className="grid grid-cols-1 lg:grid-cols-12 overflow-y-auto flex-1"
         >
           {/* Left Column: Dual Sub-Meter Scanner & Photo Proofs */}
