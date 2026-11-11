@@ -6,6 +6,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  Laptop,
   LayoutGrid,
   LogOut,
   ReceiptText,
@@ -27,6 +28,7 @@ interface NavigationDrawerProps {
   onLockApp: () => void;
   hasRooms: boolean;
   onOpenDownloadModal?: () => void;
+  isInstalledStandalone?: boolean;
 }
 
 export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
@@ -38,6 +40,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
   onTogglePrivacyMask,
   onLockApp,
   onOpenDownloadModal,
+  isInstalledStandalone = false,
 }) => {
   const navItems: {
     id: NavigationTab;
@@ -164,8 +167,8 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
           </div>
         )}
 
-        {/* Direct Download Apps Card */}
-        {onOpenDownloadModal && (
+        {/* Direct Download Apps Card (Only visible when accessing via standard web browser) */}
+        {!isInstalledStandalone && onOpenDownloadModal && (
           <div className="pt-2">
             <button
               type="button"
@@ -188,6 +191,21 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
                 Windows Launcher &amp; Offline Android App
               </p>
             </button>
+          </div>
+        )}
+
+        {/* Standalone Installed Badge (Shown when inside Desktop Launcher / Android APK) */}
+        {isInstalledStandalone && (
+          <div className="pt-2 px-1">
+            <div className="py-2.5 px-3 rounded-2xl bg-[#141C2B] border border-[#233148] flex items-center justify-between text-[11px] text-slate-300">
+              <span className="flex items-center gap-2 font-bold text-amber-400">
+                <Laptop className="w-3.5 h-3.5" />
+                <span>Standalone App</span>
+              </span>
+              <span className="text-[10px] font-mono text-emerald-400 font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30">
+                Active
+              </span>
+            </div>
           </div>
         )}
 

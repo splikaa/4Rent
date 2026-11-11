@@ -55,6 +55,7 @@ interface DashboardViewProps {
   onOpenAdvanceBalanceModal: (room: Room) => void;
   onSelectRoomDetails: (room: Room) => void;
   onOpenDownloadModal?: () => void;
+  isInstalledStandalone?: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -73,6 +74,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenAdvanceBalanceModal,
   onSelectRoomDetails,
   onOpenDownloadModal,
+  isInstalledStandalone = false,
 }) => {
   const [now, setNow] = useState(new Date());
 
@@ -173,7 +175,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5">
-          {onOpenDownloadModal && (
+          {!isInstalledStandalone && onOpenDownloadModal && (
             <button
               type="button"
               onClick={onOpenDownloadModal}
@@ -346,8 +348,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </section>
       )}
 
-      {/* 4Rent System Apps Direct Download Banner */}
-      {onOpenDownloadModal && (
+      {/* 4Rent System Apps Direct Download Banner (Only for web browser visitors) */}
+      {!isInstalledStandalone && onOpenDownloadModal && (
         <section className="rounded-3xl bg-gradient-to-r from-[#141C2B] via-[#162133] to-[#121A28] border border-[#26354D] p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-xl">
           <div className="flex items-start sm:items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0 shadow-inner">

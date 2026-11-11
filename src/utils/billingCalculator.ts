@@ -124,6 +124,39 @@ export function isRunningInDesktopApp(): boolean {
 }
 
 /**
+ * Detects whether 4Rent is running inside the standalone Android Mobile APK
+ */
+export function isRunningInMobileApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('app') === 'mobile' || params.get('apk') === '1') {
+      localStorage.setItem('4rent_mobile_installed', 'true');
+      return true;
+    }
+    const winAny = window as unknown as { AndroidBridge?: unknown; Android?: unknown };
+    if (winAny.AndroidBridge !== undefined || winAny.Android !== undefined) {
+      localStorage.setItem('4rent_mobile_installed', 'true');
+      return true;
+    }
+    if (localStorage.getItem('4rent_mobile_installed') === 'true') {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+/**
+ * Returns true if the app is running in an installed environment (Desktop Launcher or Mobile APK),
+ * so that web download banners/buttons are hidden.
+ */
+export function isStandaloneApp(): boolean {
+  return isRunningInDesktopApp() || isRunningInMobileApp();
+}
+
+/**
  * Automatically formats Philippine mobile phone numbers as the user types:
  * e.g., "09175550101" -> "0917-555-0101"
  */

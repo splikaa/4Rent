@@ -38,6 +38,9 @@ import {
 import {
   applyPaymentWithOverpayment,
   clampDueDayOneToTen,
+  isRunningInDesktopApp,
+  isRunningInMobileApp,
+  isStandaloneApp,
 } from './utils/billingCalculator';
 import { requestAndVerifyNotifications } from './services/ocrService';
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
@@ -84,6 +87,11 @@ export function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+
+  // Runtime environment detection (Desktop Launcher vs. Android Mobile APK vs. Web Browser)
+  const isDesktop = isRunningInDesktopApp();
+  const isMobile = isRunningInMobileApp();
+  const isInstalledStandalone = isStandaloneApp();
   const [showBootSplash, setShowBootSplash] = useState<boolean>(true);
   const [showUnlockSplash, setShowUnlockSplash] = useState<boolean>(false);
   const [isLocked, setIsLocked] = useState<boolean>(
@@ -1636,6 +1644,7 @@ export function App() {
         onLockApp={() => setIsLocked(true)}
         hasRooms={rooms.filter((r) => !r.isArchived).length > 0}
         onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+        isInstalledStandalone={isInstalledStandalone}
       />
 
       <main className="flex-1 min-w-0">
@@ -1661,6 +1670,7 @@ export function App() {
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onOpenWalkthrough={() => setIsWalkthroughOpen(true)}
             onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+            isInstalledStandalone={isInstalledStandalone}
           />
         )}
 
@@ -1759,6 +1769,9 @@ export function App() {
             onOpenSecuritySetup={() => setShowSecuritySetup(true)}
             onInstallDesktopApp={handleInstallDesktopApp}
             onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+            isInstalledStandalone={isInstalledStandalone}
+            isDesktop={isDesktop}
+            isMobile={isMobile}
           />
         )}
       </main>

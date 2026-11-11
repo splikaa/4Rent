@@ -126,6 +126,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         cacheBust: true,
         pixelRatio: 2,
         skipFonts: true,
+        fontEmbedCSS: '',
         backgroundColor: '#FFFFFF',
       });
       return dataUrl;
