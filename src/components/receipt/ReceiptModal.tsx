@@ -187,20 +187,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const handleShareToMessenger = async () => {
     setShareFeedback(null);
-    const summary = formatMessengerBillSummary(bill, settings.apartmentName);
 
-    // Pre-generate the official receipt PNG image for mobile Web Share file attachment
+    // Pre-generate the official receipt PNG image for forwarding
     const pngData = await generateReceiptPngDataUrl();
 
     const res = await openMessengerAppWithReceipt({
-      textSummary: summary,
       pngDataUrl: pngData || undefined,
       receiptNo: bill.receiptNo,
       tenantName: bill.tenantName,
       roomName: bill.roomName,
       messengerHandle: bill.tenantMessenger,
       shareUrl: window.location.href,
-      autoDownloadPng: false,
+      autoDownloadPng: true,
     });
     setShareFeedback(res.message);
     setTimeout(() => {

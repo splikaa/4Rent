@@ -53,6 +53,14 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        if (Build.VERSION.SDK_INT >= 24) {
+            try {
+                android.os.StrictMode.VmPolicy.Builder builder = new android.os.StrictMode.VmPolicy.Builder();
+                android.os.StrictMode.setVmPolicy(builder.build());
+            } catch (Exception ignored) {
+            }
+        }
+
         try {
             Window window = getWindow();
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
@@ -329,6 +337,21 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void openAppSettings() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                        intent.setData(Uri.fromParts("package", getPackageName(), null));
+                        startActivity(intent);
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
         public boolean hasCameraPermission() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 return checkSelfPermission("android.permission.CAMERA") == PackageManager.PERMISSION_GRANTED;
@@ -388,15 +411,33 @@ public class MainActivity extends Activity {
                             }
                         }
 
-                        // Open native system share chooser (displays direct Messenger contacts, Signal, etc.)
                         Intent sendIntent = new Intent(Intent.ACTION_SEND);
-                        sendIntent.setType("text/plain");
-                        sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                        if (pngBase64 != null && pngBase64.contains(",")) {
+                            try {
+                                String b64 = pngBase64.substring(pngBase64.indexOf(",") + 1);
+                                byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                                java.io.File cacheDir = getCacheDir();
+                                java.io.File imgFile = new java.io.File(cacheDir, "4Rent_Receipt.png");
+                                java.io.FileOutputStream fos = new java.io.FileOutputStream(imgFile);
+                                fos.write(bytes);
+                                fos.close();
+                                imgFile.setReadable(true, false);
+                                Uri fileUri = Uri.fromFile(imgFile);
+                                sendIntent.setType("image/png");
+                                sendIntent.putExtra(Intent.EXTRA_STREAM, fileUri);
+                                sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            } catch (Exception e) {
+                                sendIntent.setType("text/plain");
+                                sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                            }
+                        } else {
+                            sendIntent.setType("text/plain");
+                            sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                        }
 
-                        Intent chooser = Intent.createChooser(sendIntent, "Share Receipt via Messenger or System");
+                        Intent chooser = Intent.createChooser(sendIntent, "Share Receipt Image");
                         startActivity(chooser);
                     } catch (Exception e) {
-                        // If direct intent failed, attempt web messenger
                         try {
                             String target = (handle != null && !handle.trim().isEmpty())
                                     ? "https://m.me/" + handle.trim()

@@ -35,6 +35,151 @@ const newZip = new JSZip();
  * - String pool alignment formula: (4 - (allStrData.length % 4)) % 4
  */
 
+/**
+ * Dynamically injects android.permission.CAMERA and android.permission.POST_NOTIFICATIONS
+ * into binary AndroidManifest.xml (AXML) without corrupting binary chunk headers or string pools.
+ */
+function patchBinaryAndroidManifest(manifest) {
+  const strPoolChunk = 8;
+  const strPoolSize = manifest.readUInt32LE(strPoolChunk + 4);
+  const stringCount = manifest.readUInt32LE(strPoolChunk + 8);
+  const styleCount = manifest.readUInt32LE(strPoolChunk + 12);
+  const flags = manifest.readUInt32LE(strPoolChunk + 16);
+  const stringsStart = manifest.readUInt32LE(strPoolChunk + 20);
+  const stylesStart = manifest.readUInt32LE(strPoolChunk + 24);
+
+  const strings = [];
+  for (let i = 0; i < stringCount; i++) {
+    const off = manifest.readUInt32LE(strPoolChunk + 28 + i * 4);
+    const abs = strPoolChunk + stringsStart + off;
+    const len = manifest.readUInt16LE(abs);
+    strings.push(manifest.toString('utf16le', abs + 2, abs + 2 + len * 2));
+  }
+
+  const permsToAdd = ['android.permission.CAMERA', 'android.permission.POST_NOTIFICATIONS'];
+  const needed = permsToAdd.filter((p) => !strings.includes(p));
+  if (needed.length === 0) return manifest;
+
+  const newStrings = [...strings, ...needed];
+
+  const strDataOffsets = [];
+  const strDataBuffers = [];
+  let curDataOff = 0;
+  for (const s of newStrings) {
+    strDataOffsets.push(curDataOff);
+    const charBuf = Buffer.from(s, 'utf16le');
+    const itemBuf = Buffer.alloc(2 + charBuf.length + 2);
+    itemBuf.writeUInt16LE(s.length, 0);
+    charBuf.copy(itemBuf, 2);
+    itemBuf.writeUInt16LE(0, 2 + charBuf.length);
+    strDataBuffers.push(itemBuf);
+    curDataOff += itemBuf.length;
+  }
+  const allStrData = Buffer.concat(strDataBuffers);
+  const strPadding = (4 - (allStrData.length % 4)) % 4;
+  const paddedStrData = Buffer.concat([allStrData, Buffer.alloc(strPadding)]);
+
+  const headerSize = 28;
+  const offsetsSize = newStrings.length * 4;
+  const newStringsStart = headerSize + offsetsSize;
+  const newStrPoolSize = newStringsStart + paddedStrData.length;
+
+  const newStrPoolBuf = Buffer.alloc(newStrPoolSize);
+  newStrPoolBuf.writeUInt32LE(0x001C0001, 0);
+  newStrPoolBuf.writeUInt32LE(newStrPoolSize, 4);
+  newStrPoolBuf.writeUInt32LE(newStrings.length, 8);
+  newStrPoolBuf.writeUInt32LE(styleCount, 12);
+  newStrPoolBuf.writeUInt32LE(flags, 16);
+  newStrPoolBuf.writeUInt32LE(newStringsStart, 20);
+  newStrPoolBuf.writeUInt32LE(stylesStart, 24);
+
+  for (let i = 0; i < newStrings.length; i++) {
+    newStrPoolBuf.writeUInt32LE(strDataOffsets[i], 28 + i * 4);
+  }
+  paddedStrData.copy(newStrPoolBuf, newStringsStart);
+
+  const oldResMapStart = strPoolChunk + strPoolSize;
+  const resMapSize = manifest.readUInt32LE(oldResMapStart + 4);
+  const resMapBuf = manifest.subarray(oldResMapStart, oldResMapStart + resMapSize);
+
+  const usesPermIdx = newStrings.indexOf('uses-permission');
+  const nsIdx = newStrings.indexOf('http://schemas.android.com/apk/res/android');
+  const nameIdx = newStrings.indexOf('name');
+
+  function makeUsesPermNode(permString) {
+    const permIdx = newStrings.indexOf(permString);
+    const start = Buffer.alloc(56);
+    start.writeUInt32LE(0x00100102, 0);
+    start.writeUInt32LE(56, 4);
+    start.writeUInt32LE(15, 8);
+    start.writeUInt32LE(0xFFFFFFFF, 12);
+    start.writeInt32LE(-1, 16);
+    start.writeInt32LE(usesPermIdx, 20);
+    start.writeUInt16LE(20, 24);
+    start.writeUInt16LE(20, 26);
+    start.writeUInt16LE(1, 28);
+    start.writeUInt16LE(0, 30);
+    start.writeUInt16LE(0, 32);
+    start.writeUInt16LE(0, 34);
+
+    start.writeInt32LE(nsIdx, 36);
+    start.writeInt32LE(nameIdx, 40);
+    start.writeInt32LE(permIdx, 44);
+    start.writeUInt16LE(8, 48);
+    start.writeUInt8(0, 50);
+    start.writeUInt8(3, 51);
+    start.writeInt32LE(permIdx, 52);
+
+    const end = Buffer.alloc(24);
+    end.writeUInt32LE(0x00100103, 0);
+    end.writeUInt32LE(24, 4);
+    end.writeUInt32LE(15, 8);
+    end.writeUInt32LE(0xFFFFFFFF, 12);
+    end.writeInt32LE(-1, 16);
+    end.writeInt32LE(usesPermIdx, 20);
+
+    return Buffer.concat([start, end]);
+  }
+
+  const permNodes = Buffer.concat(needed.map(makeUsesPermNode));
+
+  const oldXmlBodyStart = oldResMapStart + resMapSize;
+  const appStrIdx = strings.indexOf('application');
+  let appOffsetInXml = -1;
+  let scanP = oldXmlBodyStart;
+  while (scanP < manifest.length) {
+    const type = manifest.readUInt32LE(scanP);
+    const size = manifest.readUInt32LE(scanP + 4);
+    if (type === 0x00100102) {
+      const nameId = manifest.readInt32LE(scanP + 20);
+      if (nameId === appStrIdx) {
+        appOffsetInXml = scanP - oldXmlBodyStart;
+        break;
+      }
+    }
+    scanP += size;
+  }
+
+  const insertOffset = appOffsetInXml >= 0 ? appOffsetInXml : (2476 - oldXmlBodyStart);
+  const xmlBeforeApp = manifest.subarray(oldXmlBodyStart, oldXmlBodyStart + insertOffset);
+  const xmlFromAppToEnd = manifest.subarray(oldXmlBodyStart + insertOffset);
+
+  const newTotalSize = 8 + newStrPoolBuf.length + resMapBuf.length + xmlBeforeApp.length + permNodes.length + xmlFromAppToEnd.length;
+
+  const newHeader = Buffer.alloc(8);
+  newHeader.writeUInt32LE(0x00080003, 0);
+  newHeader.writeUInt32LE(newTotalSize, 4);
+
+  return Buffer.concat([
+    newHeader,
+    newStrPoolBuf,
+    resMapBuf,
+    xmlBeforeApp,
+    permNodes,
+    xmlFromAppToEnd
+  ]);
+}
+
 // 1. Copy required Android binary runtime files without binary mangling
 const updatedDexPath = join(rootDir, 'mobile_app', 'classes.dex');
 const binaryEntries = [
@@ -50,6 +195,14 @@ for (const name of binaryEntries) {
   if (name === 'classes.dex' && existsSync(updatedDexPath)) {
     content = readFileSync(updatedDexPath);
     console.log(`[4Rent APK Signer] Using updated compiled classes.dex (${content.length} bytes) with camera permission handlers.`);
+  } else if (name === 'AndroidManifest.xml') {
+    const entry = baseZip.file(name);
+    if (!entry) {
+      throw new Error(`Required Android entry missing from base APK: ${name}`);
+    }
+    const rawManifest = await entry.async('nodebuffer');
+    content = patchBinaryAndroidManifest(rawManifest);
+    console.log(`[4Rent APK Signer] Injected CAMERA & POST_NOTIFICATIONS permissions into binary AndroidManifest (${content.length} bytes).`);
   } else {
     const entry = baseZip.file(name);
     if (!entry) {

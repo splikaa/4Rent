@@ -12,6 +12,7 @@ import {
   Lock,
   RefreshCw,
   RotateCw,
+  Settings,
   ShieldCheck,
   Upload,
   X,
@@ -1101,7 +1102,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                               </div>
                             </div>
                           </div>
-                          <div className="grid grid-cols-2 gap-2 mt-3">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
                             <button
                               type="button"
                               onClick={() => {
@@ -1123,6 +1124,20 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                             >
                               <Camera className="w-3.5 h-3.5 text-amber-400" />
                               <span>Device App</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const win = window as any;
+                                if (win.AndroidNative?.openAppSettings) {
+                                  win.AndroidNative.openAppSettings();
+                                }
+                              }}
+                              className="col-span-2 sm:col-span-1 py-2 px-2 rounded-lg bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-300 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition"
+                              title="Open Android Settings > Permissions to allow Camera"
+                            >
+                              <Settings className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Settings</span>
                             </button>
                           </div>
                         </div>
