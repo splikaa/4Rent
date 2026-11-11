@@ -954,6 +954,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     </option>
                   ))}
                 </select>
+                <span className="text-[10px] text-slate-400 mt-1">
+                  Active month &amp; past 5 cycles (locked against future months)
+                </span>
               </div>
 
               <div className="flex flex-col">

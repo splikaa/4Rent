@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
+import { isMobileDevice } from '../../utils/billingCalculator';
 
 interface DownloadAppsModalProps {
   isOpen: boolean;
@@ -39,6 +40,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   const [activeTab, setActiveTab] = useState<'downloads' | 'instructions'>(
     'downloads'
   );
+  const isMobile = isMobileDevice();
 
   if (!isOpen) return null;
 
@@ -80,13 +82,15 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                 id="download-modal-title"
                 className="text-lg sm:text-xl font-extrabold text-white tracking-tight flex items-center gap-2"
               >
-                <span>Download 4Rent System Apps</span>
+                <span>{isMobile ? 'Download 4Rent Mobile App' : 'Download 4Rent System Apps'}</span>
                 <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-bold tracking-wider uppercase border border-amber-500/40">
                   Official
                 </span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Zero-install Windows Desktop Launcher & Offline Android Package
+                {isMobile
+                  ? 'Official Android Package (.apk) with live Sub-Meter OCR camera'
+                  : 'Zero-install Windows Desktop Launcher & Offline Android Package'}
               </p>
             </div>
           </div>
@@ -133,8 +137,8 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
         <div className="p-5 sm:p-6 space-y-5 overflow-y-auto">
           {activeTab === 'downloads' ? (
             <>
-              {/* Option 1: 1-Click Native Desktop App (Zero Download • Zero Warnings) */}
-              {canInstallPwa && onInstallPwa && (
+              {/* Option 1: 1-Click Native Desktop App (Zero Download • Zero Warnings - Desktop Only) */}
+              {!isMobile && canInstallPwa && onInstallPwa && (
                 <div className="rounded-2xl bg-gradient-to-r from-amber-500/15 via-[#1A2438] to-[#121B2B] border border-amber-500/40 p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-3.5">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40 shadow-inner">
@@ -166,99 +170,101 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                 </div>
               )}
 
-              {/* Windows Desktop Launcher Card */}
-              <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-amber-500/50 transition duration-300">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+              {/* Windows Desktop Launcher Card (Desktop Browsers Only) */}
+              {!isMobile && (
+                <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-amber-500/50 transition duration-300">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
 
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                  <div className="flex items-start gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
-                      <Laptop className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-extrabold text-white text-base">
-                          4Rent Windows Desktop Launcher
-                        </h3>
-                        <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-[10px] font-bold">
-                          .ZIP / .EXE
-                        </span>
-                        <span className="px-2 py-0.5 rounded-md bg-[#1E293B] text-slate-400 text-[10px] font-semibold">
-                          ~41 KB
-                        </span>
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                        <Laptop className="w-6 h-6" />
                       </div>
-                      <p className="text-xs text-slate-300 mt-1">
-                        Zero-installation standalone desktop window with official system icon and shortcut pinner.
-                      </p>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-extrabold text-white text-base">
+                            4Rent Windows Desktop Launcher
+                          </h3>
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-[10px] font-bold">
+                            .ZIP / .EXE
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-[#1E293B] text-slate-400 text-[10px] font-semibold">
+                            ~44 KB
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 mt-1">
+                          Zero-installation standalone desktop window with official system icon and shortcut pinner.
+                        </p>
 
-                      <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-400">
-                        <li className="flex items-center gap-1.5">
-                          <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Fullscreen borderless window host</span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Auto pins desktop shortcut with icon</span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Multi-User Property Code support</span>
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Works on Windows 10 &amp; 11 (x64/x86)</span>
-                        </li>
-                      </ul>
+                        <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>Fullscreen borderless window host</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>Auto pins desktop shortcut with icon</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>Multi-User Property Code support</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>Works on Windows 10 &amp; 11 (x64/x86)</span>
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Download Options */}
+                  <div className="mt-4 pt-4 border-t border-[#1E293B] space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
+                        Package: <span className="text-amber-300">4Rent-Desktop-Windows.zip</span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          href={zipUrl}
+                          download="4Rent-Desktop-Windows.zip"
+                          className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95"
+                        >
+                          <FolderArchive className="w-4 h-4" />
+                          <span>Download Portable (.ZIP)</span>
+                        </a>
+
+                        <a
+                          href={exeUrl}
+                          download="4Rent-Launcher.exe"
+                          className="px-3.5 py-2 rounded-xl bg-[#1A2438] hover:bg-[#22304A] border border-[#2E3F5C] text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                          title="Direct executable file"
+                        >
+                          <Laptop className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Direct .EXE</span>
+                        </a>
+                      </div>
+                    </div>
+
+                    {/* Chrome Safe Browsing Guidance Notice */}
+                    <div className="rounded-xl bg-[#141B28] border border-amber-500/25 p-3 text-[11px] text-slate-300 leading-relaxed flex items-start gap-2.5">
+                      <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-amber-300">
+                          Why does Chrome say &quot;This file isn&apos;t commonly downloaded&quot;?
+                        </strong>
+                        <p className="mt-0.5 text-slate-300">
+                          Google Chrome automatically shows this standard precaution for newly uploaded <code className="text-amber-300">.exe</code> files from GitHub until they reach high global download counts.
+                        </p>
+                        <p className="mt-1 text-slate-200">
+                          👉 <strong>To proceed:</strong> Click <strong className="text-amber-300">&quot;Download suspicious file&quot;</strong> in Chrome, or use the <strong className="text-white">Portable (.ZIP)</strong> button above which downloads cleanly with zero prompts.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
-
-                {/* Download Options */}
-                <div className="mt-4 pt-4 border-t border-[#1E293B] space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
-                      Package: <span className="text-amber-300">4Rent-Desktop-Windows.zip</span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href={zipUrl}
-                        download="4Rent-Desktop-Windows.zip"
-                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95"
-                      >
-                        <FolderArchive className="w-4 h-4" />
-                        <span>Download Portable (.ZIP)</span>
-                      </a>
-
-                      <a
-                        href={exeUrl}
-                        download="4Rent-Launcher.exe"
-                        className="px-3.5 py-2 rounded-xl bg-[#1A2438] hover:bg-[#22304A] border border-[#2E3F5C] text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                        title="Direct executable file"
-                      >
-                        <Laptop className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Direct .EXE</span>
-                      </a>
-                    </div>
-                  </div>
-
-                  {/* Chrome Safe Browsing Guidance Notice */}
-                  <div className="rounded-xl bg-[#141B28] border border-amber-500/25 p-3 text-[11px] text-slate-300 leading-relaxed flex items-start gap-2.5">
-                    <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="text-amber-300">
-                        Why does Chrome say &quot;This file isn&apos;t commonly downloaded&quot;?
-                      </strong>
-                      <p className="mt-0.5 text-slate-300">
-                        Google Chrome automatically shows this standard precaution for newly uploaded <code className="text-amber-300">.exe</code> files from GitHub until they reach high global download counts.
-                      </p>
-                      <p className="mt-1 text-slate-200">
-                        👉 <strong>To proceed:</strong> Click <strong className="text-amber-300">&quot;Download suspicious file&quot;</strong> in Chrome, or use the <strong className="text-white">Portable (.ZIP)</strong> button above which downloads cleanly with zero prompts.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              )}
 
               {/* Android Mobile App Card */}
               <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition duration-300">

@@ -67,6 +67,7 @@ import { AllPaymentsView } from './components/payments/AllPaymentsView';
 import { ArchiveCenterView } from './components/archive/ArchiveCenterView';
 import { SubMeterScannerModal } from './components/ocr/SubMeterScannerModal';
 import { ReceiptModal } from './components/receipt/ReceiptModal';
+import { DueCalendarView } from './components/calendar/DueCalendarView';
 import { SettingsView } from './components/settings/SettingsView';
 import { DownloadAppsModal } from './components/modals/DownloadAppsModal';
 
@@ -1724,6 +1725,20 @@ export function App() {
             }
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onOpenArchiveCenter={() => setActiveTab('archive')}
+          />
+        )}
+
+        {activeTab === 'calendar' && (
+          <DueCalendarView
+            rooms={rooms}
+            bills={bills}
+            privacyMaskEnabled={settings.privacyMaskEnabled}
+            onTogglePrivacyMask={handleTogglePrivacyMask}
+            onBack={() => setActiveTab('dashboard')}
+            onNavigate={(tab) => setActiveTab(tab)}
+            onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
+            onOpenScanMeter={(room) => handleOpenScanForRoom(room)}
+            onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
           />
         )}
 

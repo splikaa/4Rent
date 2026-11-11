@@ -36,6 +36,7 @@ import {
 import {
   formatPeso,
   formatPesoPrivacy,
+  isMobileDevice,
 } from '../../utils/billingCalculator';
 import { loadReadingLogs } from '../../services/storageService';
 
@@ -77,6 +78,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   isInstalledStandalone = false,
 }) => {
   const [now, setNow] = useState(new Date());
+  const isMobile = isMobileDevice();
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -187,6 +189,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               </button>
             )}
+
+            {/* Due Date Calendar Shortcut */}
+            <button
+              type="button"
+              onClick={() => onNavigate('calendar')}
+              className="inline-flex items-center gap-1.5 h-11 px-3.5 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
+              title="Open Landlord Due Date Calendar"
+            >
+              <Calendar className="w-3.5 h-3.5 text-amber-400" />
+              <span>Calendar</span>
+            </button>
 
             {/* Desktop-Only Full Actions */}
             {!isInstalledStandalone && onOpenDownloadModal && (
@@ -343,13 +356,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => onNavigate('payments')}
-            className="self-start sm:self-auto px-4 py-2.5 rounded-2xl bg-amber-500 text-slate-950 font-extrabold text-xs hover:bg-amber-400 transition shrink-0 cursor-pointer btn-fluid"
-          >
-            Review Balances
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigate('calendar')}
+              className="px-3.5 py-2.5 rounded-2xl bg-[#141C2B] hover:bg-[#1D283E] border border-amber-500/35 text-amber-300 font-bold text-xs transition cursor-pointer btn-fluid flex items-center gap-1.5"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Due Calendar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('payments')}
+              className="px-4 py-2.5 rounded-2xl bg-amber-500 text-slate-950 font-extrabold text-xs hover:bg-amber-400 transition cursor-pointer btn-fluid"
+            >
+              Review Balances
+            </button>
+          </div>
         </section>
       )}
 
@@ -363,14 +386,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm sm:text-base font-extrabold text-white">
-                  Get Official 4Rent Windows &amp; Android Apps
+                  {isMobile ? 'Get Official 4Rent Android App' : 'Get Official 4Rent Windows & Android Apps'}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold">
-                  v1.1.0
+                  {isMobile ? '.APK' : 'v1.1.0'}
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1">
-                Install the zero-setup Windows Desktop Launcher (.exe) and offline-first Android App (.apk) with live Sub-Meter OCR scanner.
+                {isMobile
+                  ? 'Install the offline-first Android App (.apk) with real-time Sub-Meter OCR live camera scanner.'
+                  : 'Install the zero-setup Windows Desktop Launcher (.exe) and offline-first Android App (.apk) with live Sub-Meter OCR scanner.'}
               </p>
             </div>
           </div>
@@ -382,7 +407,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95"
             >
               <Download className="w-4 h-4" />
-              <span>Download EXE / APK</span>
+              <span>{isMobile ? 'Download Android APK' : 'Download EXE / APK'}</span>
             </button>
           </div>
         </section>

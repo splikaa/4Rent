@@ -1,6 +1,7 @@
 export type NavigationTab =
   | 'dashboard'
   | 'rooms'
+  | 'calendar'
   | 'inquiries'
   | 'payments'
   | 'archive'

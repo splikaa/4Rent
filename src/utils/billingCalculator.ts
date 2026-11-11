@@ -87,7 +87,12 @@ export function isRunningInDesktopApp(): boolean {
     if (/Electron/i.test(ua)) return true;
 
     const params = new URLSearchParams(window.location.search);
-    if (params.get('desktop') === '1' || params.get('app') === '1') {
+    if (
+      params.get('desktop') === '1' ||
+      params.get('desktop') === 'true' ||
+      params.get('app') === '1' ||
+      params.get('app') === 'desktop'
+    ) {
       localStorage.setItem('4rent_desktop_installed', 'true');
       return true;
     }
@@ -130,12 +135,38 @@ export function isRunningInMobileApp(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('app') === 'mobile' || params.get('apk') === '1') {
+    if (
+      params.get('mobile') === '1' ||
+      params.get('mobile') === 'true' ||
+      params.get('app') === 'mobile' ||
+      params.get('apk') === '1'
+    ) {
       localStorage.setItem('4rent_mobile_installed', 'true');
       return true;
     }
-    const winAny = window as unknown as { AndroidBridge?: unknown; Android?: unknown };
-    if (winAny.AndroidBridge !== undefined || winAny.Android !== undefined) {
+
+    // Android WebView asset loader host or file protocol
+    const hostname = window.location.hostname || '';
+    if (
+      hostname === 'appassets.androidplatform.net' ||
+      window.location.protocol === 'file:'
+    ) {
+      localStorage.setItem('4rent_mobile_installed', 'true');
+      return true;
+    }
+
+    const winAny = window as unknown as {
+      AndroidNative?: unknown;
+      AndroidBiometrics?: unknown;
+      AndroidBridge?: unknown;
+      Android?: unknown;
+    };
+    if (
+      winAny.AndroidNative !== undefined ||
+      winAny.AndroidBiometrics !== undefined ||
+      winAny.AndroidBridge !== undefined ||
+      winAny.Android !== undefined
+    ) {
       localStorage.setItem('4rent_mobile_installed', 'true');
       return true;
     }
@@ -249,13 +280,15 @@ export function getNextDueDateInOneToTenWindow(
 }
 
 /**
- * Generates a list of selectable Billing Period options (e.g., "Nov 2026", "Dec 2026", etc.)
- * so the user doesn't have to type the billing period manually in the OCR Reader.
+ * Generates a list of selectable Billing Period options (e.g., "Nov 2026", "Oct 2026", etc.)
+ * Strictly locked to the current active calendar month and past cycles.
+ * Future months cannot be selected because electricity meters can only be billed for current or past periods.
  */
 export function getBillingPeriodOptions(): string[] {
   const now = new Date();
   const options: string[] = [];
-  for (let offset = -2; offset <= 6; offset++) {
+  // Current active calendar month first, followed by previous 5 consecutive monthly cycles (no future months)
+  for (let offset = 0; offset >= -5; offset--) {
     const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
     const label = d.toLocaleDateString('en-US', {
       month: 'short',

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Archive,
   CalendarCheck,
+  CalendarDays,
   DoorOpen,
   Download,
   Eye,
@@ -56,6 +57,11 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
       id: 'rooms',
       label: 'Rooms',
       icon: <DoorOpen className="w-5 h-5" />,
+    },
+    {
+      id: 'calendar',
+      label: 'Due Date Calendar',
+      icon: <CalendarDays className="w-5 h-5" />,
     },
     {
       id: 'inquiries',

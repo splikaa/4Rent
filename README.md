@@ -27,7 +27,28 @@ Landlords do **not** need to install Node.js, Python, Git, or any complex develo
 
 ---
 
-## 📦 Packages Directory (Ready for Direct Download)
+## 🛡️ System Assurance & Reliability
+
+**4Rent Management System** is built on five strict architectural assurances designed for property managers and landlords:
+
+1. **100% Offline-First Persistence (IndexedDB Local Core)**
+   - Operates with complete autonomy with or without internet. Room states, tenant contracts, sub-meter dial crops, and payment ledgers are committed directly to your device's browser IndexedDB database. You can inspect sub-meters in concrete apartment basements with zero cellular reception with zero data loss.
+
+2. **Multi-Landlord Security & Data Partitioning**
+   - Data is partitioned by **Property Space Code** (e.g. `4RENT-MAIN`, `4R-B4U7`). Landlords operating separate boarding houses or buildings remain strictly isolated. Switching or pairing devices takes one tap.
+
+3. **Sub-Meter OCR Precision & Verifiable Audit Proof**
+   - Electric sub-meter readings are extracted through cyclometer-register optical recognition with an emerald green lock reticle. Every official statement embeds side-by-side photographic crops of the dials and a cryptographic tamper-proof verification seal (`4R-SEAL-XXXXXX`) to prevent tenant tampering or altered payment claims.
+
+4. **Philippine Rental Law Compliance (R.A. 9653)**
+   - Hardcoded compliance with Philippine rental standards: strict **Day 1–10 Payment Grace Windows**, forward billing period lock (future months cannot be billed in advance), and strict separation between non-deductible property Security Deposits and deductible Advance Rent.
+
+5. **Safe Execution & Clean Distributables Assurance**
+   - **Zero Malware / Zero Telemetry**: The Windows Desktop Launcher (`4Rent-Launcher.exe`) is an open-source, portable C# binary compiled with standard Windows 10/11 compatibility manifests (`asInvoker`), requiring no administrative elevation, no registry modifications, and leaving zero system residue.
+   - **Instant Safe Download**: To bypass Google Chrome's "not commonly downloaded" heuristics on freshly uploaded `.exe` files, landlords can directly download the portable **`4Rent-Desktop-Windows.zip`** or install the **1-Click Native Desktop App** directly from their browser.
+   - **Android Integrity**: The mobile app (`4Rent-v1.0.0-release.apk`) is self-contained with hardware biometric authentication support and native camera integration.
+
+---
 
 All official distributables are cleanly compiled and hosted for direct download:
 

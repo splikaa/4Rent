@@ -219,7 +219,7 @@ namespace FourRent.Launcher
 
             // Secondary Pin Shortcut Button
             btnCreateShortcut = new Button();
-            btnCreateShortcut.Text = "📌   Pin 4Rent to Windows Desktop (with Official 4R Icon)";
+            btnCreateShortcut.Text = "📌   Pin 4Rent to Desktop & Taskbar (with Official Icon)";
             btnCreateShortcut.UseMnemonic = false;
             btnCreateShortcut.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             btnCreateShortcut.BackColor = Color.FromArgb(22, 31, 48);
@@ -425,7 +425,7 @@ namespace FourRent.Launcher
                 {
                     ProcessStartInfo psi = new ProcessStartInfo();
                     psi.FileName = browser;
-                    psi.Arguments = "--app=\"" + url + "\" --start-maximized";
+                    psi.Arguments = "--app=\"" + url + "\" --start-maximized --window-state=maximized --new-window";
                     psi.UseShellExecute = false;
                     Process.Start(psi);
                     return true;
@@ -450,16 +450,17 @@ namespace FourRent.Launcher
                 if (shellType == null) return false;
 
                 dynamic shell = Activator.CreateInstance(shellType);
-                string desktopFolder = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                string shortcutPath = Path.Combine(desktopFolder, "4Rent Management System.lnk");
-
-                dynamic shortcut = shell.CreateShortcut(shortcutPath);
                 string browser = FindBrowserExecutable();
+
+                // 1. Desktop Shortcut
+                string desktopFolder = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                string desktopShortcutPath = Path.Combine(desktopFolder, "4Rent Management System.lnk");
+                dynamic shortcut = shell.CreateShortcut(desktopShortcutPath);
 
                 if (!string.IsNullOrEmpty(browser))
                 {
                     shortcut.TargetPath = browser;
-                    shortcut.Arguments = "--app=\"" + url + "\" --start-maximized";
+                    shortcut.Arguments = "--app=\"" + url + "\" --start-maximized --window-state=maximized --new-window";
                 }
                 else
                 {
@@ -475,8 +476,44 @@ namespace FourRent.Launcher
                     shortcut.IconLocation = browser + ",0";
                 }
 
+                shortcut.WindowStyle = 3; // 3 = Maximized window on launch
                 shortcut.Description = "4Rent Management System - Full Screen Standalone Desktop";
                 shortcut.Save();
+
+                // 2. Start Menu Programs Shortcut (Enables Windows "Pin to taskbar" indexing)
+                try
+                {
+                    string programsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+                    if (Directory.Exists(programsFolder))
+                    {
+                        string progShortcutPath = Path.Combine(programsFolder, "4Rent Management System.lnk");
+                        dynamic progShortcut = shell.CreateShortcut(progShortcutPath);
+                        if (!string.IsNullOrEmpty(browser))
+                        {
+                            progShortcut.TargetPath = browser;
+                            progShortcut.Arguments = "--app=\"" + url + "\" --start-maximized --window-state=maximized --new-window";
+                        }
+                        else
+                        {
+                            progShortcut.TargetPath = url;
+                        }
+
+                        if (!string.IsNullOrEmpty(customIconPath) && File.Exists(customIconPath))
+                        {
+                            progShortcut.IconLocation = customIconPath + ",0";
+                        }
+                        else if (!string.IsNullOrEmpty(browser))
+                        {
+                            progShortcut.IconLocation = browser + ",0";
+                        }
+
+                        progShortcut.WindowStyle = 3;
+                        progShortcut.Description = "4Rent Management System - Full Screen Standalone Desktop";
+                        progShortcut.Save();
+                    }
+                }
+                catch { }
+
                 return true;
             }
             catch
@@ -521,11 +558,11 @@ namespace FourRent.Launcher
             bool ok = CreateDesktopShortcut(url, iconPath);
             if (ok)
             {
-                lblStatus.Text = "Status: ✓ Shortcut '4Rent Management System' created on Desktop!";
+                lblStatus.Text = "Status: ✓ Pinned to Desktop & Start Menu! Ready to pin to Taskbar.";
                 lblStatus.ForeColor = Color.FromArgb(52, 211, 153);
                 MessageBox.Show(
-                    "Official Desktop Shortcut created successfully on your Windows Desktop!\r\n\r\nYou can now launch 4Rent directly from your desktop anytime with the 4Rent system logo.",
-                    "4Rent Management System",
+                    "✓ Official Shortcuts created on your Windows Desktop and Start Menu!\r\n\r\n📌 To Pin to Windows Taskbar:\r\n1. Right-click the '4Rent Management System' shortcut on your Desktop or Start Menu.\r\n2. Select 'Pin to taskbar'.\r\n\r\n4Rent will now launch directly in full-screen standalone mode with the official system icon!",
+                    "4Rent Management System — Desktop & Taskbar Pinned",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
