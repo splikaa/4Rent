@@ -1,9 +1,13 @@
 import { AppDatabaseSnapshot } from '../types/rental';
 
 const DB_NAME = 'FourRentPersistentDatabase';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'app_state';
 const PRIMARY_KEY = 'master_snapshot';
+export const METER_IMAGES_STORE = 'meter_images';
+
+// In-memory fallback for environments where IndexedDB is blocked or unavailable
+const memoryMasterImageStore = new Map<string, string>();
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -12,15 +16,149 @@ function openDb(): Promise<IDBDatabase> {
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(METER_IMAGES_STORE)) {
+        db.createObjectStore(METER_IMAGES_STORE);
       }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+/**
+ * Saves a full-resolution master meter photo into the dedicated IndexedDB `meter_images` store.
+ * Eliminates localStorage QuotaExceededError by offloading high-resolution master captures.
+ * Returns the persistent meterKey reference string (e.g., 'idb:meter:room1-curr-1718000000').
+ */
+export async function saveMeterMasterImage(
+  readingId: string,
+  imageBlobOrDataUrl: string
+): Promise<string> {
+  if (!imageBlobOrDataUrl) return '';
+
+  const cleanId = readingId.trim() || `meter_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const meterKey = cleanId.startsWith('idb:meter:') ? cleanId : `idb:meter:${cleanId}`;
+
+  // Always keep in memory fallback
+  memoryMasterImageStore.set(meterKey, imageBlobOrDataUrl);
+
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(METER_IMAGES_STORE, 'readwrite');
+      const store = tx.objectStore(METER_IMAGES_STORE);
+      const req = store.put(imageBlobOrDataUrl, meterKey);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (err) {
+    console.warn('[4Rent IDB] Master image storage fallback active for key:', meterKey, err);
+  }
+
+  return meterKey;
+}
+
+/**
+ * Retrieves the full-resolution master meter image from IndexedDB.
+ * Supports direct data URLs, blob URLs, and persistent 'idb:meter:...' keys.
+ */
+export async function getMeterMasterImage(meterKey: string): Promise<string | null> {
+  if (!meterKey) return null;
+
+  // If the key is already a raw data URL or http/blob URL, return it immediately
+  if (
+    meterKey.startsWith('data:') ||
+    meterKey.startsWith('blob:') ||
+    meterKey.startsWith('http://') ||
+    meterKey.startsWith('https://')
+  ) {
+    return meterKey;
+  }
+
+  // Check in-memory fallback first
+  if (memoryMasterImageStore.has(meterKey)) {
+    return memoryMasterImageStore.get(meterKey) || null;
+  }
+
+  try {
+    const db = await openDb();
+    const result = await new Promise<string | Blob | null>((resolve, reject) => {
+      const tx = db.transaction(METER_IMAGES_STORE, 'readonly');
+      const store = tx.objectStore(METER_IMAGES_STORE);
+      const req = store.get(meterKey);
+      req.onsuccess = () => {
+        if (req.result) {
+          resolve(req.result);
+        } else {
+          // Try without or with 'idb:meter:' prefix if mismatch
+          const altKey = meterKey.startsWith('idb:meter:')
+            ? meterKey.replace('idb:meter:', '')
+            : `idb:meter:${meterKey}`;
+          const altReq = store.get(altKey);
+          altReq.onsuccess = () => resolve(altReq.result || null);
+          altReq.onerror = () => resolve(null);
+        }
+      };
+      req.onerror = () => reject(req.error);
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+
+    if (!result) return null;
+
+    if (typeof result === 'string') {
+      memoryMasterImageStore.set(meterKey, result);
+      return result;
+    }
+
+    if (result instanceof Blob) {
+      return new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = reader.result as string;
+          memoryMasterImageStore.set(meterKey, res);
+          resolve(res);
+        };
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(result);
+      });
+    }
+
+    return null;
+  } catch (err) {
+    console.warn('[4Rent IDB] Could not load master meter image for key:', meterKey, err);
+    return memoryMasterImageStore.get(meterKey) || null;
+  }
+}
+
+/**
+ * Removes a master meter photo from the persistent store when deleting a room or bill.
+ */
+export async function deleteMeterMasterImage(meterKey: string): Promise<void> {
+  if (!meterKey) return;
+  memoryMasterImageStore.delete(meterKey);
+
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(METER_IMAGES_STORE, 'readwrite');
+      const store = tx.objectStore(METER_IMAGES_STORE);
+      const req = store.delete(meterKey);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // Ignore deletion errors
+  }
 }
 
 /**

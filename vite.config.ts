@@ -6,6 +6,7 @@ export default defineConfig({
   base: './',
   plugins: [react(), tailwindcss()],
   build: {
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
         entryFileNames: 'assets/app.js',

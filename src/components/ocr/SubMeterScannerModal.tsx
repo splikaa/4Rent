@@ -33,6 +33,8 @@ import {
   recognizeSubMeterReading,
   SubMeterHardwareInspection,
 } from '../../services/ocrService';
+import { saveMeterMasterImage } from '../../services/idbDatabase';
+import { MeterPhotoLightboxModal } from './MeterPhotoLightboxModal';
 
 interface SubMeterScannerModalProps {
   isOpen: boolean;
@@ -127,6 +129,34 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
 
+  // 1:1 Pixel Inspection Lightbox State
+  const [lightboxState, setLightboxState] = useState<{
+    isOpen: boolean;
+    imageUrl: string;
+    title: string;
+    roiCropUrl?: string;
+    readingValue?: string;
+  }>({
+    isOpen: false,
+    imageUrl: '',
+    title: '',
+  });
+
+  const openLightbox = (
+    imageUrl: string,
+    title: string,
+    roiCropUrl?: string,
+    readingValue?: string
+  ) => {
+    setLightboxState({
+      isOpen: true,
+      imageUrl,
+      title,
+      roiCropUrl,
+      readingValue,
+    });
+  };
+
   useEffect(() => {
     if (initialRoom) {
       setSelectedRoomId(initialRoom.id);
@@ -213,8 +243,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
           },
         });
       } catch {
@@ -253,37 +283,53 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     );
 
     try {
+      if (selectedRoom) {
+        saveMeterMasterImage(
+          `${selectedRoom.id}_${slot}_${Date.now()}`,
+          dataUrl
+        ).catch(() => {});
+      }
+
       const result = await recognizeSubMeterReading(dataUrl, (pct) =>
         setOcrProgress(pct)
       );
 
-      const detectedVal =
-        result.reading !== null && !Number.isNaN(result.reading)
-          ? result.reading
-          : 0.0;
+      const isRecognized =
+        result.reading !== null && !Number.isNaN(result.reading);
+      const detectedVal = isRecognized ? result.reading! : 0.0;
 
       if (slot === 'prev') {
         setPrevMeterSnapshotUrl(result.processedImageDataUrl);
         setPrevMeterCropUrl(result.registerCropDataUrl);
-        setPrevReading(String(detectedVal));
+        if (isRecognized) {
+          setPrevReading(String(detectedVal));
+        }
         // Automatically switch focus to Current slot for convenient next step
         setTargetMeterSlot('curr');
       } else {
         setCurrMeterSnapshotUrl(result.processedImageDataUrl);
         setCurrMeterCropUrl(result.registerCropDataUrl);
-        setCurrReading(String(detectedVal));
+        if (isRecognized) {
+          setCurrReading(String(detectedVal));
+        }
       }
 
       setOcrConfidence(result.confidence);
       setMeterInspection(result.inspection || null);
-      // Auto-lock only when a valid reading was recognized; keep unlocked if 0.0 to allow immediate typing
-      setIsReadingsLocked(detectedVal > 0);
+      // Auto-lock only when a valid reading was recognized; keep unlocked if ambiguous to allow immediate typing
+      setIsReadingsLocked(isRecognized && detectedVal > 0);
 
-      setOcrStatusMsg(
-        `✓ Enhanced & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
-          slot === 'prev' ? 'Previous Sub-Meter (#1)' : 'Current Sub-Meter (#2)'
-        }! Bill calculations updated.`
-      );
+      if (isRecognized) {
+        setOcrStatusMsg(
+          `✓ Enhanced & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
+            slot === 'prev' ? 'Previous Sub-Meter (#1)' : 'Current Sub-Meter (#2)'
+          }! Bill calculations updated.`
+        );
+      } else {
+        setOcrStatusMsg(
+          'Photo attached. Could not auto-detect digits with high confidence. Please verify from the close-up photo above.'
+        );
+      }
     } catch {
       setOcrStatusMsg('Photo attached. Please verify the kWh value below.');
     } finally {
@@ -345,14 +391,21 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const handleCaptureFromCamera = async () => {
     if (!videoRef.current) return;
-    const capturedDataUrl = preprocessMeterImage(videoRef.current, {
-      x: 0,
-      y: 0,
-      w: 1,
-      h: 1,
-    });
-    stopCamera();
-    await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot);
+    const video = videoRef.current;
+    const width = video.videoWidth || 1920;
+    const height = video.videoHeight || 1080;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(video, 0, 0, width, height);
+      const capturedDataUrl = canvas.toDataURL('image/jpeg', 0.96);
+      stopCamera();
+      await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -460,8 +513,16 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     const finalCurrCrop =
       currMeterCropUrl || generateSimulatedValueCropDataUrl(currNum);
 
+    const billId = `bill-${Date.now()}`;
+    if (finalPrevPhoto) {
+      saveMeterMasterImage(`${billId}_prev`, finalPrevPhoto).catch(() => {});
+    }
+    if (finalCurrPhoto) {
+      saveMeterMasterImage(`${billId}_curr`, finalCurrPhoto).catch(() => {});
+    }
+
     const newBill: BillRecord = {
-      id: `bill-${Date.now()}`,
+      id: billId,
       receiptNo: receiptCode,
       roomId: selectedRoom.id,
       roomName: selectedRoom.name,
@@ -678,20 +739,38 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   </div>
                   {prevMeterSnapshotUrl ? (
                     <div className="space-y-1">
-                      <img
-                        src={prevMeterSnapshotUrl}
-                        alt="Previous Meter"
-                        className="h-16 w-full object-contain rounded-lg bg-[#090C12]"
-                      />
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openLightbox(
+                            prevMeterSnapshotUrl,
+                            `Previous Sub-Meter Proof — ${selectedRoom.name}`,
+                            prevMeterCropUrl,
+                            `${prevNum.toFixed(1)} kWh`
+                          );
+                        }}
+                        className="relative group cursor-zoom-in"
+                        title="Click to inspect full-resolution 1:1 photo"
+                      >
+                        <img
+                          src={prevMeterSnapshotUrl}
+                          alt="Previous Meter"
+                          className="h-28 sm:h-36 w-full object-contain rounded-lg bg-[#090C12] border border-slate-700/60 group-hover:border-amber-400 transition"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold text-amber-300 transition">
+                          <ZoomIn className="w-4 h-4" />
+                          <span>100% Lossless Inspect</span>
+                        </div>
+                      </div>
                       {prevMeterCropUrl && (
                         <div className="relative">
                           <img
                             src={prevMeterCropUrl}
                             alt="Previous Value Crop"
-                            className="h-8 w-full object-contain rounded border border-emerald-500/50 bg-[#090C12]"
+                            className="h-12 sm:h-14 w-full object-contain rounded-lg border border-emerald-500/50 bg-[#090C12]"
                           />
-                          <span className="absolute bottom-0.5 right-1 text-[8px] bg-emerald-950/80 text-emerald-300 px-1 rounded">
-                            Crop
+                          <span className="absolute bottom-1 right-1.5 text-[9px] font-bold bg-emerald-950/90 text-emerald-300 px-1.5 py-0.5 rounded shadow">
+                            HD Crop
                           </span>
                         </div>
                       )}
@@ -737,20 +816,38 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   </div>
                   {currMeterSnapshotUrl ? (
                     <div className="space-y-1">
-                      <img
-                        src={currMeterSnapshotUrl}
-                        alt="Current Meter"
-                        className="h-16 w-full object-contain rounded-lg bg-[#090C12]"
-                      />
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openLightbox(
+                            currMeterSnapshotUrl,
+                            `Current Sub-Meter Proof — ${selectedRoom.name}`,
+                            currMeterCropUrl,
+                            `${currNum.toFixed(1)} kWh`
+                          );
+                        }}
+                        className="relative group cursor-zoom-in"
+                        title="Click to inspect full-resolution 1:1 photo"
+                      >
+                        <img
+                          src={currMeterSnapshotUrl}
+                          alt="Current Meter"
+                          className="h-28 sm:h-36 w-full object-contain rounded-lg bg-[#090C12] border border-slate-700/60 group-hover:border-amber-400 transition"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold text-amber-300 transition">
+                          <ZoomIn className="w-4 h-4" />
+                          <span>100% Lossless Inspect</span>
+                        </div>
+                      </div>
                       {currMeterCropUrl && (
                         <div className="relative">
                           <img
                             src={currMeterCropUrl}
                             alt="Current Value Crop"
-                            className="h-8 w-full object-contain rounded border border-amber-500/50 bg-[#090C12]"
+                            className="h-12 sm:h-14 w-full object-contain rounded-lg border border-amber-500/50 bg-[#090C12]"
                           />
-                          <span className="absolute bottom-0.5 right-1 text-[8px] bg-amber-950/80 text-amber-300 px-1 rounded">
-                            Crop
+                          <span className="absolute bottom-1 right-1.5 text-[9px] font-bold bg-amber-950/90 text-amber-300 px-1.5 py-0.5 rounded shadow">
+                            HD Crop
                           </span>
                         </div>
                       )}
@@ -1606,6 +1703,16 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* 1:1 Pixel Inspection Lightbox Modal */}
+      <MeterPhotoLightboxModal
+        isOpen={lightboxState.isOpen}
+        onClose={() => setLightboxState((prev) => ({ ...prev, isOpen: false }))}
+        imageUrl={lightboxState.imageUrl}
+        title={lightboxState.title}
+        roiCropUrl={lightboxState.roiCropUrl}
+        readingValue={lightboxState.readingValue}
+      />
     </div>
   );
 };

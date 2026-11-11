@@ -10,14 +10,26 @@ export interface SubMeterHardwareInspection {
   isBlankUnpoweredLcd?: boolean;
 }
 
+export interface OcrOptions {
+  onProgress?: (pct: number) => void;
+  targetSlot?: 'prev' | 'curr';
+  usePsm?: string;
+}
+
 export interface OcrScanResult {
   reading: number | null;
+  readingValue: string;
   rawText: string;
   confidence: number;
   processedImageDataUrl: string;
+  fullResUrl: string;
   registerCropDataUrl: string;
+  roiCropUrl: string;
+  isAuthentic: boolean;
   inspection?: SubMeterHardwareInspection;
 }
+
+export type SubMeterOcrResult = OcrScanResult;
 
 interface CropBox {
   x: number;
@@ -433,18 +445,19 @@ export function buildVerifiedValueCropScreenshot(
   label = 'VERIFIED REGISTER VALUE'
 ): string {
   const srcW =
-    img instanceof HTMLVideoElement ? img.videoWidth || 640 : img.width || 640;
+    img instanceof HTMLVideoElement ? img.videoWidth || 1280 : img.width || 1280;
   const srcH =
-    img instanceof HTMLVideoElement ? img.videoHeight || 480 : img.height || 480;
+    img instanceof HTMLVideoElement ? img.videoHeight || 720 : img.height || 720;
 
   const sx = Math.max(0, Math.floor(srcW * cropBox.x));
   const sy = Math.max(0, Math.floor(srcH * cropBox.y));
   const sw = Math.max(48, Math.min(srcW - sx, Math.floor(srcW * cropBox.w)));
   const sh = Math.max(28, Math.min(srcH - sy, Math.floor(srcH * cropBox.h)));
 
-  const outW = 520;
-  const headerH = 34;
-  const imgAreaH = 166;
+  // Generate 2x crisp high-definition crop (1040x400)
+  const outW = 1040;
+  const headerH = 68;
+  const imgAreaH = 332;
   const outH = headerH + imgAreaH;
 
   const canvas = document.createElement('canvas');
@@ -456,24 +469,24 @@ export function buildVerifiedValueCropScreenshot(
   ctx.fillStyle = '#090d16';
   ctx.fillRect(0, 0, outW, outH);
 
-  // Draw the zoomed register crop
+  // Draw the zoomed register crop at ultra-high quality
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, sx, sy, sw, sh, 4, headerH + 4, outW - 8, imgAreaH - 8);
+  ctx.drawImage(img, sx, sy, sw, sh, 8, headerH + 8, outW - 16, imgAreaH - 16);
 
   // Highlight frame around the register digits
   ctx.strokeStyle = '#f59e0b';
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(4, headerH + 4, outW - 8, imgAreaH - 8);
+  ctx.lineWidth = 4;
+  ctx.strokeRect(8, headerH + 8, outW - 16, imgAreaH - 16);
 
   // Target reticle ticks in corners
   ctx.strokeStyle = '#10b981';
-  ctx.lineWidth = 3;
-  const rLeft = 18;
-  const rTop = headerH + 16;
-  const rRight = outW - 18;
-  const rBottom = outH - 16;
-  const tick = 14;
+  ctx.lineWidth = 5;
+  const rLeft = 32;
+  const rTop = headerH + 28;
+  const rRight = outW - 32;
+  const rBottom = outH - 28;
+  const tick = 28;
 
   ctx.beginPath();
   ctx.moveTo(rLeft, rTop + tick);
@@ -495,19 +508,19 @@ export function buildVerifiedValueCropScreenshot(
   ctx.fillRect(0, 0, outW, headerH);
 
   ctx.fillStyle = '#10b981';
-  ctx.font = 'bold 12px Inter, Arial, sans-serif';
+  ctx.font = 'bold 24px Inter, -apple-system, BlinkMacSystemFont, Arial, sans-serif';
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
-  ctx.fillText(`✓ ${label}`, 12, headerH / 2 + 1);
+  ctx.fillText(`✓ ${label}`, 24, headerH / 2 + 2);
 
   if (readingValue !== null && !Number.isNaN(readingValue)) {
     ctx.fillStyle = '#fbbf24';
-    ctx.font = 'bold 14px monospace';
+    ctx.font = 'bold 28px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
     ctx.textAlign = 'right';
-    ctx.fillText(`${readingValue.toFixed(1)} kWh`, outW - 12, headerH / 2 + 1);
+    ctx.fillText(`${readingValue.toFixed(1)} kWh`, outW - 24, headerH / 2 + 2);
   }
 
-  return canvas.toDataURL('image/jpeg', 0.92);
+  return canvas.toDataURL('image/jpeg', 0.98);
 }
 
 /**
@@ -516,8 +529,8 @@ export function buildVerifiedValueCropScreenshot(
 export function generateSimulatedValueCropDataUrl(readingValue: number): string {
   const fullUrl = generateSimulatedSubMeterDataUrl(readingValue);
   const canvas = document.createElement('canvas');
-  canvas.width = 520;
-  canvas.height = 170;
+  canvas.width = 1040;
+  canvas.height = 340;
   const ctx = canvas.getContext('2d');
   if (!ctx) return fullUrl;
 
@@ -528,46 +541,46 @@ export function generateSimulatedValueCropDataUrl(readingValue: number): string 
     .slice(0, 1);
 
   ctx.fillStyle = '#090d16';
-  ctx.fillRect(0, 0, 520, 170);
+  ctx.fillRect(0, 0, 1040, 340);
 
   ctx.fillStyle = '#0f172a';
-  ctx.fillRect(0, 0, 520, 32);
+  ctx.fillRect(0, 0, 1040, 64);
   ctx.fillStyle = '#10b981';
-  ctx.font = 'bold 12px Inter, Arial, sans-serif';
+  ctx.font = 'bold 24px Inter, Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('✓ REGISTER VALUE CROP', 12, 16);
+  ctx.fillText('✓ REGISTER VALUE CROP (HIGH DEFINITION)', 24, 32);
 
   ctx.fillStyle = '#fbbf24';
-  ctx.font = 'bold 14px monospace';
+  ctx.font = 'bold 28px monospace';
   ctx.textAlign = 'right';
-  ctx.fillText(`${safeVal.toFixed(1)} kWh`, 508, 16);
+  ctx.fillText(`${safeVal.toFixed(1)} kWh`, 1016, 32);
 
-  const startX = 46;
-  const drumW = 66;
-  const drumH = 96;
-  const drumY = 50;
+  const startX = 92;
+  const drumW = 132;
+  const drumH = 192;
+  const drumY = 100;
 
   for (let i = 0; i < 6; i++) {
     const isRedTenths = i === 5;
-    const x = startX + i * (drumW + 7);
+    const x = startX + i * (drumW + 14);
     ctx.fillStyle = isRedTenths ? '#dc2626' : '#111827';
     ctx.fillRect(x, drumY, drumW, drumH);
     ctx.strokeStyle = isRedTenths ? '#f87171' : '#475569';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 4;
     ctx.strokeRect(x, drumY, drumW, drumH);
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 50px monospace';
+    ctx.font = 'bold 100px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const digit = isRedTenths ? decPart : intPart[i];
-    ctx.fillText(digit, x + drumW / 2, drumY + drumH / 2 + 2);
+    ctx.fillText(digit, x + drumW / 2, drumY + drumH / 2 + 4);
   }
 
   ctx.strokeStyle = '#f59e0b';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(2, 34, 516, 134);
+  ctx.lineWidth = 4;
+  ctx.strokeRect(4, 68, 1032, 268);
 
   return canvas.toDataURL('image/png');
 }
@@ -576,13 +589,14 @@ export function generateSimulatedValueCropDataUrl(readingValue: number): string 
  * Local 100% Offline Register Window Analyzer Fallback:
  * When offline or when Tesseract cannot parse a stylized mechanical cyclometer drum or unpowered LCD,
  * inspects the cropped register window directly on Canvas to determine the reading.
+ * Authentic analysis: never injects pseudo-random modulo digits.
  */
 function analyzeRegisterWindowOffline(
   img: HTMLImageElement,
   cropBox: CropBox
-): { reading: number; inspection: SubMeterHardwareInspection } {
-  const w = img.width || 640;
-  const h = img.height || 640;
+): { reading: number | null; confidence: number; inspection: SubMeterHardwareInspection } {
+  const w = img.width || 1280;
+  const h = img.height || 720;
   const sx = Math.max(0, Math.floor(w * cropBox.x));
   const sy = Math.max(0, Math.floor(h * cropBox.y));
   const sw = Math.max(48, Math.floor(w * cropBox.w));
@@ -594,11 +608,12 @@ function analyzeRegisterWindowOffline(
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     return {
-      reading: 0.0,
+      reading: null,
+      confidence: 0,
       inspection: {
         brandModel: 'Electric Sub-Meter',
         registerType: 'Register Window Scan',
-        registerBreakdown: 'Verified Register: 0.0 kWh',
+        registerBreakdown: 'Could not auto-detect digits. Please verify from close-up photo.',
         serialOrBarcode: 'Faceplate Serial Excluded',
         electricalSpecs: '220-240V • 60Hz',
       },
@@ -612,7 +627,6 @@ function analyzeRegisterWindowOffline(
   let lumSum = 0;
   let lumSqSum = 0;
   let redRightPixels = 0;
-  const totalPixels = 240 * 80;
 
   for (let y = 12; y < 68; y++) {
     for (let x = 16; x < 224; x++) {
@@ -637,10 +651,11 @@ function analyzeRegisterWindowOffline(
   if (stdDev < 14 && redRightPixels < 25) {
     return {
       reading: 0.0,
+      confidence: 96,
       inspection: {
         brandModel: 'Digital LCD Sub-Meter',
         registerType: 'Digital LCD Register (Blank / Unpowered)',
-        registerBreakdown: 'LCD Display Off/Zero → 0.0 kWh',
+        registerBreakdown: 'LCD Display Off/Zero → 0.0 kWh (Verified)',
         serialOrBarcode: 'Faceplate Serial Excluded',
         electricalSpecs: '240V • 60Hz Sub-Meter',
         isBlankUnpoweredLcd: true,
@@ -650,7 +665,9 @@ function analyzeRegisterWindowOffline(
 
   // Analyze 6 drum slots across the active register strip (x: 36..204, y: 18..62)
   const digits: number[] = [];
+  let isConfident = true;
   const slotW = (204 - 36) / 6;
+
   for (let slot = 0; slot < 6; slot++) {
     const x0 = Math.floor(36 + slot * slotW + 3);
     const x1 = Math.floor(36 + (slot + 1) * slotW - 3);
@@ -666,7 +683,7 @@ function analyzeRegisterWindowOffline(
       for (let x = x0; x < x1; x++) {
         const idx = (y * 240 + x) * 4;
         const lum = data[idx] * 0.3 + data[idx + 1] * 0.59 + data[idx + 2] * 0.11;
-        // Digits on dark drums are bright (> 155); digits on light LCD are dark (< 95)
+        // Digits on dark drums are bright (> meanLum + 26); digits on light LCD are dark (< meanLum - 26)
         const isInk = meanLum < 135 ? lum > meanLum + 26 : lum < meanLum - 26;
         if (isInk) {
           totalInk++;
@@ -683,7 +700,7 @@ function analyzeRegisterWindowOffline(
       }
     }
 
-    // Most leading cyclometer drums are '0' (hollow center: low centerInk relative to border)
+    // Authentic structural digit matching - NO modulo guessing!
     if (totalInk < 12 || (slot < 3 && centerInk < totalInk * 0.28)) {
       digits.push(0);
     } else if (centerInk < totalInk * 0.24 && leftInk > 0 && rightInk > 0) {
@@ -697,8 +714,24 @@ function analyzeRegisterWindowOffline(
     } else if (midInk > topInk && leftInk > rightInk * 0.9) {
       digits.push(4);
     } else {
-      digits.push(slot === 5 ? ((totalInk % 9) + 1) % 10 : 0);
+      // Slot is ambiguous: return null reading and require human close-up confirmation
+      isConfident = false;
+      break;
     }
+  }
+
+  if (!isConfident || digits.length !== 6) {
+    return {
+      reading: null,
+      confidence: 0,
+      inspection: {
+        brandModel: redRightPixels > 25 ? 'Mechanical Cyclometer kWh Sub-Meter' : 'Digital kWh Sub-Meter',
+        registerType: 'Sub-Meter Register Scan (Human Confirmation Required)',
+        registerBreakdown: 'Could not auto-detect digits with high confidence. Please verify from the close-up photo above.',
+        serialOrBarcode: 'Faceplate Serial Excluded',
+        electricalSpecs: '220-240V • 60Hz Single-Phase',
+      },
+    };
   }
 
   const intVal =
@@ -712,6 +745,7 @@ function analyzeRegisterWindowOffline(
 
   return {
     reading,
+    confidence: 85,
     inspection: {
       brandModel:
         redRightPixels > 25
@@ -721,7 +755,7 @@ function analyzeRegisterWindowOffline(
         redRightPixels > 25
           ? 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)'
           : 'Digital Register Window',
-      registerBreakdown: `Register (Counter): Black Drums: ${digits.slice(0, 5).join('')} • Red Tenths Drum: .${digits[5]} → ${reading.toFixed(1)} kWh`,
+      registerBreakdown: `Register: Black Drums: ${digits.slice(0, 5).join('')} • Red Tenths Drum: .${digits[5]} → ${reading.toFixed(1)} kWh`,
       serialOrBarcode: 'Faceplate Serial Excluded',
       electricalSpecs: '220-240V • 60Hz Single-Phase',
     },
@@ -729,8 +763,8 @@ function analyzeRegisterWindowOffline(
 }
 
 /**
- * Preserves the full-color clarity of the sub-meter photo for the Official Receipt
- * while optionally cropping only when capturing from a live video stream.
+ * Preserves the full sensor resolution and sharpness of the sub-meter photo.
+ * Eliminates forced 960px downscaling, ensuring full 1080p, 4K, 12MP/48MP clarity.
  */
 export function preprocessMeterImage(
   sourceCanvasOrImg: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
@@ -738,23 +772,35 @@ export function preprocessMeterImage(
 ): string {
   const srcWidth =
     sourceCanvasOrImg instanceof HTMLVideoElement
-      ? sourceCanvasOrImg.videoWidth || 640
-      : sourceCanvasOrImg.width || 640;
+      ? sourceCanvasOrImg.videoWidth || 1920
+      : sourceCanvasOrImg.width || 1920;
   const srcHeight =
     sourceCanvasOrImg instanceof HTMLVideoElement
-      ? sourceCanvasOrImg.videoHeight || 480
-      : sourceCanvasOrImg.height || 480;
+      ? sourceCanvasOrImg.videoHeight || 1080
+      : sourceCanvasOrImg.height || 1080;
 
   const sx = Math.max(0, Math.floor(srcWidth * cropRatio.x));
   const sy = Math.max(0, Math.floor(srcHeight * cropRatio.y));
   const sw = Math.max(64, Math.floor(srcWidth * cropRatio.w));
   const sh = Math.max(32, Math.floor(srcHeight * cropRatio.h));
 
+  // If full image and already an HTMLImageElement with data URL, preserve pristine source directly
+  if (
+    cropRatio.x === 0 &&
+    cropRatio.y === 0 &&
+    cropRatio.w === 1 &&
+    cropRatio.h === 1 &&
+    sourceCanvasOrImg instanceof HTMLImageElement &&
+    sourceCanvasOrImg.src &&
+    sourceCanvasOrImg.src.startsWith('data:')
+  ) {
+    return sourceCanvasOrImg.src;
+  }
+
+  // Preserve full capture resolution without forced downscaling
   const outCanvas = document.createElement('canvas');
-  const maxDim = 960;
-  const scale = Math.min(1, maxDim / Math.max(sw, sh));
-  outCanvas.width = Math.max(320, Math.round(sw * scale));
-  outCanvas.height = Math.max(240, Math.round(sh * scale));
+  outCanvas.width = sw;
+  outCanvas.height = sh;
 
   const ctx = outCanvas.getContext('2d');
   if (!ctx) return '';
@@ -773,56 +819,132 @@ export function preprocessMeterImage(
     outCanvas.height
   );
 
-  return outCanvas.toDataURL('image/jpeg', 0.92);
+  return outCanvas.toDataURL('image/jpeg', 0.96);
 }
 
+/**
+ * Computes the optimal Otsu binarization threshold to maximize inter-class luminance variance.
+ */
+function computeOtsuThreshold(grayData: Uint8Array, total: number): number {
+  const histogram = new Int32Array(256);
+  for (let i = 0; i < total; i++) {
+    histogram[grayData[i]]++;
+  }
+  let sumAll = 0;
+  for (let t = 0; t < 256; t++) {
+    sumAll += t * histogram[t];
+  }
+
+  let sumB = 0;
+  let wB = 0;
+  let maxVariance = 0;
+  let bestThreshold = 128;
+
+  for (let t = 0; t < 256; t++) {
+    wB += histogram[t];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+
+    sumB += t * histogram[t];
+    const mB = sumB / wB;
+    const mF = (sumAll - sumB) / wF;
+    const varBetween = wB * wF * (mB - mF) * (mB - mF);
+
+    if (varBetween > maxVariance) {
+      maxVariance = varBetween;
+      bestThreshold = t;
+    }
+  }
+
+  return bestThreshold;
+}
+
+/**
+ * Crops the dial register window with contrast normalization, dark drum inversion,
+ * adaptive Otsu binarization, and sharpening for high-accuracy Tesseract character recognition.
+ */
 function buildRegisterWindowCropForOcr(
   img: HTMLImageElement,
   cropBox: CropBox
 ): string {
-  const w = img.width || 640;
-  const h = img.height || 640;
+  const w = img.width || 1280;
+  const h = img.height || 720;
 
   const sx = Math.max(0, Math.floor(w * cropBox.x));
   const sy = Math.max(0, Math.floor(h * cropBox.y));
   const sw = Math.max(64, Math.floor(w * cropBox.w));
   const sh = Math.max(32, Math.floor(h * cropBox.h));
 
+  // Maintain crisp resolution for OCR: width at least 960 or natural sw
+  const targetW = Math.max(960, sw);
+  const targetH = Math.max(240, Math.round((targetW * sh) / sw));
+
   const canvas = document.createElement('canvas');
-  canvas.width = 720;
-  canvas.height = Math.max(160, Math.round((720 * sh) / sw));
+  canvas.width = targetW;
+  canvas.height = targetH;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const imgData = ctx.getImageData(0, 0, targetW, targetH);
   const data = imgData.data;
+  const totalPixels = targetW * targetH;
 
-  // 1. Contrast stretching
+  // 1. Calculate luminance and compute min/max for contrast normalization
+  const lumArray = new Float32Array(totalPixels);
   let minLum = 255;
   let maxLum = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  let lumSum = 0;
+
+  for (let i = 0; i < totalPixels; i++) {
+    const idx = i * 4;
+    const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+    lumArray[i] = lum;
     if (lum < minLum) minLum = lum;
     if (lum > maxLum) maxLum = lum;
-  }
-  const range = Math.max(1, maxLum - minLum);
-  for (let i = 0; i < data.length; i += 4) {
-    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const norm = ((lum - minLum) / range) * 255;
-    const c = Math.min(255, Math.max(0, (norm - 128) * 1.6 + 128));
-    data[i] = c;
-    data[i + 1] = c;
-    data[i + 2] = c;
+    lumSum += lum;
   }
 
-  // 2. Unsharp sharpening filter for blurry or slightly out-of-focus captures
+  const meanLum = lumSum / totalPixels;
+  // Dark drum inversion: mechanical cyclometer drums are typically dark (mean lum < 125) with bright digits.
+  // Inverting makes digits dark on light background, matching Tesseract's training model.
+  const isDarkDrum = meanLum < 125;
+
+  const range = Math.max(20, maxLum - minLum);
+  const grayData = new Uint8Array(totalPixels);
+
+  for (let i = 0; i < totalPixels; i++) {
+    const norm = Math.min(255, Math.max(0, ((lumArray[i] - minLum) / range) * 255));
+    const inverted = isDarkDrum ? 255 - norm : norm;
+    grayData[i] = Math.round(inverted);
+  }
+
+  // 2. Adaptive Binarization (Otsu threshold)
+  const otsuThreshold = computeOtsuThreshold(grayData, totalPixels);
+
+  // 3. Contrast adjustment with edge preservation
+  for (let i = 0; i < totalPixels; i++) {
+    const idx = i * 4;
+    const val = grayData[i];
+    const binarized =
+      val < otsuThreshold - 12
+        ? 0
+        : val > otsuThreshold + 12
+        ? 255
+        : Math.round(((val - (otsuThreshold - 12)) / 24) * 255);
+    data[idx] = binarized;
+    data[idx + 1] = binarized;
+    data[idx + 2] = binarized;
+  }
+
+  // 4. Sharpening filter to enhance digit stroke contours
   const copy = new Uint8ClampedArray(data);
-  const cw = canvas.width;
-  const ch = canvas.height;
+  const cw = targetW;
+  const ch = targetH;
   for (let y = 1; y < ch - 1; y++) {
     for (let x = 1; x < cw - 1; x++) {
       const idx = (y * cw + x) * 4;
@@ -831,7 +953,6 @@ function buildRegisterWindowCropForOcr(
       const left = (y * cw + (x - 1)) * 4;
       const right = (y * cw + (x + 1)) * 4;
 
-      // 3x3 Sharpen Kernel: center * 5 - (top + bot + left + right)
       const val = 5 * copy[idx] - copy[top] - copy[bot] - copy[left] - copy[right];
       const clamped = Math.max(0, Math.min(255, val));
       data[idx] = clamped;
@@ -856,15 +977,20 @@ function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
 
 /**
  * Multi-Stage Sub-Meter Visual Inspector, Value Cropper & Auto-Reader:
- * 1. Matches calibrated landlord sub-meter profiles (Safari SY-168, Static TYPE-SP1, GE kV2c, Cirtech MT-60i).
- * 2. Generates a zoomed-in cropped screenshot of the register value itself (`registerCropDataUrl`).
- * 3. Runs Tesseract OCR with a fast offline fallback (`analyzeRegisterWindowOffline`) so a verified reading
- *    is ALWAYS extracted and automatically inserted into the selected slot (Previous or Current) both online and offline.
+ * 1. Matches calibrated landlord sub-meter profiles.
+ * 2. Generates a zoomed-in cropped screenshot of the register value (`registerCropDataUrl`).
+ * 3. Runs Tesseract OCR with character whitelist ('0123456789.') and Page Segmentation Mode (PSM 7/8).
+ * 4. Fallback to clean offline analysis without fabricated digits.
  */
 export async function recognizeSubMeterReading(
   imageDataUrl: string,
-  onProgress?: (pct: number) => void
+  optionsOrProgress?: ((pct: number) => void) | OcrOptions
 ): Promise<OcrScanResult> {
+  const onProgress =
+    typeof optionsOrProgress === 'function'
+      ? optionsOrProgress
+      : optionsOrProgress?.onProgress;
+
   try {
     if (onProgress) onProgress(15);
     const img = await loadImageElement(imageDataUrl);
@@ -875,7 +1001,7 @@ export async function recognizeSubMeterReading(
       h: 1,
     });
 
-    if (onProgress) onProgress(45);
+    if (onProgress) onProgress(35);
     const sig = computeBoxRgbSignature(img);
     const matchedProfile = matchCalibratedSubMeterProfile(sig);
 
@@ -889,10 +1015,14 @@ export async function recognizeSubMeterReading(
       if (onProgress) onProgress(100);
       return {
         reading: matchedProfile.reading,
+        readingValue: matchedProfile.reading.toFixed(1),
         rawText: `${matchedProfile.inspection.brandModel} | ${matchedProfile.inspection.registerBreakdown}`,
         confidence: matchedProfile.confidence,
         processedImageDataUrl: preservedColorUrl || imageDataUrl,
+        fullResUrl: preservedColorUrl || imageDataUrl,
         registerCropDataUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
+        roiCropUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
+        isAuthentic: true,
         inspection: matchedProfile.inspection,
       };
     }
@@ -905,36 +1035,85 @@ export async function recognizeSubMeterReading(
     let rawText = '';
     let confidence = 0;
 
-    // Multi-pass Tesseract OCR:
-    // Pass 1: Try the enhanced cropped register window
-    // Pass 2: If register crop yields no reading, try the full meter faceplate photo
+    // Configured Tesseract OCR with Whitelist ('0123456789.') and PSM (SINGLE_LINE: 7 / SINGLE_WORD: 8)
     if (typeof navigator === 'undefined' || navigator.onLine !== false) {
       try {
-        const runTesseract = (url: string, timeoutMs: number) => {
-          const ocrPromise = Tesseract.recognize(url, 'eng', {
-            logger: (m: any) => {
-              if (m.status === 'recognizing text' && onProgress) {
-                onProgress(Math.min(94, 50 + Math.round((m.progress || 0) * 44)));
-              }
-            },
-          });
+        const runTesseract = async (
+          url: string,
+          timeoutMs: number,
+          psmMode: string = Tesseract.PSM.SINGLE_LINE
+        ) => {
+          let worker: Tesseract.Worker | null = null;
           const timeoutPromise = new Promise<null>((resolve) =>
             setTimeout(() => resolve(null), timeoutMs)
           );
+
+          const ocrPromise = (async () => {
+            try {
+              const createdWorker = await Tesseract.createWorker('eng', 1, {
+                logger: (m: any) => {
+                  if (m.status === 'recognizing text' && onProgress) {
+                    onProgress(Math.min(94, 45 + Math.round((m.progress || 0) * 50)));
+                  }
+                },
+              });
+              worker = createdWorker;
+
+              await createdWorker.setParameters({
+                tessedit_char_whitelist: '0123456789.',
+                tessedit_pageseg_mode: (psmMode as any),
+              });
+
+              const res = await createdWorker.recognize(url);
+              return res;
+            } catch {
+              // Fallback to basic recognize if worker parameters throw
+              try {
+                return await Tesseract.recognize(url, 'eng', {
+                  logger: (m: any) => {
+                    if (m.status === 'recognizing text' && onProgress) {
+                      onProgress(Math.min(94, 45 + Math.round((m.progress || 0) * 50)));
+                    }
+                  },
+                });
+              } catch {
+                return null;
+              }
+            } finally {
+              if (worker) {
+                await worker.terminate().catch(() => {});
+              }
+            }
+          })();
+
           return Promise.race([ocrPromise, timeoutPromise]);
         };
 
-        // Pass 1: register crop (up to 15s)
-        const pass1Result = await runTesseract(ocrCropUrl || imageDataUrl, 15000);
+        // Pass 1: Enhanced cropped register window with PSM SINGLE_LINE (up to 15s)
+        const pass1Result = await runTesseract(ocrCropUrl || imageDataUrl, 15000, Tesseract.PSM.SINGLE_LINE);
         if (pass1Result && pass1Result.data) {
           rawText = pass1Result.data.text || '';
           confidence = Math.round(pass1Result.data.confidence || 0);
           reading = extractMeterDigitsFromOcrText(rawText);
         }
 
-        // Pass 2: full photo fallback if crop gave no reading (up to 12s)
+        // Pass 1b: If PSM SINGLE_LINE had no result, retry crop with PSM SINGLE_WORD
+        if (reading === null && ocrCropUrl) {
+          const pass1bResult = await runTesseract(ocrCropUrl, 8000, Tesseract.PSM.SINGLE_WORD);
+          if (pass1bResult && pass1bResult.data) {
+            const pass1bText = pass1bResult.data.text || '';
+            const pass1bReading = extractMeterDigitsFromOcrText(pass1bText);
+            if (pass1bReading !== null) {
+              reading = pass1bReading;
+              rawText = pass1bText;
+              confidence = Math.max(confidence, Math.round(pass1bResult.data.confidence || 0));
+            }
+          }
+        }
+
+        // Pass 2: Full photo fallback if crop gave no reading (up to 12s)
         if (reading === null && ocrCropUrl && imageDataUrl) {
-          const pass2Result = await runTesseract(imageDataUrl, 12000);
+          const pass2Result = await runTesseract(imageDataUrl, 12000, Tesseract.PSM.AUTO);
           if (pass2Result && pass2Result.data) {
             const pass2Text = pass2Result.data.text || '';
             const pass2Reading = extractMeterDigitsFromOcrText(pass2Text);
@@ -950,9 +1129,12 @@ export async function recognizeSubMeterReading(
       }
     }
 
-    // Offline / Fallback Local Register Drum & LCD Analyzer
+    // Offline / Fallback Local Register Drum & LCD Analyzer (authentic, zero modulo guessing)
     const offlineAnalysis = analyzeRegisterWindowOffline(img, detectedCropBox);
     const finalReading = reading !== null ? reading : offlineAnalysis.reading;
+    const isAuthentic = finalReading !== null;
+    const finalConfidence = reading !== null ? Math.max(confidence, 75) : offlineAnalysis.confidence;
+    const readingValueStr = finalReading !== null ? finalReading.toFixed(1) : '';
 
     // Detect known models from OCR raw text if available
     let detectedBrand = 'Electric kWh Sub-Meter';
@@ -979,7 +1161,7 @@ export async function recognizeSubMeterReading(
         ? {
             brandModel: detectedBrand,
             registerType: 'Digital Register Window Digit Extraction',
-            registerBreakdown: `Verified Register: ${finalReading.toFixed(1)} kWh`,
+            registerBreakdown: `Verified Register: ${reading.toFixed(1)} kWh`,
             serialOrBarcode: detectedSerial,
             electricalSpecs: detectedSpecs,
           }
@@ -989,28 +1171,43 @@ export async function recognizeSubMeterReading(
       img,
       detectedCropBox,
       finalReading,
-      'VERIFIED REGISTER CROP'
+      finalReading !== null ? 'VERIFIED REGISTER CROP' : 'CLOSE-UP INSPECTION CROP'
     );
 
     if (onProgress) onProgress(100);
     return {
       reading: finalReading,
+      readingValue: readingValueStr,
+      confidence: finalConfidence,
       rawText:
         rawText.trim() ||
         `${finalInspection.brandModel} | ${finalInspection.registerBreakdown}`,
-      confidence: reading !== null ? Math.max(confidence, 92) : 94,
       processedImageDataUrl: preservedColorUrl || imageDataUrl,
+      fullResUrl: preservedColorUrl || imageDataUrl,
       registerCropDataUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
+      roiCropUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
+      isAuthentic,
       inspection: finalInspection,
     };
   } catch (err) {
     console.warn('Sub-Meter OCR engine encountered an issue:', err);
     return {
-      reading: 0.0,
-      rawText: 'Sub-Meter Register Scan',
-      confidence: 88,
+      reading: null,
+      readingValue: '',
+      confidence: 0,
+      rawText: 'Sub-Meter Register Scan (Manual Verification Required)',
       processedImageDataUrl: imageDataUrl,
+      fullResUrl: imageDataUrl,
       registerCropDataUrl: generateSimulatedValueCropDataUrl(0),
+      roiCropUrl: generateSimulatedValueCropDataUrl(0),
+      isAuthentic: false,
+      inspection: {
+        brandModel: 'Electric Sub-Meter',
+        registerType: 'Manual Verification Required',
+        registerBreakdown: 'Could not auto-detect digits with high confidence. Please verify from the close-up photo above.',
+        serialOrBarcode: 'Faceplate Serial Excluded',
+        electricalSpecs: '220-240V • 60Hz',
+      },
     };
   }
 }
@@ -1020,28 +1217,28 @@ export async function recognizeSubMeterReading(
  */
 export function generateSimulatedSubMeterDataUrl(readingValue: number): string {
   const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = 360;
+  canvas.width = 1280;
+  canvas.height = 720;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
 
   ctx.fillStyle = '#0f172a';
-  ctx.fillRect(0, 0, 640, 360);
+  ctx.fillRect(0, 0, 1280, 720);
 
   ctx.fillStyle = '#1e293b';
   ctx.strokeStyle = '#475569';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(24, 24, 592, 312);
-  ctx.fillRect(24, 24, 592, 312);
+  ctx.lineWidth = 6;
+  ctx.strokeRect(48, 48, 1184, 624);
+  ctx.fillRect(48, 48, 1184, 624);
 
   ctx.fillStyle = '#cbd5e1';
-  ctx.font = 'bold 17px Inter, Arial, sans-serif';
+  ctx.font = 'bold 34px Inter, Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('ELECTRONIC KILOWATT-HOUR SUB-METER • 240V 60Hz', 320, 68);
+  ctx.fillText('ELECTRONIC KILOWATT-HOUR SUB-METER • 240V 60Hz', 640, 136);
 
   ctx.fillStyle = '#94a3b8';
-  ctx.font = 'bold 13px monospace';
-  ctx.fillText('10000    1000     100      10       1      0.1', 320, 108);
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText('10000    1000     100      10       1      0.1', 640, 216);
 
   const safeVal = Math.max(0, Number(readingValue) || 0);
   const intPart = Math.floor(safeVal)
@@ -1052,31 +1249,32 @@ export function generateSimulatedSubMeterDataUrl(readingValue: number): string {
     .toString()
     .slice(0, 1);
 
-  const startX = 110;
-  const drumW = 64;
-  const drumH = 92;
-  const drumY = 124;
+  const startX = 220;
+  const drumW = 128;
+  const drumH = 184;
+  const drumY = 248;
 
   for (let i = 0; i < 6; i++) {
     const isRedTenths = i === 5;
-    const x = startX + i * (drumW + 6);
+    const x = startX + i * (drumW + 12);
     ctx.fillStyle = isRedTenths ? '#dc2626' : '#090d16';
     ctx.fillRect(x, drumY, drumW, drumH);
     ctx.strokeStyle = isRedTenths ? '#f87171' : '#334155';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 4;
     ctx.strokeRect(x, drumY, drumW, drumH);
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 52px monospace';
+    ctx.font = 'bold 104px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const digit = isRedTenths ? decPart : intPart[i];
-    ctx.fillText(digit, x + drumW / 2, drumY + drumH / 2 + 2);
+    ctx.fillText(digit, x + drumW / 2, drumY + drumH / 2 + 4);
   }
 
   ctx.fillStyle = '#f59e0b';
-  ctx.font = 'bold 20px Inter, Arial, sans-serif';
-  ctx.fillText(`${safeVal.toFixed(1)} kWh`, 320, 275);
+  ctx.font = 'bold 40px Inter, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${safeVal.toFixed(1)} kWh`, 640, 550);
 
   return canvas.toDataURL('image/png');
 }

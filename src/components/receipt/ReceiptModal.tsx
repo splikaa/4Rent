@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   X,
   Zap,
+  ZoomIn,
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
 import { AppSettings, BillRecord } from '../../types/rental';
@@ -27,6 +28,7 @@ import {
   generateSimulatedValueCropDataUrl,
   openMessengerAppWithReceipt,
 } from '../../services/ocrService';
+import { MeterPhotoLightboxModal } from '../ocr/MeterPhotoLightboxModal';
 
 interface ReceiptModalProps {
   bill: BillRecord | null;
@@ -46,6 +48,34 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
+  // 1:1 Pixel Inspection Lightbox State
+  const [lightboxState, setLightboxState] = useState<{
+    isOpen: boolean;
+    imageUrl: string;
+    title: string;
+    roiCropUrl?: string;
+    readingValue?: string;
+  }>({
+    isOpen: false,
+    imageUrl: '',
+    title: '',
+  });
+
+  const openLightbox = (
+    imageUrl: string,
+    title: string,
+    roiCropUrl?: string,
+    readingValue?: string
+  ) => {
+    setLightboxState({
+      isOpen: true,
+      imageUrl,
+      title,
+      roiCropUrl,
+      readingValue,
+    });
+  };
 
   // Sub-meter photos and zoomed register value crops
   const prevMeterProofImg = useMemo(() => {
@@ -361,17 +391,34 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   </div>
                   <div className="space-y-1.5">
                     {prevMeterProofImg && (
-                      <img
-                        src={prevMeterProofImg}
-                        alt="Previous Sub-Meter Photo Proof"
-                        className="w-full h-16 sm:h-20 object-contain rounded bg-slate-100 border border-slate-200"
-                      />
+                      <div
+                        onClick={() =>
+                          openLightbox(
+                            prevMeterProofImg,
+                            `Previous Sub-Meter Photo Proof — ${bill.roomName}`,
+                            prevMeterCropImg,
+                            `${bill.prevReading.toFixed(1)} kWh`
+                          )
+                        }
+                        className="relative group cursor-zoom-in overflow-hidden rounded bg-slate-100 border border-slate-200"
+                        title="Click to inspect full-resolution 1:1 proof photo"
+                      >
+                        <img
+                          src={prevMeterProofImg}
+                          alt="Previous Sub-Meter Photo Proof"
+                          className="w-full h-24 sm:h-32 object-contain group-hover:scale-105 transition duration-150"
+                        />
+                        <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1.5 text-xs font-bold text-white transition">
+                          <ZoomIn className="w-4 h-4 text-amber-400" />
+                          <span>100% Lossless Inspect</span>
+                        </div>
+                      </div>
                     )}
                     {prevMeterCropImg && (
                       <img
                         src={prevMeterCropImg}
                         alt="Previous Value Zoomed Crop"
-                        className="w-full h-8 sm:h-9 object-contain rounded bg-slate-950 border border-emerald-600/40"
+                        className="w-full h-12 sm:h-14 object-contain rounded bg-slate-950 border border-emerald-600/60 shadow-sm"
                       />
                     )}
                   </div>
@@ -389,17 +436,34 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   </div>
                   <div className="space-y-1.5">
                     {currMeterProofImg && (
-                      <img
-                        src={currMeterProofImg}
-                        alt="Current Sub-Meter Photo Proof"
-                        className="w-full h-16 sm:h-20 object-contain rounded bg-slate-100 border border-slate-200"
-                      />
+                      <div
+                        onClick={() =>
+                          openLightbox(
+                            currMeterProofImg,
+                            `Current Sub-Meter Photo Proof — ${bill.roomName}`,
+                            currMeterCropImg,
+                            `${bill.currReading.toFixed(1)} kWh`
+                          )
+                        }
+                        className="relative group cursor-zoom-in overflow-hidden rounded bg-slate-100 border border-slate-200"
+                        title="Click to inspect full-resolution 1:1 proof photo"
+                      >
+                        <img
+                          src={currMeterProofImg}
+                          alt="Current Sub-Meter Photo Proof"
+                          className="w-full h-24 sm:h-32 object-contain group-hover:scale-105 transition duration-150"
+                        />
+                        <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1.5 text-xs font-bold text-white transition">
+                          <ZoomIn className="w-4 h-4 text-amber-400" />
+                          <span>100% Lossless Inspect</span>
+                        </div>
+                      </div>
                     )}
                     {currMeterCropImg && (
                       <img
                         src={currMeterCropImg}
                         alt="Current Value Zoomed Crop"
-                        className="w-full h-8 sm:h-9 object-contain rounded bg-slate-950 border border-amber-600/40"
+                        className="w-full h-12 sm:h-14 object-contain rounded bg-slate-950 border border-amber-600/60 shadow-sm"
                       />
                     )}
                   </div>
@@ -590,6 +654,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 1:1 Pixel Inspection Lightbox Modal */}
+      <MeterPhotoLightboxModal
+        isOpen={lightboxState.isOpen}
+        onClose={() => setLightboxState((prev) => ({ ...prev, isOpen: false }))}
+        imageUrl={lightboxState.imageUrl}
+        title={lightboxState.title}
+        roiCropUrl={lightboxState.roiCropUrl}
+        readingValue={lightboxState.readingValue}
+      />
     </div>
   );
 };

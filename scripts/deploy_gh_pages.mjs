@@ -1,9 +1,17 @@
 import { execSync } from 'node:child_process';
 import { existsSync, unlinkSync } from 'node:fs';
 
-const gitBin = existsSync('C:\\Users\\Gameiun Peso NEt\\AppData\\Local\\MinGit\\cmd\\git.exe')
-  ? '"C:\\Users\\Gameiun Peso NEt\\AppData\\Local\\MinGit\\cmd\\git.exe"'
-  : 'git';
+let gitBin = 'git';
+try {
+  execSync('git --version', { stdio: 'ignore' });
+} catch {
+  const localMinGit = process.env.LOCALAPPDATA
+    ? `${process.env.LOCALAPPDATA}\\Programs\\MinGit\\cmd\\git.exe`
+    : '';
+  if (localMinGit && existsSync(localMinGit)) {
+    gitBin = `"${localMinGit}"`;
+  }
+}
 
 process.env.GIT_INDEX_FILE = '.git/index-gh-pages';
 try {
