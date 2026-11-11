@@ -10,8 +10,6 @@ import {
   ChevronRight,
   DoorOpen,
   Download,
-  Eye,
-  EyeOff,
   Home,
   Laptop,
   Menu,
@@ -143,8 +141,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 lg:px-12 pt-7 pb-32 space-y-8 animate-view-enter">
       {/* Top Header - Organized, Clean & Responsive Layout */}
-      <header className="space-y-3.5">
-        <div className="flex items-center justify-between gap-3">
+      <header className="space-y-4">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -156,64 +154,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
 
             <div className="min-w-0">
-              <p className="text-[11px] sm:text-xs font-bold text-amber-400/90 tracking-wider uppercase truncate">
+              <p className="text-[11px] sm:text-xs font-bold text-amber-400/90 tracking-wider uppercase">
                 {greeting} • 4Rent
               </p>
-              <h1 className="text-xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight truncate">
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight">
                 Dashboard
               </h1>
             </div>
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Privacy Shield Toggle (Mobile & Desktop) */}
-            {onTogglePrivacyMask && (
-              <button
-                type="button"
-                onClick={onTogglePrivacyMask}
-                className={`h-10 sm:h-11 px-3 sm:px-3.5 rounded-2xl border text-xs font-bold flex items-center gap-2 transition cursor-pointer btn-fluid shadow-sm ${
-                  privacyMaskEnabled
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                    : 'bg-[#141C2B] hover:bg-[#1C273C] border-[#24314A] text-slate-300 hover:text-amber-400'
-                }`}
-                title={privacyMaskEnabled ? 'Privacy Shield Active (Amounts masked)' : 'Toggle Privacy Shield'}
-              >
-                {privacyMaskEnabled ? (
-                  <EyeOff className="w-4 h-4 text-emerald-400" />
-                ) : (
-                  <Eye className="w-4 h-4 text-amber-400" />
-                )}
-                <span className="hidden sm:inline">
-                  {privacyMaskEnabled ? 'Privacy Shield On' : 'Privacy Shield'}
-                </span>
-              </button>
-            )}
-
-            {/* Due Date Calendar Shortcut */}
-            <button
-              type="button"
-              onClick={() => onNavigate('calendar')}
-              className="inline-flex items-center gap-1.5 h-11 px-3.5 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
-              title="Open Landlord Due Date Calendar"
-            >
-              <Calendar className="w-3.5 h-3.5 text-amber-400" />
-              <span>Calendar</span>
-            </button>
-
+          <div className="hidden sm:flex flex-wrap items-center gap-2.5">
             {/* Desktop-Only Full Actions */}
             {!isInstalledStandalone && onOpenDownloadModal && (
               <button
                 type="button"
                 onClick={onOpenDownloadModal}
-                className="hidden sm:inline-flex items-center gap-1.5 h-11 px-3.5 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
-                title="Download 4Rent Windows Launcher (.exe) & Android Mobile App (.apk)"
+                className="inline-flex items-center gap-1.5 h-11 px-4 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
+                title="Download Windows (.exe) & Android (.apk) apps"
               >
-                <Download className="w-3.5 h-3.5 text-amber-400" />
+                <Download className="w-4 h-4 text-amber-400" />
                 <span>Get Apps</span>
-                <span className="hidden md:inline-block px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold">
-                  EXE/APK
-                </span>
               </button>
             )}
 
@@ -221,18 +182,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenWalkthrough}
-                className="hidden sm:inline-flex items-center gap-1.5 h-11 px-3.5 rounded-2xl bg-amber-500/12 hover:bg-amber-500/20 border border-amber-500/35 text-amber-300 text-xs font-extrabold transition cursor-pointer btn-fluid"
-                title="Open 4Rent Easy Go-Through Guide"
+                className="inline-flex items-center gap-1.5 h-11 px-4 rounded-2xl bg-amber-500/12 hover:bg-amber-500/20 border border-amber-500/35 text-amber-300 text-xs font-extrabold transition cursor-pointer btn-fluid"
+                title="Open quick guide"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Easy Guide</span>
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Guide</span>
               </button>
             )}
 
             <button
               type="button"
               onClick={() => onNavigate('inquiries')}
-              className="hidden md:inline-flex items-center gap-2 h-11 px-4 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-[#24314A] text-slate-200 font-bold text-xs transition cursor-pointer btn-fluid"
+              className="inline-flex items-center gap-2 h-11 px-4 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-[#24314A] text-slate-200 font-bold text-xs transition cursor-pointer btn-fluid"
             >
               <CalendarCheck className="w-4 h-4 text-amber-400" />
               <span>Bookings ({pendingBookings.length})</span>
@@ -242,10 +203,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenScanMeter(activeRooms[0])}
-                className="hidden sm:inline-flex items-center gap-2 h-11 px-4 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition cursor-pointer btn-fluid"
+                className="inline-flex items-center gap-2 h-11 px-5 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition cursor-pointer btn-fluid"
               >
                 <Camera className="w-4 h-4" />
-                <span>OCR Sub-Meter Reader</span>
+                <span>Scan Meter</span>
               </button>
             )}
 
@@ -253,7 +214,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               type="button"
               onClick={() => onNavigate('settings')}
               aria-label="Open Settings"
-              className="hidden sm:flex w-11 h-11 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-[#24314A] items-center justify-center text-slate-300 hover:text-white transition shrink-0 cursor-pointer btn-fluid"
+              className="flex w-11 h-11 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-[#24314A] items-center justify-center text-slate-300 hover:text-white transition shrink-0 cursor-pointer btn-fluid"
             >
               <Settings className="w-5 h-5" />
             </button>
@@ -279,20 +240,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* 3 Primary KPI Summary Cards with Spacious Gaps */}
       <section
         aria-label="Room occupancy summary"
-        className="grid grid-cols-3 gap-4 sm:gap-6"
+        className="grid grid-cols-3 gap-2.5 sm:gap-6"
       >
         <button
           type="button"
           onClick={() => onNavigate('rooms')}
-          className="surface-card surface-card-interactive rounded-3xl p-5 sm:p-7 flex flex-col items-center justify-center text-center cursor-pointer"
+          className="surface-card surface-card-interactive rounded-2xl sm:rounded-3xl p-3.5 sm:p-7 flex flex-col items-center justify-center text-center cursor-pointer"
         >
-          <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-2xl bg-[#15233C] border border-blue-500/25 flex items-center justify-center mb-3.5 shadow-inner">
-            <Building2 className="w-6 h-6 sm:w-7 sm:h-7 text-blue-400" />
+          <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-[#15233C] border border-blue-500/25 flex items-center justify-center mb-2 sm:mb-3.5 shadow-inner">
+            <Building2 className="w-5 h-5 sm:w-7 sm:h-7 text-blue-400" />
           </div>
-          <div className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white font-mono-num">
+          <div className="text-xl sm:text-3xl lg:text-4xl font-extrabold text-white font-mono-num">
             {totalRooms}
           </div>
-          <div className="text-xs sm:text-sm font-semibold text-slate-300 mt-1.5">
+          <div className="text-[11px] sm:text-sm font-semibold text-slate-300 mt-1 sm:mt-1.5">
             Total Rooms
           </div>
         </button>
@@ -300,15 +261,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <button
           type="button"
           onClick={() => onNavigate('rooms')}
-          className="surface-card surface-card-interactive rounded-3xl p-5 sm:p-7 flex flex-col items-center justify-center text-center cursor-pointer"
+          className="surface-card surface-card-interactive rounded-2xl sm:rounded-3xl p-3.5 sm:p-7 flex flex-col items-center justify-center text-center cursor-pointer"
         >
-          <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-2xl bg-[#2A2018] border border-amber-500/25 flex items-center justify-center mb-3.5 shadow-inner">
-            <User className="w-6 h-6 sm:w-7 sm:h-7 text-amber-400" />
+          <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-[#2A2018] border border-amber-500/25 flex items-center justify-center mb-2 sm:mb-3.5 shadow-inner">
+            <User className="w-5 h-5 sm:w-7 sm:h-7 text-amber-400" />
           </div>
-          <div className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white font-mono-num">
+          <div className="text-xl sm:text-3xl lg:text-4xl font-extrabold text-white font-mono-num">
             {occupiedRooms}
           </div>
-          <div className="text-xs sm:text-sm font-semibold text-slate-300 mt-1.5">
+          <div className="text-[11px] sm:text-sm font-semibold text-slate-300 mt-1 sm:mt-1.5">
             Occupied
           </div>
         </button>
@@ -316,15 +277,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <button
           type="button"
           onClick={() => onNavigate('rooms')}
-          className="surface-card surface-card-interactive rounded-3xl p-5 sm:p-7 flex flex-col items-center justify-center text-center cursor-pointer"
+          className="surface-card surface-card-interactive rounded-2xl sm:rounded-3xl p-3.5 sm:p-7 flex flex-col items-center justify-center text-center cursor-pointer"
         >
-          <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-2xl bg-[#122822] border border-emerald-500/25 flex items-center justify-center mb-3.5 shadow-inner">
-            <DoorOpen className="w-6 h-6 sm:w-7 sm:h-7 text-emerald-400" />
+          <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-[#122822] border border-emerald-500/25 flex items-center justify-center mb-2 sm:mb-3.5 shadow-inner">
+            <DoorOpen className="w-5 h-5 sm:w-7 sm:h-7 text-emerald-400" />
           </div>
-          <div className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white font-mono-num">
+          <div className="text-xl sm:text-3xl lg:text-4xl font-extrabold text-white font-mono-num">
             {vacantRooms}
           </div>
-          <div className="text-xs sm:text-sm font-semibold text-slate-300 mt-1.5">
+          <div className="text-[11px] sm:text-sm font-semibold text-slate-300 mt-1 sm:mt-1.5">
             Vacant
           </div>
         </button>
@@ -339,7 +300,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-extrabold text-amber-300">
-                1st to 10th Monthly Payment Reminder ({roomsWithDueBalance.length}{' '}
+                Payment Due ({roomsWithDueBalance.length}{' '}
                 {roomsWithDueBalance.length === 1 ? 'room' : 'rooms'})
               </h2>
               <p className="text-xs sm:text-sm text-slate-300 mt-1">
@@ -352,7 +313,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       )})`
                   )
                   .join(' • ')}{' '}
-                have unpaid balances due between Day 1 and Day 10 of the month.
+                • Due Day 1–10.
               </p>
             </div>
           </div>
@@ -363,7 +324,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="px-3.5 py-2.5 rounded-2xl bg-[#141C2B] hover:bg-[#1D283E] border border-amber-500/35 text-amber-300 font-bold text-xs transition cursor-pointer btn-fluid flex items-center gap-1.5"
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span>Due Calendar</span>
+              <span>Calendar</span>
             </button>
             <button
               type="button"
@@ -394,8 +355,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1">
                 {isMobile
-                  ? 'Install the offline-first Android App (.apk) with real-time Sub-Meter OCR live camera scanner.'
-                  : 'Install the zero-setup Windows Desktop Launcher (.exe) and offline-first Android App (.apk) with live Sub-Meter OCR scanner.'}
+                  ? 'Offline Android App with Sub-Meter OCR camera scanner.'
+                  : 'Standalone Windows Launcher (.exe) & offline Android App (.apk).'}
               </p>
             </div>
           </div>
@@ -420,8 +381,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Your Rooms
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Tap any room card to inspect full profile, continuous meter &
-            transaction history
+            Select a room to view details, billing &amp; meter proof.
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5">
@@ -822,15 +782,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         onClick={() => onSelectRoomDetails(r)}
                         className="space-y-1.5 cursor-pointer group"
                       >
-                        <div className="flex items-center justify-between text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                           <span className="font-bold text-slate-200 group-hover:text-amber-400 transition">
                             {r.name}{' '}
                             <span className="text-slate-400 font-normal">
-                              (Current Meter: {r.lastMeterReading.toFixed(1)}{' '}
-                              kWh)
+                              (Meter: {r.lastMeterReading.toFixed(1)} kWh)
                             </span>
                           </span>
-                          <span className="font-mono-num font-bold text-amber-400">
+                          <span className="font-mono-num font-bold text-amber-400 shrink-0">
                             {roomKwh.toFixed(1)} kWh billed
                           </span>
                         </div>
@@ -846,15 +805,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              <div className="mt-7 pt-4 border-t border-[#222E44] flex items-center justify-between text-xs text-slate-300">
+              <div className="mt-7 pt-4 border-t border-[#222E44] flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
                 <span className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  Deposit & Privacy Protected • Overpayments → Advance
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Deposit Protected • Overpay → Advance</span>
                 </span>
                 <button
                   type="button"
                   onClick={() => onOpenScanMeter(activeRooms[0])}
-                  className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs inline-flex items-center gap-1.5 cursor-pointer shadow transition active:scale-95"
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs inline-flex items-center gap-1.5 cursor-pointer shadow transition active:scale-95 shrink-0"
                 >
                   <Camera className="w-3.5 h-3.5" />
                   <span>Open OCR Reader</span>

@@ -132,12 +132,10 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
         <div className="surface-card rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h2 className="text-sm sm:text-base font-extrabold text-white">
-              Vacant Room Reservations & Tenant Inquiries
+              Room Reservations &amp; Inquiries
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 mt-1">
-              Only vacant rooms are listed for booking ({vacantRooms.length}{' '}
-              available). Convert bookings into active tenants in 1 click while
-              preserving continuous kWh sub-meter readings.
+              {vacantRooms.length} vacant {vacantRooms.length === 1 ? 'room' : 'rooms'} available. Convert bookings into move-ins anytime.
             </p>
           </div>
           <span className="text-xs font-mono-num text-amber-400 font-bold shrink-0 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30">
@@ -146,14 +144,13 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
         </div>
 
         {inquiries.length === 0 ? (
-          <div className="surface-card rounded-3xl py-20 px-6 text-center">
+          <div className="surface-card rounded-3xl py-16 px-6 text-center">
             <CalendarCheck className="w-12 h-12 text-amber-400 mx-auto mb-4" />
             <h3 className="text-lg sm:text-xl font-extrabold text-white">
-              No inquiries or room bookings yet
+              No inquiries or bookings yet
             </h3>
             <p className="text-xs sm:text-sm text-slate-400 mt-1.5 max-w-sm mx-auto">
-              Log prospective tenants inquiring about available vacant rooms or
-              reserve a unit with a booking deposit.
+              Log prospect inquiries or reserve a vacant unit.
             </p>
           </div>
         ) : (

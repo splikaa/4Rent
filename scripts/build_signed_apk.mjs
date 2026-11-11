@@ -409,6 +409,8 @@ const outputTargets = [
   join(rootDir, '4Rent-v1.0.0-release.apk'),
   join(rootDir, 'public', '4Rent-v1.0.0-release.apk'),
   join(rootDir, 'dist', '4Rent-v1.0.0-release.apk'),
+  join(rootDir, 'public', 'packages', 'mobile', '4Rent-v1.0.0-release.apk'),
+  join(rootDir, 'dist', 'packages', 'mobile', '4Rent-v1.0.0-release.apk'),
 ];
 
 for (const target of outputTargets) {

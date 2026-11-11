@@ -21,7 +21,7 @@ try {
   const parent = execSync(`${gitBin} rev-parse gh-pages`).toString().trim();
   console.log('Parent gh-pages commit:', parent);
   const commit = execSync(
-    `${gitBin} commit-tree ${tree} -p ${parent} -m "deploy: expose Windows .EXE launcher & Android .APK for direct download with modernized desktop launcher UI"`
+    `${gitBin} commit-tree ${tree} -p ${parent} -m "deploy: organize Calendar layout & spacing, simplify header toolbar, shorten descriptions, and polish mobile responsiveness"`
   ).toString().trim();
   console.log('New gh-pages commit:', commit);
   execSync(`${gitBin} update-ref refs/heads/gh-pages ${commit}`);

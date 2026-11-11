@@ -60,7 +60,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
     },
     {
       id: 'calendar',
-      label: 'Due Date Calendar',
+      label: 'Calendar',
       icon: <CalendarDays className="w-5 h-5" />,
     },
     {
