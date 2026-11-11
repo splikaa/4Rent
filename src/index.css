@@ -312,15 +312,15 @@ textarea:focus {
   #receipt-printable-sheet,
   #printable-receipt-area {
     width: 100% !important;
-    max-width: 100% !important;
+    max-width: 680px !important;
     min-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
+    margin: 0 auto !important;
+    padding: 16px !important;
     background: #ffffff !important;
     color: #0f172a !important;
-    border: none !important;
+    border: 1px solid #cbd5e1 !important;
     box-shadow: none !important;
-    border-radius: 0 !important;
+    border-radius: 12px !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }

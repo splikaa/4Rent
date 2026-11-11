@@ -1481,8 +1481,10 @@ export async function openMessengerAppWithReceipt(options: {
   messengerHandle?: string;
   shareUrl?: string;
   autoDownloadPng?: boolean;
+  preOpenedWindow?: Window | null;
 }): Promise<{ openedApp: boolean; message: string }> {
   const {
+    textSummary,
     pngDataUrl,
     receiptNo = 'Receipt',
     tenantName,
@@ -1490,6 +1492,7 @@ export async function openMessengerAppWithReceipt(options: {
     messengerHandle,
     shareUrl,
     autoDownloadPng = true,
+    preOpenedWindow,
   } = options;
 
   // Extract clean username/handle if provided
@@ -1513,8 +1516,15 @@ export async function openMessengerAppWithReceipt(options: {
       : 'https://splikaa.github.io/4Rent/';
   const finalShareUrl = shareUrl || fallbackUrl;
 
-  // 1. Copy the EXACT RECEIPT IMAGE to clipboard (no text) so user can paste (Ctrl+V) directly in Messenger
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isMobile = isAndroid || isIOS;
+
+  // 1. Copy the EXACT RECEIPT IMAGE to clipboard on Desktop/Web so user can paste (Ctrl+V) in Messenger.
+  //    If triggered from a quick list action without an image, copy the detailed summary text instead.
   let imageBlob: Blob | null = null;
+  let copiedImageToClipboard = false;
   if (pngDataUrl) {
     try {
       const res = await fetch(pngDataUrl);
@@ -1523,7 +1533,14 @@ export async function openMessengerAppWithReceipt(options: {
         await navigator.clipboard.write([
           new ClipboardItem({ 'image/png': imageBlob }),
         ]);
+        copiedImageToClipboard = true;
       }
+    } catch {
+      // ignore clipboard error
+    }
+  } else if (textSummary && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(textSummary);
     } catch {
       // ignore clipboard error
     }
@@ -1540,7 +1557,7 @@ export async function openMessengerAppWithReceipt(options: {
     };
   };
 
-  // 2. Native Android APK Bridge -> Shares the receipt image directly via Android Intent
+  // 2. Native Android APK Bridge -> Keep Mobile native share intact
   if (win.AndroidNative && typeof win.AndroidNative.shareToMessenger === 'function') {
     try {
       const launched = win.AndroidNative.shareToMessenger(
@@ -1559,9 +1576,8 @@ export async function openMessengerAppWithReceipt(options: {
     }
   }
 
-  // 3. Web Share API (Android Chrome, iOS Safari, Mobile Web)
-  // Shares ONLY the exact receipt image file (NO text)
-  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+  // 3. Mobile Web Share API (Android Chrome, iOS Safari, Mobile Web only — never trigger Windows/macOS Desktop Share dialog)
+  if (isMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
     if (imageBlob) {
       try {
         const receiptFile = new File([imageBlob], customFileName, {
@@ -1587,17 +1603,12 @@ export async function openMessengerAppWithReceipt(options: {
             message: 'Share dismissed.',
           };
         }
-        // fall through to desktop/web fallbacks
+        // fall through to mobile deep-link fallbacks
       }
     }
   }
 
   // 4. Mobile Browser Deep-Links (Fallback)
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
-  const isAndroid = /Android/i.test(ua);
-  const isIOS = /iPhone|iPad|iPod/i.test(ua);
-  const isMobile = isAndroid || isIOS;
-
   if (isMobile) {
     if (cleanHandle) {
       window.location.href = `https://m.me/${encodeURIComponent(cleanHandle)}`;
@@ -1637,8 +1648,8 @@ export async function openMessengerAppWithReceipt(options: {
     };
   }
 
-  // 5. Desktop Web (Windows / macOS)
-  // Auto-download the exact receipt image file so the user can drag-and-drop or upload into Messenger
+  // 5. Desktop Web (Windows / macOS) — Bypass OS Share Sheet and go straight to Messenger
+  // Auto-download exact full receipt PNG so it can also be dragged/attached anytime
   if (autoDownloadPng && pngDataUrl) {
     try {
       const a = document.createElement('a');
@@ -1652,24 +1663,28 @@ export async function openMessengerAppWithReceipt(options: {
     }
   }
 
-  // Open direct Messenger thread or web Messenger
-  if (cleanHandle) {
-    window.open(
-      `https://m.me/${encodeURIComponent(cleanHandle)}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
+  const desktopMessengerUrl = cleanHandle
+    ? `https://m.me/${encodeURIComponent(cleanHandle)}`
+    : 'https://www.messenger.com/';
+
+  if (preOpenedWindow && !preOpenedWindow.closed) {
+    try {
+      preOpenedWindow.opener = null;
+      preOpenedWindow.location.href = desktopMessengerUrl;
+    } catch {
+      window.open(desktopMessengerUrl, '_blank', 'noopener,noreferrer');
+    }
   } else {
-    window.open(
-      'https://www.messenger.com/',
-      '_blank',
-      'noopener,noreferrer'
-    );
+    window.open(desktopMessengerUrl, '_blank', 'noopener,noreferrer');
   }
 
   return {
     openedApp: true,
-    message: 'Receipt image copied to clipboard & downloaded! Press Ctrl+V in Messenger to send.',
+    message: pngDataUrl
+      ? copiedImageToClipboard
+        ? 'Receipt image copied & PNG saved. Press Ctrl+V in Messenger to send.'
+        : 'Receipt PNG saved & Messenger opened. Attach the downloaded PNG to send.'
+      : 'Details copied! Press Ctrl+V in Messenger to send.',
   };
 }
 

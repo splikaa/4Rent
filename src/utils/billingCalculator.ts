@@ -783,10 +783,10 @@ export function formatMessengerBillSummary(
 ): string {
   const statusLabel =
     bill.status === 'paid'
-      ? '✅ PAID'
+      ? '✅ PAID IN FULL'
       : bill.status === 'partial'
       ? '🟡 PARTIAL PAYMENT'
-      : '🔴 UNPAID / DUE';
+      : '🔴 STATEMENT DUE';
 
   const seal = generateReceiptVerificationCode(
     bill.receiptNo,
@@ -794,61 +794,86 @@ export function formatMessengerBillSummary(
     bill.totalAmountDue
   );
 
+  const parsedDue = new Date(bill.dueDate);
+  const validDue = Number.isNaN(parsedDue.getTime()) ? new Date() : parsedDue;
+  const parsedPeriod = new Date(`1 ${bill.billingPeriod}`);
+  const startDate = Number.isNaN(parsedPeriod.getTime())
+    ? new Date(validDue.getFullYear(), validDue.getMonth(), 1)
+    : new Date(parsedPeriod.getFullYear(), parsedPeriod.getMonth(), 1);
+  const nextMonthStart = new Date(
+    startDate.getFullYear(),
+    startDate.getMonth() + 1,
+    1
+  );
+  const nextCycleLabel = nextMonthStart.toLocaleDateString('en-US', {
+    month: 'short',
+    year: 'numeric',
+  });
+  const safeDueDay = clampDueDayOneToTen(validDue.getDate());
+  const nextDueDate = new Date(
+    validDue.getFullYear(),
+    validDue.getMonth() + 1,
+    safeDueDay,
+    12,
+    0,
+    0
+  ).toLocaleDateString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  const formattedDue = validDue.toLocaleDateString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
   const lines = [
-    `🏠 *${apartmentName || '4Rent Management System'} • Official Statement*`,
-    `Receipt No: ${bill.receiptNo} (${seal})`,
-    `Room: *${bill.roomName}*`,
-    `Tenant: ${bill.tenantName}`,
-    `Billing Period: ${bill.billingPeriod}`,
-    `Next Due Date (1st-10th Window): ${new Date(
-      bill.dueDate
-    ).toLocaleDateString('en-PH', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })}`,
+    `🏠 *${apartmentName || '4Rent Management System'} • Statement & Receipt*`,
+    `Receipt #: ${bill.receiptNo} (${seal})`,
+    `Unit: *${bill.roomName}* • Tenant: ${bill.tenantName}`,
     `────────────────────`,
-    `⚡ *DUAL ELECTRIC SUB-METER PROOF*`,
-    `• Sub-Meter #1 (Previous): ${bill.prevReading.toFixed(1)} kWh`,
-    `• Sub-Meter #2 (Current): ${bill.currReading.toFixed(1)} kWh`,
-    `• Consumption Difference (Δ): *${bill.consumptionKwh.toFixed(1)} kWh*`,
-    `• Electric Rate: ${formatPeso(bill.electricRate)} / kWh`,
-    `• Electric Sub-Total: *${formatPeso(bill.electricTotal)}*`,
+    `📅 *MONTHLY RATE SCHEDULE*`,
+    `• This Month (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}/mo + ${formatPeso(bill.electricRate)}/kWh • Due ${formattedDue}`,
+    `• Next Month (${nextCycleLabel}): ${formatPeso(bill.baseRent)}/mo + metered kWh (Start: ${bill.currReading.toFixed(1)} kWh) • Due ${nextDueDate}`,
     `────────────────────`,
-    `📋 *BILLING BREAKDOWN*`,
-    `• Monthly Room Rent: ${formatPeso(bill.baseRent)}`,
-    `• Electric Bill: ${formatPeso(bill.electricTotal)}`,
+    `⚡ *ELECTRIC SUB-METER PROOF*`,
+    `• Previous: ${bill.prevReading.toFixed(1)} kWh → Current: ${bill.currReading.toFixed(1)} kWh`,
+    `• Usage: *${bill.consumptionKwh.toFixed(1)} kWh* × ${formatPeso(bill.electricRate)}/kWh = *${formatPeso(bill.electricTotal)}*`,
+    `────────────────────`,
+    `📋 *CHARGES & SETTLEMENT*`,
+    `• Base Rent (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}`,
+    `• Electricity (${bill.consumptionKwh.toFixed(1)} kWh): ${formatPeso(bill.electricTotal)}`,
   ];
 
   if (bill.previousBalanceCarryOver > 0) {
     lines.push(
-      `• Previous Unpaid Balance: ${formatPeso(bill.previousBalanceCarryOver)}`
+      `• Prior Unpaid Balance: ${formatPeso(bill.previousBalanceCarryOver)}`
     );
   }
   if (bill.depositApplied > 0) {
     lines.push(
-      `• Less Advance / Deposit Applied: -${formatPeso(bill.depositApplied)}`
+      `• Advance Credit Applied: -${formatPeso(bill.depositApplied)}`
     );
   }
 
   lines.push(
-    `────────────────────`,
-    `💰 *TOTAL AMOUNT DUE: ${formatPeso(bill.totalAmountDue)}*`
+    `• Total Amount Due: *${formatPeso(bill.totalAmountDue)}*`
   );
 
   if (bill.amountPaid > 0) {
-    lines.push(`• Amount Paid: ${formatPeso(bill.amountPaid)}`);
+    lines.push(`• Paid: ${formatPeso(bill.amountPaid)}${bill.paymentMethod ? ` (${bill.paymentMethod})` : ''}`);
     lines.push(`• Remaining Balance: *${formatPeso(bill.remainingBalance)}*`);
   }
   if (bill.overpaymentToAdvance > 0) {
     lines.push(
-      `• Credited to Advance Balance (Withdrawable): +${formatPeso(
+      `• Advance Credit (${nextCycleLabel}): +${formatPeso(
         bill.overpaymentToAdvance
       )}`
     );
   }
 
   lines.push(`• Status: ${statusLabel}`);
-  lines.push(`\n4Rent Management System v1.0.0 • Developed by splikaa`);
+  lines.push(`Payment Window: Every 1st–10th Monthly • 4Rent v1.0.0`);
   return lines.join('\n');
 }

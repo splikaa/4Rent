@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { BillRecord, NavigationTab, Room } from '../../types/rental';
 import {
+  formatMessengerBillSummary,
   formatPesoPrivacy,
   maskPhoneNumber,
 } from '../../utils/billingCalculator';
@@ -806,6 +807,10 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
                           type="button"
                           onClick={() => {
                             openMessengerAppWithReceipt({
+                              textSummary: formatMessengerBillSummary(
+                                bill,
+                                '4Rent Management System'
+                              ),
                               receiptNo: bill.receiptNo,
                               tenantName: bill.tenantName,
                               roomName: bill.roomName,
