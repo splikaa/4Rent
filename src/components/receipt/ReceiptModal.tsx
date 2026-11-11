@@ -2,7 +2,6 @@ import React, { useMemo, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import {
   Check,
-  Copy,
   Download,
   ExternalLink,
   Eye,
@@ -18,7 +17,6 @@ import {
 import { BrandLogo } from '../BrandLogo';
 import { AppSettings, BillRecord } from '../../types/rental';
 import {
-  formatMessengerBillSummary,
   formatPeso,
   generateReceiptVerificationCode,
   maskPhoneNumber,
@@ -46,7 +44,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     () => settings.maskReceiptContacts ?? true
   );
   const [isExporting, setIsExporting] = useState(false);
-  const [copiedText, setCopiedText] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   // 1:1 Pixel Inspection Lightbox State
@@ -122,12 +119,30 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     if (!receiptRef.current) return null;
     try {
       setIsExporting(true);
-      const dataUrl = await toPng(receiptRef.current, {
+      const node = receiptRef.current;
+      const fullWidth = node.scrollWidth || 640;
+      const fullHeight = node.scrollHeight || 950;
+
+      const dataUrl = await toPng(node, {
         cacheBust: true,
         pixelRatio: 2,
         skipFonts: true,
         fontEmbedCSS: '',
         backgroundColor: '#FFFFFF',
+        width: fullWidth,
+        height: fullHeight,
+        canvasWidth: fullWidth * 2,
+        canvasHeight: fullHeight * 2,
+        style: {
+          transform: 'none',
+          maxHeight: 'none',
+          maxWidth: 'none',
+          height: `${fullHeight}px`,
+          width: `${fullWidth}px`,
+          overflow: 'visible',
+          position: 'static',
+          margin: '0',
+        },
       });
       return dataUrl;
     } catch {
@@ -157,32 +172,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setShareFeedback(`Receipt PNG downloaded: ${filename}`);
     setTimeout(() => {
       setShareFeedback((prev) => (prev?.startsWith('Receipt PNG') ? null : prev));
-    }, 4500);
-  };
-
-  const handleCopySummary = async () => {
-    const summary = formatMessengerBillSummary(bill, settings.apartmentName);
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(summary);
-      } else {
-        throw new Error('Clipboard API unavailable');
-      }
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = summary;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
-    setCopiedText(true);
-    setShareFeedback('Bill summary copied! Ready to paste into Messenger.');
-    setTimeout(() => setCopiedText(false), 3000);
-    setTimeout(() => {
-      setShareFeedback((prev) => (prev?.startsWith('Bill summary') ? null : prev));
     }, 4500);
   };
 
@@ -415,7 +404,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           `${bill.prevReading.toFixed(1)} kWh`
                         )
                       }
-                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 sm:h-28"
+                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-20 sm:h-24 max-h-24"
                       title="Click to inspect full 1:1 HD sub-meter proof"
                     >
                       <img
@@ -451,7 +440,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           `${bill.currReading.toFixed(1)} kWh`
                         )
                       }
-                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 sm:h-28"
+                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-20 sm:h-24 max-h-24"
                       title="Click to inspect full 1:1 HD sub-meter proof"
                     >
                       <img
@@ -468,9 +457,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </div>
               </div>
 
-              {/* Exact Formula & Calculation Breakdown */}
-              <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-1 text-xs text-slate-800">
-                <span>
+              {/* Exact Formula & Calculation Breakdown Card */}
+              <div className="mt-2.5 p-2 sm:p-2.5 rounded-lg bg-white border border-slate-200 flex flex-wrap items-center justify-between gap-1.5 text-xs text-slate-800">
+                <span className="text-[11px] sm:text-xs">
                   Computation:{' '}
                   <strong className="font-mono-num text-slate-950 font-bold">
                     {bill.currReading.toFixed(1)} kWh − {bill.prevReading.toFixed(1)} kWh ={' '}
@@ -478,7 +467,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   </strong>{' '}
                   × {formatPeso(bill.electricRate)}/kWh
                 </span>
-                <span className="font-mono-num text-sm font-black text-slate-950">
+                <span className="font-mono-num text-xs sm:text-sm font-black text-slate-950">
                   = {formatPeso(bill.electricTotal)}
                 </span>
               </div>
@@ -625,34 +614,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               type="button"
               onClick={handleDownloadPng}
               disabled={isExporting}
-              className="h-11 py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/15 transition cursor-pointer btn-fluid"
+              className="h-11 py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/15 transition cursor-pointer btn-fluid"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Download</span> PNG
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCopySummary}
-              className="h-11 py-2.5 px-3 rounded-xl bg-[#1A2335] hover:bg-[#24314A] border border-[#2A3955] text-slate-200 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
-            >
-              {copiedText ? (
-                <>
-                  <Check className="w-4 h-4 text-emerald-400" />
-                  <span className="text-emerald-400">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4" />
-                  <span className="hidden sm:inline">Copy</span> Text
-                </>
-              )}
+              <span>Download PNG</span>
             </button>
 
             <button
               type="button"
               onClick={() => window.print()}
-              className="h-11 py-2.5 px-3.5 rounded-xl bg-[#1A2335] hover:bg-[#24314A] border border-[#2A3955] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+              className="h-11 py-2.5 px-4 rounded-xl bg-[#1A2335] hover:bg-[#24314A] border border-[#2A3955] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
             >
               <Printer className="w-4 h-4 text-amber-400" />
               <span>Print / PDF</span>

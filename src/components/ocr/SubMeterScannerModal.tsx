@@ -26,6 +26,7 @@ import {
   formatPeso,
   getBillingPeriodOptions,
   getNextDueDateInOneToTenWindow,
+  isRunningInMobileApp,
 } from '../../utils/billingCalculator';
 import {
   generateSimulatedSubMeterDataUrl,
@@ -53,72 +54,6 @@ interface SubMeterScannerModalProps {
     advanceDeductedFromRoom: number,
     updatedRoomLastCropUrl?: string
   ) => void;
-}
-
-function extractQuickReadingFromSample(
-  data: Uint8ClampedArray,
-  meanLum: number
-): number | null {
-  const digits: number[] = [];
-  const slotW = (204 - 36) / 6;
-
-  for (let slot = 0; slot < 6; slot++) {
-    const x0 = Math.floor(36 + slot * slotW + 3);
-    const x1 = Math.floor(36 + (slot + 1) * slotW - 3);
-    let topInk = 0;
-    let midInk = 0;
-    let botInk = 0;
-    let leftInk = 0;
-    let rightInk = 0;
-    let centerInk = 0;
-    let totalInk = 0;
-
-    for (let y = 20; y < 60; y++) {
-      for (let x = x0; x < x1; x++) {
-        const idx = (y * 240 + x) * 4;
-        const lum = data[idx] * 0.3 + data[idx + 1] * 0.59 + data[idx + 2] * 0.11;
-        const isInk = meanLum < 135 ? lum > meanLum + 26 : lum < meanLum - 26;
-        if (isInk) {
-          totalInk++;
-          const ny = (y - 20) / 40;
-          const nx = (x - x0) / Math.max(1, x1 - x0);
-          if (ny < 0.33) topInk++;
-          else if (ny < 0.66) midInk++;
-          else botInk++;
-
-          if (nx < 0.35) leftInk++;
-          else if (nx > 0.65) rightInk++;
-          else centerInk++;
-        }
-      }
-    }
-
-    if (totalInk < 10 || (slot < 3 && centerInk < totalInk * 0.28)) {
-      digits.push(0);
-    } else if (centerInk < totalInk * 0.24 && leftInk > 0 && rightInk > 0) {
-      digits.push(0);
-    } else if (centerInk > totalInk * 0.45 && leftInk < rightInk * 0.6) {
-      digits.push(1);
-    } else if (topInk > botInk * 1.25 && rightInk > leftInk * 1.2) {
-      digits.push(7);
-    } else if (midInk > topInk * 0.9 && rightInk > leftInk * 1.15) {
-      digits.push(3);
-    } else if (midInk > topInk && leftInk > rightInk * 0.9) {
-      digits.push(4);
-    } else {
-      return null;
-    }
-  }
-
-  if (digits.length !== 6) return null;
-  const intVal =
-    digits[0] * 10000 +
-    digits[1] * 1000 +
-    digits[2] * 100 +
-    digits[3] * 10 +
-    digits[4];
-  const decVal = digits[5] / 10;
-  return Math.round((intVal + decVal) * 10) / 10;
 }
 
 export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
@@ -182,11 +117,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [rolloverType, setRolloverType] = useState<'dial_rollover' | 'meter_reset'>('dial_rollover');
   const [dialDigits, setDialDigits] = useState<number>(5);
 
+  const isMobileApp = isRunningInMobileApp();
+
   // OCR, Inspection & Camera state
   const [scanTab, setScanTab] = useState<'upload' | 'camera'>('upload');
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isRegisterLocked, setIsRegisterLocked] = useState(false);
-  const [liveReadingPreview, setLiveReadingPreview] = useState<number | null>(null);
+  const isLockedRef = useRef(false);
   const liveAnalysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const liveAnalysisTimerRef = useRef<number | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
@@ -317,8 +254,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   useEffect(() => {
     if (!isCameraActive) {
+      isLockedRef.current = false;
       setIsRegisterLocked(false);
-      setLiveReadingPreview(null);
       if (liveAnalysisTimerRef.current) {
         window.clearInterval(liveAnalysisTimerRef.current);
         liveAnalysisTimerRef.current = null;
@@ -336,7 +273,6 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     let lockStreak = 0;
-    let holdCount = 0;
 
     const checkLiveFrame = () => {
       const video = videoRef.current;
@@ -359,10 +295,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         const imgData = ctx.getImageData(0, 0, 240, 80);
         const data = imgData.data;
 
-        // Calculate variance, edge contrast, and red drum presence
+        // Check for genuine cyclometer register characteristics:
+        // Tenths drum is RED on the right (x > 170), dark drums on the left (x < 165)
         let lumSum = 0;
         let lumSqSum = 0;
         let redRightCount = 0;
+        let redLeftCount = 0;
+        let darkDrumsCount = 0;
         let edgeTransCount = 0;
         const totalSample = 56 * 208; // sampling window
 
@@ -377,8 +316,15 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
             lumSum += lum;
             lumSqSum += lum * lum;
 
-            if (x > 165 && r > 115 && r > g * 1.35 && r > b * 1.35) {
-              redRightCount++;
+            const isRed = r > 115 && r > g * 1.35 && r > b * 1.35;
+            if (isRed) {
+              if (x > 170) {
+                redRightCount++;
+              } else if (x < 155) {
+                redLeftCount++;
+              }
+            } else if (x < 165 && lum < 80) {
+              darkDrumsCount++;
             }
 
             if (Math.abs(lum - prevRowLum) > 38) {
@@ -392,26 +338,36 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         const variance = Math.max(0, lumSqSum / totalSample - meanLum * meanLum);
         const stdDev = Math.sqrt(variance);
 
-        // Sub-meter cyclometer drums or LCD in focus have distinct contrast and drum edge boundaries
-        const isDrumsCentered = stdDev > 16 && (edgeTransCount > 120 || redRightCount > 14);
+        // Sub-meter cyclometer: red drum strictly on the right, dark drums on the left
+        const isCyclometerAligned =
+          redRightCount >= 25 &&
+          redRightCount > redLeftCount * 2.0 &&
+          darkDrumsCount > 200 &&
+          edgeTransCount > 60;
 
-        if (isDrumsCentered) {
+        // Digital LCD sub-meter in focus (high contrast segment boundaries within faceplate)
+        const isLcdAligned =
+          stdDev > 22 &&
+          edgeTransCount > 180 &&
+          meanLum > 40 &&
+          meanLum < 190 &&
+          redLeftCount === 0;
+
+        const isMeterAligned = isCyclometerAligned || isLcdAligned;
+
+        if (isMeterAligned) {
           lockStreak++;
-          if (lockStreak >= 2 || holdCount > 0) {
-            holdCount = 5; // Hold stable emerald lock for ~1 second without flickering
-            setIsRegisterLocked(true);
-            const quickReading = extractQuickReadingFromSample(data, meanLum);
-            if (quickReading !== null && !Number.isNaN(quickReading)) {
-              setLiveReadingPreview(quickReading);
+          if (lockStreak >= 2) {
+            if (!isLockedRef.current) {
+              isLockedRef.current = true;
+              setIsRegisterLocked(true);
             }
           }
         } else {
           lockStreak = 0;
-          if (holdCount > 0) {
-            holdCount--;
-          } else {
+          if (isLockedRef.current) {
+            isLockedRef.current = false;
             setIsRegisterLocked(false);
-            setLiveReadingPreview(null);
           }
         }
       } catch {
@@ -419,7 +375,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       }
     };
 
-    liveAnalysisTimerRef.current = window.setInterval(checkLiveFrame, 220);
+    // Throttled frame inspection (350ms) without speculative live guessing avoids WebView video flickering
+    liveAnalysisTimerRef.current = window.setInterval(checkLiveFrame, 350);
 
     return () => {
       if (liveAnalysisTimerRef.current) {
@@ -438,9 +395,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    isLockedRef.current = false;
     setIsCameraActive(false);
     setIsRegisterLocked(false);
-    setLiveReadingPreview(null);
   };
 
   const startCamera = async () => {
@@ -519,13 +476,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
    */
   const runOcrOnDataUrl = async (
     dataUrl: string,
-    slot: 'prev' | 'curr',
-    lockedHintVal?: number | null
+    slot: 'prev' | 'curr'
   ): Promise<void> => {
     setIsOcrRunning(true);
     setOcrProgress(15);
     setOcrStatusMsg(
-      `Reading & enhancing sub-meter value for ${
+      `Reading & inspecting sub-meter dial for ${
         slot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'
       }...`
     );
@@ -538,22 +494,19 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         ).catch(() => {});
       }
 
-      let result = await recognizeSubMeterReading(dataUrl, (pct) =>
+      const result = await recognizeSubMeterReading(dataUrl, (pct) =>
         setOcrProgress(pct)
       );
 
-      // If live video lock detected reading and result was ambiguous, use lockedHintVal
-      if (
-        (result.reading === null || Number.isNaN(result.reading)) &&
-        lockedHintVal !== null &&
-        lockedHintVal !== undefined
-      ) {
-        result = {
-          ...result,
-          reading: lockedHintVal,
-          readingValue: lockedHintVal.toFixed(1),
-          confidence: 96,
-        };
+      // Strict validation: Reject non-sub-meter objects (e.g. keyboards, screens, play buttons)
+      if (!result.isAuthentic) {
+        setOcrConfidence(0);
+        setMeterInspection(result.inspection || null);
+        setIsReadingsLocked(false);
+        setOcrStatusMsg(
+          '⚠️ No Electric Sub-Meter Detected. Please frame a physical electric sub-meter dial.'
+        );
+        return;
       }
 
       const isRecognized =
@@ -578,18 +531,18 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       setOcrConfidence(result.confidence);
       setMeterInspection(result.inspection || null);
-      // Auto-lock only when a valid reading was recognized; keep unlocked if ambiguous to allow immediate typing
+      // Auto-lock only when an authentic reading was recognized; keep unlocked if ambiguous to allow manual typing
       setIsReadingsLocked(isRecognized && detectedVal > 0);
 
       if (isRecognized) {
         setOcrStatusMsg(
-          `✓ Enhanced & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
+          `✓ Verified & auto-inserted ${detectedVal.toFixed(1)} kWh into ${
             slot === 'prev' ? 'Previous Sub-Meter (#1)' : 'Current Sub-Meter (#2)'
           }! Bill calculations updated.`
         );
       } else {
         setOcrStatusMsg(
-          'Photo attached. Could not auto-detect digits with high confidence. Please verify from the close-up photo above.'
+          '✓ Sub-meter attached. Dial digits are blurry or obstructed. Please enter the kWh reading manually.'
         );
       }
     } catch {
@@ -665,9 +618,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(video, 0, 0, width, height);
       const capturedDataUrl = canvas.toDataURL('image/jpeg', 0.96);
-      const lockedVal = liveReadingPreview;
       stopCamera();
-      await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot, lockedVal);
+      await runOcrOnDataUrl(capturedDataUrl, targetMeterSlot);
     }
   };
 
@@ -1165,40 +1117,52 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
               </div>
 
-              {/* Mode Tabs */}
-              <div className="grid grid-cols-2 gap-2.5 mb-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopCamera();
-                    setScanTab('upload');
-                  }}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                    scanTab === 'upload'
-                      ? 'bg-amber-500 text-slate-950 border-amber-500'
-                      : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
-                  }`}
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Upload Photo</span>
-                </button>
+              {/* Mode Tabs / Platform Selection */}
+              {!isMobileApp ? (
+                <div className="flex items-center justify-between p-2.5 mb-2.5 rounded-xl bg-[#0E131C] border border-[#252F42] text-xs">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Upload className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="font-bold">Desktop / Web Mode • Image Upload Only</span>
+                  </div>
+                  <span className="text-[10px] bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/20 font-semibold hidden sm:inline">
+                    Live camera in Android Mobile App
+                  </span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopCamera();
+                      setScanTab('upload');
+                    }}
+                    className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
+                      scanTab === 'upload'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500'
+                        : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
+                    }`}
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload Photo</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setScanTab('camera');
-                    startCamera();
-                  }}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                    scanTab === 'camera'
-                      ? 'bg-amber-500 text-slate-950 border-amber-500'
-                      : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
-                  }`}
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Live Camera Capture</span>
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScanTab('camera');
+                      startCamera();
+                    }}
+                    className={`py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition cursor-pointer ${
+                      scanTab === 'camera'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500'
+                        : 'bg-[#0E131C] text-slate-300 border-[#252F42]'
+                    }`}
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Live Camera Capture</span>
+                  </button>
+                </div>
+              )}
 
               {/* Scanner Viewport */}
               <div className="rounded-2xl bg-[#0A0D13] border border-[#252F42] p-4 flex flex-col items-center justify-center">
@@ -1219,7 +1183,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   className="hidden"
                 />
 
-                {scanTab === 'camera' ? (
+                {isMobileApp && scanTab === 'camera' ? (
                   isCameraActive ? (
                     <div className="relative w-full">
                       <div className="relative w-full h-48 sm:h-56 bg-black rounded-xl overflow-hidden border border-amber-500/40">
@@ -1245,6 +1209,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                             backfaceVisibility: 'hidden',
                             WebkitBackfaceVisibility: 'hidden',
                             willChange: 'transform',
+                            contain: 'paint',
                           }}
                           onLoadedMetadata={(e) => {
                             const v = e.currentTarget;
@@ -1272,11 +1237,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                               {isRegisterLocked ? (
                                 <>
                                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                  <span>
-                                    {liveReadingPreview !== null
-                                      ? `✓ Register Locked: ${liveReadingPreview.toFixed(1)} kWh`
-                                      : '✓ Register In Focus (Ready to Snap)'}
-                                  </span>
+                                  <span>✓ Sub-Meter Dials Aligned (Ready to Snap)</span>
                                 </>
                               ) : (
                                 <span>Align Sub-Meter Register (5 Black + 1 Red Drums)</span>
@@ -1311,8 +1272,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                             }`}
                           >
                             {isRegisterLocked
-                              ? '✓ In focus • Tap snap to insert'
-                              : 'Align meter drums inside box'}
+                              ? '✓ Sub-meter detected • Tap snap to scan'
+                              : 'Center dial drums inside guide box'}
                           </span>
                         </div>
                       </div>
@@ -1330,24 +1291,21 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                           {isOcrRunning ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin" />
-                              <span>Reading & Enhancing...</span>
+                              <span>Reading & Inspecting...</span>
                             </>
                           ) : isRegisterLocked ? (
                             <>
                               <CheckCircle2 className="w-4 h-4 text-slate-950" />
                               <span>
-                                {liveReadingPreview !== null
-                                  ? `✓ Snap & Insert ${liveReadingPreview.toFixed(1)} kWh`
-                                  : `✓ Snap & Insert into ${
-                                      targetMeterSlot === 'prev' ? 'Slot #1' : 'Slot #2'
-                                    }`}
+                                ✓ Snap & Scan Sub-Meter into{' '}
+                                {targetMeterSlot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'}
                               </span>
                             </>
                           ) : (
                             <>
                               <Camera className="w-4 h-4" />
                               <span>
-                                Snap & Insert into{' '}
+                                Snap & Scan Sub-Meter into{' '}
                                 {targetMeterSlot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'}
                               </span>
                             </>

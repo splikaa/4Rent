@@ -623,10 +623,12 @@ function analyzeRegisterWindowOffline(
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 240, 80);
   const { data } = ctx.getImageData(0, 0, 240, 80);
 
-  // Check luminance variance to detect blank/unpowered LCD screens
+  // Check luminance variance, red tenth drum localization, and drum structure
   let lumSum = 0;
   let lumSqSum = 0;
   let redRightPixels = 0;
+  let redLeftPixels = 0;
+  let darkDrumsCount = 0;
 
   for (let y = 12; y < 68; y++) {
     for (let x = 16; x < 224; x++) {
@@ -637,18 +639,34 @@ function analyzeRegisterWindowOffline(
       const lum = r * 0.299 + g * 0.587 + b * 0.114;
       lumSum += lum;
       lumSqSum += lum * lum;
-      if (x > 165 && r - Math.max(g, b) > 25) {
-        redRightPixels++;
+
+      // Authentic cyclometer sub-meters have a red tenths drum strictly on the right (x > 170)
+      const isRed = r > 110 && (r - Math.max(g, b)) > 26;
+      if (isRed) {
+        if (x > 170) {
+          redRightPixels++;
+        } else if (x < 155) {
+          redLeftPixels++;
+        }
+      } else if (x < 165 && lum < 80) {
+        darkDrumsCount++;
       }
     }
   }
 
   const sampleCount = (68 - 12) * (224 - 16);
   const meanLum = lumSum / sampleCount;
-  const variance = lumSqSum / sampleCount - meanLum * meanLum;
-  const stdDev = Math.sqrt(Math.max(0, variance));
+  const variance = Math.max(0, lumSqSum / sampleCount - meanLum * meanLum);
+  const stdDev = Math.sqrt(variance);
 
-  if (stdDev < 14 && redRightPixels < 25) {
+  // Mechanical cyclometer has red drum localized to the right 1/6th, dark drums on the left
+  const isCyclometerDrums =
+    redRightPixels >= 25 &&
+    redRightPixels > redLeftPixels * 1.8 &&
+    darkDrumsCount > 200;
+
+  // Unpowered LCD has low variance within mid-tone grey/green glass bounds (not pure white or pitch black)
+  if (stdDev < 14 && redRightPixels < 25 && meanLum >= 45 && meanLum <= 170) {
     return {
       reading: 0.0,
       confidence: 96,
@@ -700,21 +718,19 @@ function analyzeRegisterWindowOffline(
       }
     }
 
-    // Authentic structural digit matching - NO modulo guessing!
+    // Authentic structural digit matching - NO speculative guessing!
     if (totalInk < 12 || (slot < 3 && centerInk < totalInk * 0.28)) {
       digits.push(0);
-    } else if (centerInk < totalInk * 0.24 && leftInk > 0 && rightInk > 0) {
+    } else if (centerInk < totalInk * 0.22 && leftInk > totalInk * 0.15 && rightInk > totalInk * 0.15) {
       digits.push(0);
-    } else if (centerInk > totalInk * 0.45 && leftInk < rightInk * 0.6) {
+    } else if (centerInk > totalInk * 0.52 && leftInk < rightInk * 0.5) {
       digits.push(1);
-    } else if (topInk > botInk * 1.25 && rightInk > leftInk * 1.2) {
+    } else if (topInk > botInk * 1.35 && rightInk > leftInk * 1.3) {
       digits.push(7);
-    } else if (midInk > topInk * 0.9 && rightInk > leftInk * 1.15) {
+    } else if (midInk > topInk * 0.95 && rightInk > leftInk * 1.25 && botInk > totalInk * 0.2) {
       digits.push(3);
-    } else if (midInk > topInk && leftInk > rightInk * 0.9) {
-      digits.push(4);
     } else {
-      // Slot is ambiguous: return null reading and require human close-up confirmation
+      // Slot is ambiguous: never invent or guess numbers; require manual confirmation
       isConfident = false;
       break;
     }
@@ -725,11 +741,17 @@ function analyzeRegisterWindowOffline(
       reading: null,
       confidence: 0,
       inspection: {
-        brandModel: redRightPixels > 25 ? 'Mechanical Cyclometer kWh Sub-Meter' : 'Digital kWh Sub-Meter',
-        registerType: 'Sub-Meter Register Scan (Human Confirmation Required)',
-        registerBreakdown: 'Could not auto-detect digits with high confidence. Please verify from the close-up photo above.',
-        serialOrBarcode: 'Faceplate Serial Excluded',
-        electricalSpecs: '220-240V • 60Hz Single-Phase',
+        brandModel: isCyclometerDrums
+          ? 'Mechanical Cyclometer kWh Sub-Meter'
+          : 'Unrecognized Device (Not an Electric Sub-Meter)',
+        registerType: isCyclometerDrums
+          ? 'Sub-Meter Cyclometer Dial Scan (Manual Verification Required)'
+          : 'Non-Sub-Meter Object Detected',
+        registerBreakdown: isCyclometerDrums
+          ? 'Cyclometer dial detected, but digits were ambiguous. Please enter reading manually from photo.'
+          : 'No electric sub-meter cyclometer dials or kWh display found in this image.',
+        serialOrBarcode: 'N/A',
+        electricalSpecs: isCyclometerDrums ? '220-240V • 60Hz Single-Phase' : 'N/A',
       },
     };
   }
@@ -745,16 +767,14 @@ function analyzeRegisterWindowOffline(
 
   return {
     reading,
-    confidence: 85,
+    confidence: isCyclometerDrums ? 88 : 50,
     inspection: {
-      brandModel:
-        redRightPixels > 25
-          ? 'Mechanical Cyclometer kWh Sub-Meter'
-          : 'Digital kWh Sub-Meter',
-      registerType:
-        redRightPixels > 25
-          ? 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)'
-          : 'Digital Register Window',
+      brandModel: isCyclometerDrums
+        ? 'Mechanical Cyclometer kWh Sub-Meter'
+        : 'Digital kWh Sub-Meter',
+      registerType: isCyclometerDrums
+        ? 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)'
+        : 'Digital Register Window',
       registerBreakdown: `Register: Black Drums: ${digits.slice(0, 5).join('')} • Red Tenths Drum: .${digits[5]} → ${reading.toFixed(1)} kWh`,
       serialOrBarcode: 'Faceplate Serial Excluded',
       electricalSpecs: '220-240V • 60Hz Single-Phase',
@@ -1131,47 +1151,81 @@ export async function recognizeSubMeterReading(
 
     // Offline / Fallback Local Register Drum & LCD Analyzer (authentic, zero modulo guessing)
     const offlineAnalysis = analyzeRegisterWindowOffline(img, detectedCropBox);
-    const finalReading = reading !== null ? reading : offlineAnalysis.reading;
-    const isAuthentic = finalReading !== null;
-    const finalConfidence = reading !== null ? Math.max(confidence, 75) : offlineAnalysis.confidence;
+
+    // Verify whether the photo actually captures an electric sub-meter device
+    const SUBMETER_KEYWORD_REGEX = /(?:kwh|kw[\.·]?h|watthour|watt[\s-]hour|meter|imp[\s/]*kwh|\b220\s*v\b|\b240\s*v\b|\b120\s*v\b|\b60\s*hz\b|\b50\s*hz\b|single[\s-]phase|1[\s-]phase|1phase|\b10\(60\)a\b|\b5\(30\)a\b|safari|cirtech|type[\s-]sp1|sub[\s-]?meter|ge\s*kv2c)/i;
+    const hasMeterKeywords = SUBMETER_KEYWORD_REGEX.test(rawText);
+    const isCyclometer = offlineAnalysis.inspection?.brandModel?.includes('Cyclometer') === true;
+    const isBlankLcd = offlineAnalysis.inspection?.isBlankUnpoweredLcd === true;
+    const isSubMeterDevice = hasMeterKeywords || isCyclometer || isBlankLcd;
+
+    let finalReading: number | null = null;
+    let isAuthentic = false;
+    let finalConfidence = 0;
+    let finalInspection: SubMeterHardwareInspection;
+
+    if (!isSubMeterDevice) {
+      // Reject non-meter objects (e.g. keyboard, monitor, media play buttons, random objects)
+      finalReading = null;
+      isAuthentic = false;
+      finalConfidence = 0;
+      finalInspection = {
+        brandModel: 'Not an Electric Sub-Meter',
+        registerType: 'Unrecognized Device',
+        registerBreakdown: 'No electric sub-meter dials or LCD kWh display detected in this photo. Please frame a physical sub-meter.',
+        serialOrBarcode: 'N/A',
+        electricalSpecs: 'N/A',
+      };
+    } else {
+      finalReading = reading !== null ? reading : offlineAnalysis.reading;
+      isAuthentic = true;
+      finalConfidence = reading !== null ? Math.max(confidence, 75) : offlineAnalysis.confidence;
+
+      // Detect known models from OCR raw text if available
+      let detectedBrand = isCyclometer
+        ? 'Mechanical Cyclometer kWh Sub-Meter'
+        : 'Electric kWh Sub-Meter';
+      let detectedSpecs = '220–240V • 60Hz Sub-Meter';
+      let detectedSerial = 'Faceplate Serial Excluded';
+      if (/safari|sy-?168/i.test(rawText)) {
+        detectedBrand = 'Safari SY-168 Digital Kilowatt Hour Meter';
+        detectedSpecs = '240V • 10(60)A • 1Phase • 60Hz';
+      } else if (/static|sp1|type-?sp1/i.test(rawText)) {
+        detectedBrand = 'Static Watthour Meter TYPE-SP1';
+        detectedSpecs = '240V • 5-30A • 50Hz • 3200 imp/kWh';
+      } else if (/cirtech|mt-?60i|cl-?60/i.test(rawText)) {
+        detectedBrand = 'Cirtech MT-60i Digital Sub-Meter';
+        detectedSpecs = '240V • 10(60)A • 60Hz • 1600 imp/kWh';
+      }
+
+      const serialMatch = rawText.match(/\b(?:no\.?|s\.?\s*no|serial)\s*[:#-]?\s*([A-Z0-9\-]+)/i);
+      if (serialMatch) {
+        detectedSerial = `No. ${serialMatch[1]} (Excluded)`;
+      }
+
+      finalInspection =
+        reading !== null
+          ? {
+              brandModel: detectedBrand,
+              registerType: 'Digital Register Window Digit Extraction',
+              registerBreakdown: `Verified Register: ${reading.toFixed(1)} kWh`,
+              serialOrBarcode: detectedSerial,
+              electricalSpecs: detectedSpecs,
+            }
+          : offlineAnalysis.inspection;
+    }
+
     const readingValueStr = finalReading !== null ? finalReading.toFixed(1) : '';
-
-    // Detect known models from OCR raw text if available
-    let detectedBrand = 'Electric kWh Sub-Meter';
-    let detectedSpecs = '220–240V • 60Hz Sub-Meter';
-    let detectedSerial = 'Faceplate Serial Excluded';
-    if (/safari|sy-?168/i.test(rawText)) {
-      detectedBrand = 'Safari SY-168 Digital Kilowatt Hour Meter';
-      detectedSpecs = '240V • 10(60)A • 1Phase • 60Hz';
-    } else if (/static|sp1|type-?sp1/i.test(rawText)) {
-      detectedBrand = 'Static Watthour Meter TYPE-SP1';
-      detectedSpecs = '240V • 5-30A • 50Hz • 3200 imp/kWh';
-    } else if (/cirtech|mt-?60i|cl-?60/i.test(rawText)) {
-      detectedBrand = 'Cirtech MT-60i Digital Sub-Meter';
-      detectedSpecs = '240V • 10(60)A • 60Hz • 1600 imp/kWh';
-    }
-
-    const serialMatch = rawText.match(/\b(?:no\.?|s\.?\s*no|serial)\s*[:#-]?\s*([A-Z0-9\-]+)/i);
-    if (serialMatch) {
-      detectedSerial = `No. ${serialMatch[1]} (Excluded)`;
-    }
-
-    const finalInspection: SubMeterHardwareInspection =
-      reading !== null
-        ? {
-            brandModel: detectedBrand,
-            registerType: 'Digital Register Window Digit Extraction',
-            registerBreakdown: `Verified Register: ${reading.toFixed(1)} kWh`,
-            serialOrBarcode: detectedSerial,
-            electricalSpecs: detectedSpecs,
-          }
-        : offlineAnalysis.inspection;
 
     const registerCropDataUrl = buildVerifiedValueCropScreenshot(
       img,
       detectedCropBox,
       finalReading,
-      finalReading !== null ? 'VERIFIED REGISTER CROP' : 'CLOSE-UP INSPECTION CROP'
+      !isSubMeterDevice
+        ? 'UNRECOGNIZED NON-METER OBJECT'
+        : finalReading !== null
+        ? 'VERIFIED REGISTER CROP'
+        : 'CLOSE-UP INSPECTION CROP'
     );
 
     if (onProgress) onProgress(100);
