@@ -403,9 +403,12 @@ if (!signedApk || signedApk.length === 0) {
 
 console.log(`[4Rent APK Signer] Successfully signed! Total APK size: ${signedApk.length} bytes.`);
 
-// 5. Output strictly to package destination (clean template is NEVER overwritten)
+// 5. Output to package destination and distribution endpoints
 const outputTargets = [
   join(rootDir, 'packages', 'mobile', '4Rent-v1.0.0-release.apk'),
+  join(rootDir, '4Rent-v1.0.0-release.apk'),
+  join(rootDir, 'public', '4Rent-v1.0.0-release.apk'),
+  join(rootDir, 'dist', '4Rent-v1.0.0-release.apk'),
 ];
 
 for (const target of outputTargets) {
