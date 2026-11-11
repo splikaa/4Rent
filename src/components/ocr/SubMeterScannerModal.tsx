@@ -335,6 +335,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     const canvas = liveAnalysisCanvasRef.current;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
+    let lockStreak = 0;
+    let holdCount = 0;
+
     const checkLiveFrame = () => {
       const video = videoRef.current;
       if (!video || video.readyState < 2 || video.paused || !ctx) {
@@ -378,7 +381,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               redRightCount++;
             }
 
-            if (Math.abs(lum - prevRowLum) > 42) {
+            if (Math.abs(lum - prevRowLum) > 38) {
               edgeTransCount++;
             }
             prevRowLum = lum;
@@ -390,17 +393,26 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         const stdDev = Math.sqrt(variance);
 
         // Sub-meter cyclometer drums or LCD in focus have distinct contrast and drum edge boundaries
-        const isDrumsCentered = stdDev > 20 && (edgeTransCount > 150 || redRightCount > 18);
+        const isDrumsCentered = stdDev > 16 && (edgeTransCount > 120 || redRightCount > 14);
 
         if (isDrumsCentered) {
-          setIsRegisterLocked(true);
-          const quickReading = extractQuickReadingFromSample(data, meanLum);
-          if (quickReading !== null && !Number.isNaN(quickReading)) {
-            setLiveReadingPreview(quickReading);
+          lockStreak++;
+          if (lockStreak >= 2 || holdCount > 0) {
+            holdCount = 5; // Hold stable emerald lock for ~1 second without flickering
+            setIsRegisterLocked(true);
+            const quickReading = extractQuickReadingFromSample(data, meanLum);
+            if (quickReading !== null && !Number.isNaN(quickReading)) {
+              setLiveReadingPreview(quickReading);
+            }
           }
         } else {
-          setIsRegisterLocked(false);
-          setLiveReadingPreview(null);
+          lockStreak = 0;
+          if (holdCount > 0) {
+            holdCount--;
+          } else {
+            setIsRegisterLocked(false);
+            setLiveReadingPreview(null);
+          }
         }
       } catch {
         // ignore frame read errors
@@ -1213,7 +1225,16 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                           autoPlay
                           playsInline
                           muted
-                          className="w-full h-full object-cover live-camera-video"
+                          controls={false}
+                          disablePictureInPicture
+                          {...({
+                            'webkit-playsinline': 'true',
+                            'x5-playsinline': 'true',
+                            'x5-video-player-type': 'h5-page',
+                            'x5-video-player-fullscreen': 'true',
+                            controlsList: 'nodownload nofullscreen noremoteplayback',
+                          } as React.HTMLAttributes<HTMLVideoElement>)}
+                          className="w-full h-full object-cover live-camera-video pointer-events-none"
                           style={{
                             objectFit: 'cover',
                             transform: 'translateZ(0)',
