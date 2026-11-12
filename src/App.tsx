@@ -540,6 +540,7 @@ export function App() {
             res.snapshot
           );
           importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
+          clearPendingCloudApply();
           setRooms(loadRooms());
           setBills(loadBills());
           setInquiries(loadInquiries());

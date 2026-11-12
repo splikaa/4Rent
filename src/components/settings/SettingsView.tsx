@@ -31,6 +31,7 @@ import {
   SecurityAuditEntry,
 } from '../../types/rental';
 import {
+  clearPendingCloudApply,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   loadAuditLogs,
@@ -158,6 +159,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         // 2. Smart Merge
         finalSnap = mergeDatabaseSnapshots(localSnap, pullRes.snapshot);
         importDatabaseSnapshot(finalSnap, { preserveLocalSecurity: true });
+        clearPendingCloudApply();
         onReloadAllData();
       }
 
@@ -166,6 +168,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setIsSyncing(false);
 
       if (pushRes.ok) {
+        clearPendingCloudApply();
         const updated: AppSettings = {
           ...form,
           cloudSync: { ...form.cloudSync, lastSyncedAt: pushRes.syncedAt },

@@ -428,6 +428,8 @@ export function setStoredMobileAppliedMonth(monthKey: string): void {
   }
 }
 
+const PENDING_CLOUD_APPLY_TTL_MS = 15 * 60 * 1000;
+
 export function setPendingCloudApply(
   propertyCode: string,
   appliedMonth: string
@@ -435,7 +437,7 @@ export function setPendingCloudApply(
   try {
     localStorage.setItem(
       PENDING_CLOUD_APPLY_KEY,
-      JSON.stringify({ propertyCode, appliedMonth })
+      JSON.stringify({ propertyCode, appliedMonth, createdAt: Date.now() })
     );
   } catch {
     // ignore storage errors
@@ -450,6 +452,14 @@ export function peekPendingCloudApply(): {
     const raw = localStorage.getItem(PENDING_CLOUD_APPLY_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    const createdAt = Number(parsed?.createdAt);
+    if (
+      Number.isFinite(createdAt) &&
+      Date.now() - createdAt > PENDING_CLOUD_APPLY_TTL_MS
+    ) {
+      clearPendingCloudApply();
+      return null;
+    }
     if (parsed?.propertyCode) {
       return {
         propertyCode: String(parsed.propertyCode),
@@ -468,17 +478,6 @@ export function clearPendingCloudApply(): void {
   } catch {
     // ignore storage errors
   }
-}
-
-export function consumePendingCloudApply(): {
-  propertyCode: string;
-  appliedMonth: string;
-} | null {
-  const pending = peekPendingCloudApply();
-  if (pending) {
-    clearPendingCloudApply();
-  }
-  return pending;
 }
 
 export async function flushMasterIndexedDbNow(): Promise<void> {
@@ -517,6 +516,7 @@ export async function applyCloudSnapshotCleanly(
     setStoredMobileAppliedMonth(cloudSyncOverride.mobileCodeAppliedMonth);
   }
   await flushMasterIndexedDbNow();
+  clearPendingCloudApply();
 }
 
 const SYNC_CHANNEL_NAME = '4rent_realtime_sync_channel';
