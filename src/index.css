@@ -220,7 +220,13 @@ textarea:focus {
 @media (prefers-reduced-motion: reduce) {
   .animate-view-enter,
   .animate-modal-pop,
-  .animate-card-in {
+  .animate-card-in,
+  .sprite-mascot-bob,
+  .sprite-laser-sweep,
+  .sprite-pulse-beacon,
+  .sprite-coin-drop,
+  .sprite-packet-travel,
+  .sprite-hand-tap {
     animation: none !important;
   }
   .surface-card,
@@ -229,6 +235,108 @@ textarea:focus {
     transition: none !important;
     transform: none !important;
   }
+}
+
+/* Guide Sprite Keyframe Animations (GPU transform/opacity only) */
+@keyframes spriteMascotBob {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(1.5deg);
+  }
+}
+
+@keyframes spriteLaserSweep {
+  0%,
+  100% {
+    transform: translateY(-10px);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(10px);
+    opacity: 1;
+  }
+}
+
+@keyframes spritePulseBeacon {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes spriteCoinDrop {
+  0% {
+    transform: translateY(-14px) scale(0.85);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  75% {
+    transform: translateY(10px) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(14px) scale(0.9);
+    opacity: 0;
+  }
+}
+
+@keyframes spritePacketTravel {
+  0% {
+    transform: translateX(-28px) scale(0.8);
+    opacity: 0;
+  }
+  25%,
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(28px) scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes spriteHandTap {
+  0%,
+  100% {
+    transform: scale(1) translateY(0);
+  }
+  50% {
+    transform: scale(0.88) translateY(3px);
+  }
+}
+
+.sprite-mascot-bob {
+  animation: spriteMascotBob 2.8s var(--spring-ease) infinite;
+}
+
+.sprite-laser-sweep {
+  animation: spriteLaserSweep 1.8s ease-in-out infinite;
+}
+
+.sprite-pulse-beacon {
+  animation: spritePulseBeacon 1.9s var(--spring-ease) infinite;
+}
+
+.sprite-coin-drop {
+  animation: spriteCoinDrop 2s var(--spring-ease) infinite;
+}
+
+.sprite-packet-travel {
+  animation: spritePacketTravel 1.8s linear infinite;
+}
+
+.sprite-hand-tap {
+  animation: spriteHandTap 1.4s var(--spring-ease) infinite;
 }
 
 /* Custom subtle scrollbars */

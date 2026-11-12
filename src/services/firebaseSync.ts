@@ -53,12 +53,17 @@ export function getMobileCodeMonthlyLock(
 }
 
 /**
- * 4Rent Production Firebase Configuration for Web & Mobile
+ * 4Rent Firebase Configuration for Web & Mobile.
+ * API keys are intentionally omitted from source control; supply optional
+ * credentials via Vite environment variables (.env.local) or Cloud Sync Settings.
  */
+const firebaseViteEnv =
+  (import.meta as unknown as { env?: Record<string, string> }).env || {};
+
 export const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyADZ1u2AAvEF1Rvh3knPjck_rnRihP2Ifk',
+  apiKey: firebaseViteEnv.VITE_FIREBASE_API_KEY || '',
   authDomain: 'rent-41279.firebaseapp.com',
-  projectId: 'rent-41279',
+  projectId: firebaseViteEnv.VITE_FIREBASE_PROJECT_ID || 'rent-41279',
   storageBucket: 'rent-41279.firebasestorage.app',
   messagingSenderId: '1065579410434',
   appId: '1:1065579410434:web:5ed8b25e9ade2fc30de31b',
@@ -128,7 +133,7 @@ export async function pushSnapshotToFirebase(
   const baseUrl = getFirebaseDatabaseUrl(config);
   const propCode = config.propertyCode || '4RENT-MAIN';
   const syncedAt = new Date().toISOString();
-  // Never upload local PIN or WebAuthn credential identifiers to cloud snapshots
+  // Never upload local PIN, WebAuthn identifiers, or API tokens to cloud snapshots
   const sanitizedSettings = snapshot.settings
     ? {
         ...snapshot.settings,
@@ -136,6 +141,10 @@ export async function pushSnapshotToFirebase(
           ...snapshot.settings.security,
           pinCode: '',
           webAuthnCredentialId: undefined,
+        },
+        cloudSync: {
+          ...snapshot.settings.cloudSync,
+          firebaseApiKey: '',
         },
       }
     : snapshot.settings;

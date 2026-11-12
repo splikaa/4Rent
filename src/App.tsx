@@ -2078,6 +2078,7 @@ export function App() {
         onLockApp={() => setIsLocked(true)}
         hasRooms={rooms.filter((r) => !r.isArchived).length > 0}
         onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+        onOpenWalkthrough={() => setIsWalkthroughOpen(true)}
         isInstalledStandalone={isInstalledStandalone}
       />
 

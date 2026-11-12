@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
+  Sparkles,
   X,
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
@@ -29,6 +30,7 @@ interface NavigationDrawerProps {
   onLockApp: () => void;
   hasRooms: boolean;
   onOpenDownloadModal?: () => void;
+  onOpenWalkthrough?: () => void;
   isInstalledStandalone?: boolean;
 }
 
@@ -41,6 +43,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
   onTogglePrivacyMask,
   onLockApp,
   onOpenDownloadModal,
+  onOpenWalkthrough,
   isInstalledStandalone = false,
 }) => {
   const navItems: {
@@ -168,6 +171,28 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
                 }`}
               >
                 {privacyMaskEnabled ? 'Masked' : 'Visible'}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Interactive Visual Guide Quick Launch */}
+        {onOpenWalkthrough && (
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                onCloseMobile();
+                onOpenWalkthrough();
+              }}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-amber-500/12 hover:bg-amber-500/20 border border-amber-500/35 text-xs font-extrabold text-amber-300 transition-all duration-300 cursor-pointer"
+            >
+              <span className="flex items-center gap-2.5">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Visual Sprite Guide</span>
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[9px] font-black">
+                7 FLOWS
               </span>
             </button>
           </div>

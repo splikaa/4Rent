@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Zero-Installation Full-Screen Desktop & Standalone Android Mobile Property, Room & Electric Sub-Meter Billing System.</strong><br/>
+  <strong>Offline-First Desktop, Web PWA & Standalone Android Room, Tenant, Advance Balance, and Electric Sub-Meter OCR Billing System.</strong><br/>
   <strong>Version: <code>v1.0.0</code> • Developed by <a href="https://github.com/splikaa">splikaa</a></strong>
 </p>
 
@@ -13,122 +13,124 @@
 
 ## ⚡ Quick Start: Zero Installation for Landlords
 
-Landlords do **not** need to install Node.js, Python, Git, or any complex developer tools:
+Landlords do **not** need Node.js, Python, or developer tools to run **4Rent** on Windows, Android, or modern web browsers:
 
-### 🖥️ Windows Desktop Launcher (Official Portable Standalone `.EXE`)
-1. Download **`4Rent-Launcher.exe`** directly from the live web app or the [`packages/desktop/`](./packages/desktop/) directory.
-2. Double-click **`4Rent-Launcher.exe`** (no installation required).
-3. The sleek launcher lets you enter your **Property Space Code**, creates an official **4Rent Management System** desktop shortcut with the high-resolution system logo, and opens 4Rent in an isolated, borderless standalone desktop window host!
+### 🖥️ Windows Desktop Launcher (Portable `.EXE`)
+1. Download **`4Rent-Launcher.exe`** (or **`4Rent-Desktop-Windows.zip`**) from the live web app or [`packages/desktop/`](./packages/desktop/).
+2. Double-click **`4Rent-Launcher.exe`** — no installer or administrator rights needed (`asInvoker`).
+3. Enter your **Property Space Code** once to create an official Desktop shortcut and launch 4Rent in an isolated standalone window.
 
-### 📱 Android Mobile App (Offline-First `.APK`)
-1. Download **`4Rent-v1.0.0-release.apk`** directly from the live web app or the [`packages/mobile/`](./packages/mobile/) directory.
-2. Install the APK on your Android device (Android 7.0+).
-3. Features real-time Sub-Meter OCR live camera with auto-reticle green lock, direct 1-tap Facebook Messenger receipt forwarding, offline IndexedDB storage, and instant cloud sync.
-
----
-
-## 🛡️ System Assurance & Reliability
-
-**4Rent Management System** is built on five strict architectural assurances designed for property managers and landlords:
-
-1. **100% Offline-First Persistence (IndexedDB Local Core)**
-   - Operates with complete autonomy with or without internet. Room states, tenant contracts, sub-meter dial crops, and payment ledgers are committed directly to your device's browser IndexedDB database. You can inspect sub-meters in concrete apartment basements with zero cellular reception with zero data loss.
-
-2. **Multi-Landlord Security & Data Partitioning**
-   - Data is partitioned by **Property Space Code** (e.g. `4RENT-MAIN`, `4R-B4U7`). Landlords operating separate boarding houses or buildings remain strictly isolated. Switching or pairing devices takes one tap.
-
-3. **Sub-Meter OCR Precision & Verifiable Audit Proof**
-   - Electric sub-meter readings are extracted through cyclometer-register optical recognition with an emerald green lock reticle. Every official statement embeds side-by-side photographic crops of the dials and a cryptographic tamper-proof verification seal (`4R-SEAL-XXXXXX`) to prevent tenant tampering or altered payment claims.
-
-4. **Philippine Rental Law Compliance (R.A. 9653)**
-   - Hardcoded compliance with Philippine rental standards: strict **Day 1–10 Payment Grace Windows**, forward billing period lock (future months cannot be billed in advance), and strict separation between non-deductible property Security Deposits and deductible Advance Rent.
-
-5. **Safe Execution & Clean Distributables Assurance**
-   - **Zero Malware / Zero Telemetry**: The Windows Desktop Launcher (`4Rent-Launcher.exe`) is an open-source, portable C# binary compiled with standard Windows 10/11 compatibility manifests (`asInvoker`), requiring no administrative elevation, no registry modifications, and leaving zero system residue.
-   - **Instant Safe Download**: To bypass Google Chrome's "not commonly downloaded" heuristics on freshly uploaded `.exe` files, landlords can directly download the portable **`4Rent-Desktop-Windows.zip`** or install the **1-Click Native Desktop App** directly from their browser.
-   - **Android Integrity**: The mobile app (`4Rent-v1.0.0-release.apk`) is self-contained with hardware biometric authentication support and native camera integration.
+### 📱 Android Mobile App (Offline-First Signed `.APK`)
+1. Download **`4Rent-v1.0.0-release.apk`** (`~399 KB`) from the live web app or [`packages/mobile/`](./packages/mobile/).
+2. Install on Android (`Android 7.0+`).
+3. Includes Live Camera & Photo Sub-Meter OCR, `HD Crop` register verification, Fingerprint/Biometric unlock, native Facebook Messenger receipt sharing, and offline IndexedDB persistence.
 
 ---
 
-All official distributables are cleanly compiled and hosted for direct download:
+## 🎮 Interactive Visual Sprite Guide (7 Step-by-Step Flows)
 
-```text
-packages/
-├── desktop/
-│   ├── 4Rent-Launcher.exe          # Official standalone Windows Desktop launcher (~39 KB)
-│   ├── 4rent-icon.ico              # Multi-resolution official system icon
-│   └── src/LauncherProgram.cs      # Portable C# WinForms source
-└── mobile/
-    └── 4Rent-v1.0.0-release.apk     # Standalone cryptographically signed Android APK (~323 KB)
-```
+New users can open the built-in **4Rent Visual Sprite Guide** anytime from:
+- **Dashboard Header**: Tap **Guide** (available on both Mobile and Desktop headers, plus **Watch Visual Guide** when no rooms exist yet).
+- **Navigation Drawer**: Tap **Visual Sprite Guide (`7 FLOWS`)** from any screen.
 
----
+Every flow pairs the animated **4Rent Guide Buddy** mascot with a **Play / Pause interactive Micro-UI Sprite Stage** across 3 clickable sub-steps and 1-click launch buttons:
 
-## 🔍 Dual Sub-Meter Visual Inspector & Auto-Read Engine
-
-When billing a room, **4Rent** provides an accurate dual sub-meter reading workflow:
-
-1. **Slot #1: Previous Sub-Meter**
-   - Holds the verified starting baseline reading (`kWh`), full photo, and cropped dial screenshot from the previous billing period.
-2. **Slot #2: Current Sub-Meter**
-   - The landlord takes a photo or uploads an image of the new reading.
-   - **Automatic Reading Insertion**: The visual OCR engine immediately extracts the dial digits (e.g. `3.4 kWh`), auto-inserts the value directly into the slot input, and updates the electricity cost in real time.
-   - **Verified Value Crop**: Simultaneously crops and displays a zoomed-in screenshot of the physical dials/LCD display directly inside the slot card and on the official receipt.
-3. **Next-Month Automatic Rollover**:
-   - When generating the bill, the Current Sub-Meter reading, photo, and crop are automatically saved as the room's continuous baseline.
-   - Next month, when the landlord opens the bill generator, the previous Current reading is automatically pre-filled as the new Previous Sub-Meter (#1), with a dedicated **"Rollover to Next Month"** button for immediate manual rollover.
+1. **Flow 1 — Room Setup & Tenancy Lifecycle**: Add rooms, preserve continuous `kWh` baselines across tenants, verify ID & RA 10173 consent, and protect critical room actions with explicit confirmation dialogs.
+2. **Flow 2 — Sub-Meter OCR Scan & Auto-Rollover**: Capture `#1 Previous` / `#2 Current` slots via mobile camera or desktop image upload, inspect the zoomed `HD Crop`, and automatically roll `#2` into `#1` next cycle.
+3. **Flow 3 — Calendar Schedule & Pay Window Guard**: Track Day `1–10` due dates, inspect locked future months safely, and prevent duplicate scans once the current month is paid.
+4. **Flow 4 — Official Statement & Receipt Sharing**: Inspect white-paper statements with dual meter photo crops, export clean **single-page A4 PDF** or high-res **PNG**, and share directly via Messenger.
+5. **Flow 5 — Overpayment, Advance Balance & Refund**: Credit excess payments above `Remaining Balance` (or prepaid multi-month deposits) into next-month **Advance Balance**, guarded by **Fingerprint** (Mobile) or **4-Digit PIN** (Desktop/Web), with move-out refunds.
+6. **Flow 6 — Bookings, Archive Center & Immutable Logs**: Convert reservations into move-ins in 1 tap, restore archived rooms/receipts, and retain **immutable sub-meter reading logs** that cannot be deleted.
+7. **Flow 7 — Offline IndexedDB & Space Code Sync**: Work 100% offline in IndexedDB and pair Mobile safely from Desktop via your private **Property Space Code**.
 
 ---
 
-## 🧾 Clean Official Statement & Sub-Meter Receipt
+## 🔍 Dual Sub-Meter OCR Inspector & Continuous Baseline
 
-The generated **Official Statement of Account & Sub-Meter Billing Receipt** includes:
-- **Section I • Electric Sub-Meter Proofs**: Dual side-by-side cropped dial screenshots showing both Previous and Current readings with calculated consumption and rate.
-- **Section II • Itemized Charges**: Monthly Base Rent, Electric Sub-Meter Consumption, Previous Carried-Over Unpaid Balances, and Auto-Deducting Advance Rent.
-- **Tamper-Proof Verification Seal (`4R-SEAL-XXXXXX`)**: Unique cryptographic seal guaranteeing authenticity against altered tenant screenshots.
-- **Modern Clean Layout**: Redundant manual signature boxes have been removed in favor of digital tamper-proof verification seals.
-- **1-Click Messenger App Sharing**:
-  - On **Mobile**: Deep links directly into the native Facebook Messenger application (`com.facebook.orca` / `fb-messenger://`).
-  - On **Desktop**: Direct Messenger web link and instant formatted clipboard summary.
-  - **Download PNG** & **Print / PDF**: High-resolution receipt export.
+1. **Slot #1 (Previous Sub-Meter)**: Stores the unit's continuous `kWh` baseline, full photo proof, and zoomed register crop. Baseline readings **never reset** when a tenant vacates.
+2. **Slot #2 (Current Sub-Meter)**: Uses unified Mobile/Desktop OCR (`Tesseract.js` + preprocessing + `HD Crop` dial isolation) to extract mechanical drum or digital LCD digits (`e.g. 003020.7`).
+3. **Next-Month Rollover**: Issuing a monthly bill (or tapping **Rollover to Next Month**) promotes `#2 Current` directly into `#1 Previous` so monthly consumption deltas stay exact.
 
 ---
 
-## 📡 Three-Tier Connectivity & Smart Two-Way Sync
+## 📅 Due Calendar, Advance Balance & Room Safeguards
 
-4Rent operates seamlessly in any environment:
-- **Offline Mode**: Uses browser IndexedDB (`idbDatabase.ts`) so landlords can record readings, generate bills, and inspect rooms in apartment basements with zero reception.
-- **Mobile Data & Wi-Fi**: Automatically detects connection type via `navigator.connection` and synchronizes with Firebase Realtime Database (`4RENT-MAIN`) as soon as connectivity is restored.
-- **Conflict-Free Merge**: Timestamps ensure newest device changes take precedence without data loss.
-
----
-
-## 🏢 Landlord Security & Tenant Privacy (RA 10173 Ready)
-
-- **Mandatory 4-Digit Passcode PIN**: Protects financial data with idle auto-lock timers (`5`, `15`, or `30` minutes).
-- **Public Screen Privacy Mask**: 1-click toggle in the header or Settings masks tenant mobile numbers (`0917-•••-••01`) and landlord revenue figures (`₱••,•••.••`) when viewing the screen in public.
-- **Day 1–10 Payment Window Policy**: Enforces standard Philippine rental payment windows with due dates strictly between the 1st and 10th of every month.
-- **Advance Rent vs. Security Deposit Separation**: Tenant security deposits remain strictly non-deductible on file to protect property repairs, while overpayments automatically credit into Advance Rent.
+- **Pay Window Policy (Days 1–10)**: Due dates align cleanly to days `1st–10th` of each month.
+- **Future Month & Paid Lock**: When viewing future months or rooms already marked **Paid** for the active cycle, **Scan Meter** stays intentionally locked while **Room Details** and **Advance Payment** remain accessible.
+- **Overpayments & Refunds**:
+  - Recording a payment higher than **Remaining Balance** automatically routes the excess `₱` into the room's **Advance Balance** for the next billing cycle after **Fingerprint / 4-Digit PIN** verification.
+  - Prepaid deposits auto-deduct upon subsequent billing cycles or can be refunded cleanly via **Advance / Refund** when a tenant vacates.
+- **Room Action Confirmations**:
+  - **Tenant Vacated**: Moves tenant into **Previous Tenants History**, preserves final `kWh`, and checks remaining deposit/advance.
+  - **Archive Room**: Available only after vacating (occupied rooms cannot be archived accidentally).
+  - **Remove Room Permanently**: Requires explicit confirmation plus **Fingerprint / 4-Digit PIN** authentication.
+- **Immutable Archive Logs**: Sub-Meter reading logs inside **Archive & History** are read-only audit records and cannot be deleted.
 
 ---
 
-## 🛠️ Developer Build & Deployment Instructions
+## 📡 Offline-First IndexedDB & Private Cloud Space Sync
 
-To rebuild the web bundle and update the GitHub Pages live deployment:
+- **Offline Core**: Rooms, tenant records, dual meter crops, bills, and PIN security settings persist locally in **IndexedDB** + **localStorage** with zero internet required.
+- **Desktop Space Code Host**: Only **Desktop / Web** generates or updates a **Property Space Code** (e.g., `4RENT-MAIN`).
+- **Mobile Monthly Limit & Privacy Notice**:
+  - Mobile devices apply a Space Code **once per calendar month**, triggering a clean reload and full snapshot hydration.
+  - **Do not share your Property Space Code publicly.** Anyone holding your Space Code and database endpoint can access synced property snapshots.
+- **Never Synced to Cloud**: Local unlock PINs (`pinCode`), WebAuthn credential IDs (`webAuthnCredentialId`), and optional client API tokens (`firebaseApiKey`) are stripped before any snapshot is uploaded.
+
+---
+
+## 🔐 API Key Hygiene & Environment Setup
+
+This repository contains **no committed API keys, PAT tokens, or Firebase secrets**. Optional Firebase overrides are loaded exclusively at build/runtime via ignored local environment files (`.env.local`) or entered in **Settings → Cloud Sync**.
+
+1. Copy the template file:
+   ```bash
+   cp .env.example .env.local
+   ```
+2. Fill in your own values in `.env.local` (already excluded by [`.gitignore`](./.gitignore)):
+   ```env
+   VITE_FIREBASE_PROJECT_ID=your-project-id
+   VITE_FIREBASE_DATABASE_URL=https://your-project-id-default-rtdb.firebaseio.com
+   VITE_FIREBASE_API_KEY=your_optional_web_api_key_or_rtdb_token
+   VITE_PROPERTY_CODE=YOUR-SPACE-CODE
+   ```
+3. Never commit `.env`, `.env.local`, `google-services.json` keys, or personal GitHub access tokens to source control.
+
+---
+
+## 🛠️ Developer Build, APK Signing & Deployment
 
 ```bash
 # 1. Install dependencies
 npm install --legacy-peer-deps
 
-# 2. Build production assets (outputs to dist/)
+# 2. Run local development server (Web / Responsive preview)
+npm run dev
+
+# 3. Type-check and build production web assets (outputs to dist/)
 npm run build
 
-# 3. Launch native Electron Desktop window
+# 4. Build and cryptographically sign the offline Android APK
+npm run build:apk
+
+# 5. Launch native Electron Desktop host (optional)
 npm run electron
+```
+
+### Distributables Layout
+
+```text
+packages/
+├── desktop/
+│   ├── 4Rent-Launcher.exe          # Portable Windows launcher (~39 KB)
+│   ├── 4rent-icon.ico              # Multi-resolution Windows icon
+│   └── src/LauncherProgram.cs      # C# WinForms launcher source
+└── mobile/
+    └── 4Rent-v1.0.0-release.apk    # Signed offline Android APK (~399 KB)
 ```
 
 ---
 
 ## 📄 License
 
-MIT License. Designed and engineered for **4Rent Management System** landlords and property managers.
+Licensed under the **MIT License** — see [`LICENSE`](./LICENSE) for full terms and conditions.

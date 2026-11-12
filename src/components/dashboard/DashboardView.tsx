@@ -145,24 +145,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Top Header - Organized, Clean & Responsive Layout */}
       <header className="space-y-4">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={onOpenDrawer}
-              aria-label="Open navigation menu"
-              className="lg:hidden w-11 h-11 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-[#24314A] flex items-center justify-center text-slate-200 hover:text-white transition shrink-0 cursor-pointer btn-fluid shadow-sm"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={onOpenDrawer}
+                aria-label="Open navigation menu"
+                className="lg:hidden w-11 h-11 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-[#24314A] flex items-center justify-center text-slate-200 hover:text-white transition shrink-0 cursor-pointer btn-fluid shadow-sm"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
 
-            <div className="min-w-0">
-              <p className="text-[11px] sm:text-xs font-bold text-amber-400/90 tracking-wider uppercase">
-                {greeting} • 4Rent
-              </p>
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight">
-                Dashboard
-              </h1>
+              <div className="min-w-0">
+                <p className="text-[11px] sm:text-xs font-bold text-amber-400/90 tracking-wider uppercase">
+                  {greeting} • 4Rent
+                </p>
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight">
+                  Dashboard
+                </h1>
+              </div>
             </div>
+
+            {onOpenWalkthrough && (
+              <button
+                type="button"
+                onClick={onOpenWalkthrough}
+                className="sm:hidden inline-flex items-center gap-1.5 h-10 px-3.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-extrabold transition cursor-pointer btn-fluid shrink-0"
+                title="Open Interactive Visual Guide"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Guide</span>
+              </button>
+            )}
           </div>
 
           {/* Action Toolbar */}
@@ -439,7 +453,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             sub-meters, deposits, and official receipts.
           </p>
 
-          <div className="mt-8 flex items-center justify-center">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
               onClick={onOpenAddRoom}
@@ -448,6 +462,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <Plus className="w-4 h-4 stroke-[2.5]" />
               <span>Create First Room</span>
             </button>
+            {onOpenWalkthrough && (
+              <button
+                type="button"
+                onClick={onOpenWalkthrough}
+                className="px-6 py-4 rounded-2xl bg-[#172133] hover:bg-[#1F2D45] border border-amber-500/35 text-amber-300 font-extrabold text-sm flex items-center gap-2 transition cursor-pointer btn-fluid"
+              >
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Watch Visual Guide</span>
+              </button>
+            )}
           </div>
         </div>
       ) : (
