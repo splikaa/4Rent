@@ -36,15 +36,6 @@ const STORAGE_KEYS = {
   METER_LOGS: '4rent_db_meter_logs',
 };
 
-// Safe runtime decoder so raw credentials and project endpoints are never exposed in git tracking
-const _decodeSecret = (b64: string): string => {
-  try {
-    return atob(b64);
-  } catch {
-    return '';
-  }
-};
-
 const viteEnv =
   (import.meta as unknown as { env?: Record<string, string> }).env || {};
 const DEV_FIREBASE_PROJECT_ID =
@@ -64,6 +55,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   landlordMessenger: '',
   paymentInstructions: '',
   defaultElectricRate: 15.0,
+  monthlyElectricRates: {},
   defaultMonthlyRent: 4500.0,
   defaultSecurityDeposit: 4500.0,
   remindersPromptShown: false,
@@ -110,6 +102,11 @@ export function loadSettings(): AppSettings {
       ...DEFAULT_SETTINGS,
       ...parsed,
       apartmentName: normalizedName,
+      monthlyElectricRates:
+        parsed.monthlyElectricRates &&
+        typeof parsed.monthlyElectricRates === 'object'
+          ? parsed.monthlyElectricRates
+          : {},
       security: {
         ...DEFAULT_SETTINGS.security,
         ...(parsed.security || {}),
@@ -335,36 +332,54 @@ export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
   };
 }
 
-async function persistMasterIndexedDb(): Promise<void> {
+let _idbPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let _idbWriteChain: Promise<void> = Promise.resolve();
+
+function persistMasterIndexedDb(): void {
   if (!_isAppHydrated) return;
-  const snap = exportDatabaseSnapshot();
-  const isCandidateEmpty =
-    (!snap.rooms || snap.rooms.length === 0) &&
-    (!snap.bills || snap.bills.length === 0) &&
-    (!snap.tenantHistory || snap.tenantHistory.length === 0);
-
-  if (isCandidateEmpty) {
-    try {
-      const existing = await loadSnapshotFromIndexedDb();
-      if (
-        (existing?.rooms && existing.rooms.length > 0) ||
-        (existing?.bills && existing.bills.length > 0) ||
-        (existing?.tenantHistory && existing.tenantHistory.length > 0)
-      ) {
-        console.warn(
-          '[4Rent Storage Guard] Blocked empty snapshot overwrite of populated IndexedDB backup.'
-        );
-        return;
-      }
-    } catch {
-      // Proceed if check fails
-    }
+  if (_idbPersistTimer) {
+    clearTimeout(_idbPersistTimer);
   }
+  _idbPersistTimer = setTimeout(() => {
+    _idbPersistTimer = null;
+    _idbWriteChain = _idbWriteChain
+      .then(async () => {
+        const snap = exportDatabaseSnapshot();
+        const isCandidateEmpty =
+          (!snap.rooms || snap.rooms.length === 0) &&
+          (!snap.bills || snap.bills.length === 0) &&
+          (!snap.tenantHistory || snap.tenantHistory.length === 0);
 
-  saveSnapshotToIndexedDb(snap);
+        if (isCandidateEmpty) {
+          try {
+            const existing = await loadSnapshotFromIndexedDb();
+            if (
+              (existing?.rooms && existing.rooms.length > 0) ||
+              (existing?.bills && existing.bills.length > 0) ||
+              (existing?.tenantHistory && existing.tenantHistory.length > 0)
+            ) {
+              console.warn(
+                '[4Rent Storage Guard] Blocked empty snapshot overwrite of populated IndexedDB backup.'
+              );
+              return;
+            }
+          } catch {
+            // Proceed if check fails
+          }
+        }
+
+        await saveSnapshotToIndexedDb(snap);
+      })
+      .catch(() => {
+        // Ignore chained IDB write errors
+      });
+  }, 120);
 }
 
-export function importDatabaseSnapshot(snapshot: AppDatabaseSnapshot): void {
+export function importDatabaseSnapshot(
+  snapshot: AppDatabaseSnapshot,
+  options?: { preserveLocalSecurity?: boolean }
+): void {
   if (Array.isArray(snapshot.rooms)) {
     saveRooms(snapshot.rooms);
   }
@@ -378,7 +393,16 @@ export function importDatabaseSnapshot(snapshot: AppDatabaseSnapshot): void {
     saveTenantHistory(snapshot.tenantHistory);
   }
   if (snapshot.settings) {
-    saveSettings(snapshot.settings);
+    if (options?.preserveLocalSecurity) {
+      const localSettings = loadSettings();
+      saveSettings({
+        ...snapshot.settings,
+        security: localSettings.security,
+        cloudSync: localSettings.cloudSync,
+      });
+    } else {
+      saveSettings(snapshot.settings);
+    }
   }
   if (Array.isArray(snapshot.meterLogs)) {
     saveReadingLogs(snapshot.meterLogs);

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import {
   CalendarClock,
@@ -9,6 +9,7 @@ import {
   EyeOff,
   FileDown,
   Loader2,
+  Lock,
   MessageCircle,
   Printer,
   ShieldCheck,
@@ -16,28 +17,33 @@ import {
   Zap,
   ZoomIn,
 } from 'lucide-react';
-import { BrandLogo } from '../BrandLogo';
 import { AppSettings, BillRecord } from '../../types/rental';
 import {
   clampDueDayOneToTen,
   formatMessengerBillSummary,
+  formatMonthKeyLabel,
   formatPeso,
   generateReceiptVerificationCode,
+  getAdjacentMonthKey,
+  getElectricRateForPeriod,
+  getScheduledMonthKeys,
   isMobileDevice,
   isRunningInMobileApp,
   maskPhoneNumber,
+  normalizeMonthKey,
 } from '../../utils/billingCalculator';
 import { buildSinglePageReceiptPdfBlob } from '../../utils/pdfReceiptGenerator';
 import {
   generateSimulatedSubMeterDataUrl,
   generateSimulatedValueCropDataUrl,
-  openMessengerAppWithReceipt,
 } from '../../services/ocrService';
+import { openMessengerAppWithReceipt } from '../../services/notificationService';
 import { MeterPhotoLightboxModal } from '../ocr/MeterPhotoLightboxModal';
 
 interface ReceiptModalProps {
   bill: BillRecord | null;
   settings: AppSettings;
+  onApplyMonthlyRate?: (monthKeyOrPeriod: string, rate: number) => void;
   onClose: () => void;
 }
 
@@ -92,6 +98,7 @@ function buildMonthlyScheduleBreakdown(billingPeriod: string, dueDateIso: string
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   bill,
   settings,
+  onApplyMonthlyRate,
   onClose,
 }) => {
   const receiptRef = useRef<HTMLDivElement | null>(null);
@@ -100,6 +107,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   );
   const [isExporting, setIsExporting] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const [quickRateMonthKey, setQuickRateMonthKey] = useState<string>(() =>
+    normalizeMonthKey(bill?.billingPeriod || new Date().toISOString())
+  );
+  const [quickRateValue, setQuickRateValue] = useState<string>(() =>
+    String(bill?.electricRate ?? settings.defaultElectricRate ?? 15)
+  );
+
+  useEffect(() => {
+    if (!bill) return;
+    const key = normalizeMonthKey(bill.billingPeriod);
+    setQuickRateMonthKey(key);
+    const liveRate = bill.isArchived || bill.status === 'paid'
+      ? bill.electricRate
+      : getElectricRateForPeriod(settings, key);
+    setQuickRateValue(String(liveRate));
+  }, [bill?.id, bill?.electricRate, bill?.billingPeriod]);
 
   // 1:1 Pixel Inspection Lightbox State
   const [lightboxState, setLightboxState] = useState<{
@@ -343,7 +366,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     const pngData = await generateReceiptPngDataUrl();
     const summaryText = formatMessengerBillSummary(
       bill,
-      settings.apartmentName || '4Rent Management System'
+      settings.apartmentName || 'Rental Management',
+      settings
     );
 
     const res = await openMessengerAppWithReceipt({
@@ -383,16 +407,28 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       ? settings.landlordName
       : 'Authorized Landlord';
 
+  const isRateLockedReceipt = Boolean(bill.isArchived || bill.status === 'paid');
+  const billMonthKey = normalizeMonthKey(bill.billingPeriod);
+  const nextMonthKey = getAdjacentMonthKey(billMonthKey, 1);
+  const scheduledRateMonthKeys = Array.from(
+    new Set([
+      billMonthKey,
+      nextMonthKey,
+      ...getScheduledMonthKeys(new Date(`1 ${bill.billingPeriod}`), 3, settings.monthlyElectricRates),
+    ])
+  ).sort();
+  const nextMonthRate = getElectricRateForPeriod(settings, nextMonthKey);
+
   return (
     <div className="receipt-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 md:p-6 overflow-y-auto">
       <div className="receipt-print-shell w-full max-w-3xl rounded-3xl bg-[#111724] border border-[#243148] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[94vh] animate-modal-pop relative">
         {/* Modal Top Control Header (Hidden when printed) */}
-        <div className="no-print flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 bg-[#162030] border-b border-[#243148] shrink-0">
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-            <span className="text-xs sm:text-sm font-black text-white whitespace-nowrap">
+        <div className="no-print flex items-center justify-between gap-2.5 px-4 sm:px-6 py-3 bg-[#162030] border-b border-[#243148] shrink-0">
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <span className="text-xs sm:text-sm font-black text-white">
               Official Statement &amp; Receipt
             </span>
-            <span className="font-mono-num text-[11px] sm:text-xs bg-amber-500/15 text-amber-400 font-bold px-2.5 py-0.5 rounded-full border border-amber-500/30 truncate">
+            <span className="font-mono-num text-[11px] sm:text-xs bg-amber-500/15 text-amber-400 font-bold px-2.5 py-0.5 rounded-full border border-amber-500/30">
               {bill.receiptNo}
             </span>
           </div>
@@ -428,6 +464,72 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         </div>
 
+        {/* Non-print Quick Monthly Electric Rate Controls */}
+        {onApplyMonthlyRate && (
+          <div className="no-print px-4 sm:px-6 py-2.5 bg-[#0F1624] border-b border-[#243148] flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+            {isRateLockedReceipt ? (
+              <div className="flex items-center gap-2 text-[11px] text-slate-300">
+                <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  Previous applied receipt locked at{' '}
+                  <strong className="text-amber-300 font-mono-num">
+                    {formatPeso(bill.electricRate)}/kWh
+                  </strong>{' '}
+                  — future rate updates will not alter this receipt.
+                </span>
+              </div>
+            ) : (
+              <>
+                <div className="text-[11px] text-slate-300 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Apply Monthly Electric Rate (reflects instantly on active receipt):</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <select
+                    value={quickRateMonthKey}
+                    onChange={(e) => {
+                      const nextKey = e.target.value;
+                      setQuickRateMonthKey(nextKey);
+                      setQuickRateValue(
+                        String(getElectricRateForPeriod(settings, nextKey))
+                      );
+                    }}
+                    className="h-8 rounded-lg bg-[#162030] border border-[#2B3B56] px-2.5 text-xs font-bold text-white focus:border-amber-500 focus:outline-none"
+                  >
+                    {scheduledRateMonthKeys.map((mk) => (
+                      <option key={mk} value={mk}>
+                        {formatMonthKeyLabel(mk, 'long')}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center h-8 rounded-lg bg-[#162030] border border-amber-500/40 px-2">
+                    <span className="text-xs font-bold text-amber-400 mr-1">₱</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={quickRateValue}
+                      onChange={(e) => setQuickRateValue(e.target.value)}
+                      className="w-18 bg-transparent text-xs font-extrabold font-mono-num text-amber-300 focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const parsed = parseFloat(quickRateValue);
+                      if (!Number.isFinite(parsed) || parsed < 0) return;
+                      onApplyMonthlyRate(quickRateMonthKey, parsed);
+                    }}
+                    className="h-8 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer transition"
+                  >
+                    Apply Rate
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Floating Notification Toast */}
         {shareFeedback && (
           <div className="no-print absolute top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-black text-xs shadow-2xl border border-amber-400 flex items-center gap-2 animate-modal-pop max-w-[92%] text-center">
@@ -436,44 +538,38 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         )}
 
-        {/* Scrollable Backdrop Container — Block flow with mx-auto prevents Flexbox height clipping */}
-        <div className="receipt-sheet-container flex-1 overflow-y-auto p-3 sm:p-6 bg-[#090D15]">
+        {/* Scrollable Backdrop Container */}
+        <div className="receipt-sheet-container flex-1 overflow-y-auto p-2.5 sm:p-6 bg-[#090D15]">
           <div
             ref={receiptRef}
             id="receipt-printable-sheet"
-            className="receipt-white-sheet mx-auto w-full max-w-[660px] bg-white text-slate-900 rounded-2xl p-5 sm:p-7 shadow-2xl font-sans border border-slate-200 relative space-y-4"
+            className="receipt-white-sheet mx-auto w-full max-w-[680px] bg-white text-slate-900 rounded-2xl p-4 sm:p-7 shadow-2xl font-sans border border-slate-200 relative space-y-4"
           >
-            {/* 1. Perfectly Centered Statement Letterhead */}
-            <div className="text-center border-b-2 border-slate-900 pb-4 space-y-2">
-              <div className="w-11 h-11 rounded-xl bg-slate-950 flex items-center justify-center mx-auto shadow-sm">
-                <BrandLogo size="md" />
-              </div>
+            {/* 1. Clean Text-Only Centered Letterhead (No System Logo) */}
+            <div className="text-center border-b-2 border-slate-900 pb-4 space-y-1.5">
+              <h1 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-950 leading-snug break-words">
+                {settings.apartmentName || 'Rental Property Statement'}
+              </h1>
+              <p className="text-[11px] sm:text-xs font-bold text-slate-600 uppercase tracking-widest">
+                Official Statement of Account &amp; Sub-Meter Receipt
+              </p>
+              <p className="text-xs text-slate-600">
+                {displayLandlordName}
+                {settings.landlordPhone && (
+                  <>
+                    {' • '}
+                    {maskPhoneNumber(
+                      settings.landlordPhone,
+                      maskContactsOnReceipt
+                    )}
+                  </>
+                )}
+              </p>
 
-              <div>
-                <h1 className="text-base sm:text-xl font-black uppercase tracking-tight text-slate-950 leading-tight">
-                  {settings.apartmentName || '4Rent Management System'}
-                </h1>
-                <p className="text-[11px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">
-                  Official Statement of Account &amp; Sub-Meter Receipt
-                </p>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  {displayLandlordName}
-                  {settings.landlordPhone && (
-                    <>
-                      {' • '}
-                      {maskPhoneNumber(
-                        settings.landlordPhone,
-                        maskContactsOnReceipt
-                      )}
-                    </>
-                  )}
-                </p>
-              </div>
-
-              {/* Centered Status & Receipt Metadata Bar */}
-              <div className="pt-2 flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-[11px]">
+              {/* Status & Receipt Metadata Bar */}
+              <div className="pt-2 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 text-xs">
                 <span
-                  className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                  className={`inline-block px-3 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider border ${
                     bill.status === 'paid'
                       ? 'bg-emerald-50 text-emerald-800 border-emerald-600'
                       : bill.status === 'partial'
@@ -482,176 +578,219 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   }`}
                 >
                   {bill.status === 'paid'
-                    ? 'PAID IN FULL'
+                    ? `PAID FOR ${bill.billingPeriod.toUpperCase()}`
                     : bill.status === 'partial'
-                    ? 'PARTIAL PAYMENT'
-                    : 'STATEMENT DUE'}
+                    ? `PARTIAL • ${bill.billingPeriod.toUpperCase()}`
+                    : `DUE • ${bill.billingPeriod.toUpperCase()}`}
                 </span>
-                <span className="text-slate-300">•</span>
-                <span className="font-mono-num font-extrabold text-slate-900">
+                <span className="font-mono-num font-extrabold text-slate-950">
                   OR #{bill.receiptNo}
                 </span>
-                <span className="text-slate-300">•</span>
+                <span className="text-slate-400">•</span>
                 <span className="font-mono-num text-slate-600">
                   Issued {formattedIssueDate}
                 </span>
               </div>
             </div>
 
-            {/* 2. Centered Unit & Tenant Summary Grid */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/70">
-              <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 text-center">
-                <div className="p-2.5 sm:p-3">
-                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+            {/* 2. Aligned Unit & Tenant Summary Grid (Flush Mobile 2x2 & Desktop 4x1) */}
+            <div className="border border-slate-300 rounded-xl overflow-hidden bg-slate-200">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-px text-center">
+                <div className="bg-slate-50 p-3 flex flex-col justify-center">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     Unit / Room
                   </span>
-                  <strong className="text-xs sm:text-sm font-black text-slate-950 block mt-0.5">
+                  <strong className="text-xs sm:text-sm font-black text-slate-950 block mt-1 break-words">
                     {bill.roomName}
                   </strong>
                 </div>
-                <div className="p-2.5 sm:p-3">
-                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                <div className="bg-slate-50 p-3 flex flex-col justify-center">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     Tenant
                   </span>
-                  <strong className="text-xs font-black text-slate-900 block truncate mt-0.5">
+                  <strong className="text-xs sm:text-sm font-black text-slate-900 block mt-1 break-words leading-snug">
                     {bill.tenantName}
                   </strong>
                   {bill.tenantPhone && (
-                    <span className="text-[10px] font-mono-num text-slate-500 block">
+                    <span className="text-[11px] font-mono-num text-slate-600 block mt-0.5">
                       {maskPhoneNumber(bill.tenantPhone, maskContactsOnReceipt)}
                     </span>
                   )}
                 </div>
-                <div className="p-2.5 sm:p-3">
-                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                    Active Month
+                <div className="bg-slate-50 p-3 flex flex-col justify-center">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Billing Month
                   </span>
-                  <strong className="text-xs font-extrabold text-slate-900 block mt-0.5">
+                  <strong className="text-xs sm:text-sm font-extrabold text-slate-900 block mt-1">
                     {bill.billingPeriod}
                   </strong>
                 </div>
-                <div className="p-2.5 sm:p-3">
-                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                <div className="bg-slate-50 p-3 flex flex-col justify-center">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     Due Date (1st–10th)
                   </span>
-                  <strong className="text-xs font-black font-mono-num text-slate-950 block mt-0.5">
+                  <strong className="text-xs sm:text-sm font-black font-mono-num text-slate-950 block mt-1">
                     {formattedDueDate}
                   </strong>
                 </div>
               </div>
             </div>
 
-            {/* 3. Monthly Schedule & Rate Breakdown (This Month & Next Month) */}
-            <div className="border border-slate-200 rounded-xl p-3 sm:p-4 bg-slate-50/60 space-y-2.5">
-              <div className="flex items-center justify-center gap-1.5 pb-2 border-b border-slate-200">
-                <CalendarClock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-slate-900 text-center">
-                  Monthly Rate Breakdown — This Month &amp; Next Cycle
+            {/* 3. Monthly Electric Rate Breakdown & Billing Schedule */}
+            <div className="border border-slate-300 rounded-xl p-3.5 sm:p-4 bg-slate-50/70 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                <div className="flex items-center gap-1.5">
+                  <CalendarClock className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-900">
+                    Monthly Electric Rate Breakdown
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white border border-slate-300 text-slate-700">
+                  {isRateLockedReceipt ? 'Locked (Applied Receipt)' : 'Live Rate Schedule'}
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                {/* Current Billing Month */}
+              {/* Clean Aligned Per-Month Electric Rate Table */}
+              <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+                <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
+                  {scheduledRateMonthKeys.slice(0, 4).map((mk) => {
+                    const isBillMonth = mk === billMonthKey;
+                    const isNextMonth = mk === nextMonthKey;
+                    const displayRate = isBillMonth
+                      ? bill.electricRate
+                      : getElectricRateForPeriod(settings, mk);
+                    return (
+                      <div
+                        key={mk}
+                        className={`px-3 py-2 flex items-center justify-between gap-2 text-xs border-b border-slate-100 last:border-b-0 ${
+                          isBillMonth ? 'bg-amber-50/60' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-bold text-slate-900">
+                            {formatMonthKeyLabel(mk, 'long')}
+                          </span>
+                          {isBillMonth && (
+                            <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">
+                              Applied
+                            </span>
+                          )}
+                          {isNextMonth && !isBillMonth && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                              Next
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono-num font-black text-slate-950 shrink-0">
+                          {formatPeso(displayRate)} / kWh
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* This Cycle vs Next Cycle Alignment Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 pb-1 border-b border-slate-100">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-800">
-                      This Month ({cycleSchedule.currentLabel})
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
+                      This Cycle ({cycleSchedule.currentLabel})
                     </span>
-                    <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap">
-                      Active Cycle
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                      Active
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span>Coverage</span>
-                    <span className="font-mono-num font-semibold text-slate-900 whitespace-nowrap">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">Coverage</span>
+                    <span className="font-mono-num font-semibold text-slate-900">
                       {cycleSchedule.currentRange}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span>Rent Rate</span>
-                    <span className="font-mono-num font-bold text-slate-950 whitespace-nowrap">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">Rent Rate</span>
+                    <span className="font-mono-num font-bold text-slate-950">
                       {formatPeso(bill.baseRent)} / mo
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span className="truncate">Electric ({bill.consumptionKwh.toFixed(1)} kWh)</span>
-                    <span className="font-mono-num font-bold text-slate-950 whitespace-nowrap">
-                      {formatPeso(bill.electricRate)}/kWh • {formatPeso(bill.electricTotal)}
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-slate-600">
+                      Electric ({bill.consumptionKwh.toFixed(1)} kWh)
+                    </span>
+                    <span className="font-mono-num font-bold text-slate-950 text-right">
+                      {formatPeso(bill.electricRate)}/kWh = {formatPeso(bill.electricTotal)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span>Due Date</span>
-                    <span className="font-mono-num font-bold text-slate-900 whitespace-nowrap">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">Due Date</span>
+                    <span className="font-mono-num font-bold text-slate-900">
                       {formattedDueDate}
                     </span>
                   </div>
                 </div>
 
-                {/* Next Billing Month & Succeeding */}
                 <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 pb-1 border-b border-slate-100">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-800">
-                      Next Month ({cycleSchedule.nextLabel})
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
+                      Next Cycle ({cycleSchedule.nextLabel})
                     </span>
-                    <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
-                      Recurring Rate
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                      Upcoming
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span>Coverage</span>
-                    <span className="font-mono-num font-semibold text-slate-900 whitespace-nowrap">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">Coverage</span>
+                    <span className="font-mono-num font-semibold text-slate-900">
                       {cycleSchedule.nextRange}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span>Rent Rate</span>
-                    <span className="font-mono-num font-bold text-slate-950 whitespace-nowrap">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">Rent Rate</span>
+                    <span className="font-mono-num font-bold text-slate-950">
                       {formatPeso(bill.baseRent)} / mo
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span>Start Meter</span>
-                    <span className="font-mono-num font-bold text-slate-950 whitespace-nowrap">
-                      {bill.currReading.toFixed(1)} kWh (@{formatPeso(bill.electricRate)})
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-slate-600">Start Meter &amp; Rate</span>
+                    <span className="font-mono-num font-bold text-slate-950 text-right">
+                      {bill.currReading.toFixed(1)} kWh (@{formatPeso(nextMonthRate)})
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                    <span>Next Due (Day {cycleSchedule.dueDayNumber})</span>
-                    <span className="font-mono-num font-bold text-slate-900 whitespace-nowrap">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">
+                      Next Due (Day {cycleSchedule.dueDayNumber})
+                    </span>
+                    <span className="font-mono-num font-bold text-slate-900">
                       {cycleSchedule.nextDueLabel}
                     </span>
                   </div>
                 </div>
               </div>
-
-              <p className="text-center text-[10px] text-slate-500 pt-0.5">
-                Standard monthly billing: {formatPeso(bill.baseRent)}/mo rent + metered electricity ({formatPeso(bill.electricRate)}/kWh), payable every 1st–10th.
-              </p>
             </div>
 
             {/* 4. Section I: Sub-Meter Readings & Proof */}
-            <div className="border border-slate-200 rounded-xl p-3 sm:p-4 bg-slate-50/70 space-y-2.5">
+            <div className="border border-slate-300 rounded-xl p-3.5 sm:p-4 bg-slate-50/70 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
                 <div className="flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-slate-900">
+                  <Zap className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-900">
                     Section I • Electric Sub-Meter Proof
                   </span>
                 </div>
-                <span className="text-[10px] sm:text-xs font-mono-num font-extrabold text-slate-900 bg-white px-2.5 py-0.5 rounded border border-slate-300 whitespace-nowrap shrink-0">
-                  Rate: {formatPeso(bill.electricRate)}/kWh
+                <span className="text-xs font-mono-num font-extrabold text-slate-900 bg-white px-2.5 py-0.5 rounded border border-slate-300">
+                  Rate ({bill.billingPeriod}): {formatPeso(bill.electricRate)}/kWh
                 </span>
               </div>
 
               {/* Dual Sub-Meter Columns */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Previous Reading */}
-                <div className="rounded-lg border border-slate-200 bg-white p-2 sm:p-2.5 flex flex-col justify-between gap-1.5">
-                  <div className="flex items-center justify-between gap-1 text-[10px] pb-1 border-b border-slate-200">
+                <div className="rounded-lg border border-slate-200 bg-white p-2.5 flex flex-col justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2 text-xs pb-1.5 border-b border-slate-200">
                     <span className="font-bold uppercase text-slate-600">
-                      1. Previous
+                      1. Previous Meter
                     </span>
-                    <span className="font-mono-num font-black text-xs text-slate-950 whitespace-nowrap">
+                    <span className="font-mono-num font-black text-slate-950">
                       {bill.prevReading.toFixed(1)} kWh
                     </span>
                   </div>
@@ -665,7 +804,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           `${bill.prevReading.toFixed(1)} kWh`
                         )
                       }
-                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-20 sm:h-24 p-1"
+                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 p-1"
                       title="Click to inspect full 1:1 sub-meter proof"
                     >
                       <img
@@ -686,21 +825,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           `${bill.prevReading.toFixed(1)} kWh`
                         )
                       }
-                      className="no-print w-full py-1 rounded bg-slate-100 hover:bg-slate-200 text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
+                      className="no-print w-full py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
                     >
-                      <ZoomIn className="w-3 h-3 text-amber-600" />
+                      <ZoomIn className="w-3.5 h-3.5 text-amber-600" />
                       <span>Inspect Photo</span>
                     </button>
                   )}
                 </div>
 
                 {/* Current Reading */}
-                <div className="rounded-lg border border-slate-200 bg-white p-2 sm:p-2.5 flex flex-col justify-between gap-1.5">
-                  <div className="flex items-center justify-between gap-1 text-[10px] pb-1 border-b border-slate-200">
+                <div className="rounded-lg border border-slate-200 bg-white p-2.5 flex flex-col justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2 text-xs pb-1.5 border-b border-slate-200">
                     <span className="font-bold uppercase text-slate-600">
-                      2. Current
+                      2. Current Meter
                     </span>
-                    <span className="font-mono-num font-black text-xs text-slate-950 whitespace-nowrap">
+                    <span className="font-mono-num font-black text-slate-950">
                       {bill.currReading.toFixed(1)} kWh
                     </span>
                   </div>
@@ -714,7 +853,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           `${bill.currReading.toFixed(1)} kWh`
                         )
                       }
-                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-20 sm:h-24 p-1"
+                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 p-1"
                       title="Click to inspect full 1:1 sub-meter proof"
                     >
                       <img
@@ -735,9 +874,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                           `${bill.currReading.toFixed(1)} kWh`
                         )
                       }
-                      className="no-print w-full py-1 rounded bg-slate-100 hover:bg-slate-200 text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
+                      className="no-print w-full py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
                     >
-                      <ZoomIn className="w-3 h-3 text-amber-600" />
+                      <ZoomIn className="w-3.5 h-3.5 text-amber-600" />
                       <span>Inspect Photo</span>
                     </button>
                   )}
@@ -745,7 +884,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
 
               {/* Centered Computation Strip */}
-              <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-center text-[11px] sm:text-xs text-slate-800">
+              <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-center text-xs text-slate-800 leading-relaxed">
                 <span className="font-semibold">Usage: </span>
                 <strong className="font-mono-num text-slate-950">
                   {bill.currReading.toFixed(1)} − {bill.prevReading.toFixed(1)} ={' '}
@@ -758,55 +897,82 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             </div>
 
-            {/* 5. Section II: Itemized Statement of Charges & Totals */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-              <div className="bg-slate-100 px-3.5 py-2 border-b border-slate-200 flex justify-between text-[10px] font-black uppercase tracking-wider text-slate-700">
+            {/* 5. Section II: Itemized Statement of Charges & Deposit Deductions */}
+            <div className="border border-slate-300 rounded-xl overflow-hidden bg-white">
+              <div className="bg-slate-100 px-3.5 sm:px-4 py-2.5 border-b border-slate-200 flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-800">
                 <span>Section II • Statement of Charges</span>
                 <span>Amount (PHP)</span>
               </div>
-              <div className="divide-y divide-slate-200 text-xs">
-                <div className="px-3.5 py-2 flex justify-between gap-2 text-slate-800">
+              <div className="divide-y divide-slate-200 text-xs sm:text-[13px]">
+                <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-slate-800">
                   <span>1. Monthly Base Rent ({bill.billingPeriod})</span>
-                  <span className="font-mono-num font-bold text-slate-950 whitespace-nowrap">
+                  <span className="font-mono-num font-bold text-slate-950 shrink-0 text-right">
                     {formatPeso(bill.baseRent)}
                   </span>
                 </div>
 
-                <div className="px-3.5 py-2 flex justify-between gap-2 text-slate-800">
+                <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-slate-800">
                   <span>
                     2. Sub-Meter Electricity ({bill.consumptionKwh.toFixed(1)} kWh @{' '}
                     {formatPeso(bill.electricRate)}/kWh)
                   </span>
-                  <span className="font-mono-num font-bold text-slate-950 whitespace-nowrap">
+                  <span className="font-mono-num font-bold text-slate-950 shrink-0 text-right">
                     {formatPeso(bill.electricTotal)}
                   </span>
                 </div>
 
                 {bill.previousBalanceCarryOver > 0 && (
-                  <div className="px-3.5 py-2 flex justify-between gap-2 text-red-700 font-bold bg-red-50/50">
+                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-red-700 font-bold bg-red-50/50">
                     <span>3. Unpaid Balance Carried Over</span>
-                    <span className="font-mono-num whitespace-nowrap">
+                    <span className="font-mono-num shrink-0 text-right">
                       {formatPeso(bill.previousBalanceCarryOver)}
                     </span>
                   </div>
                 )}
 
-                {bill.depositApplied > 0 && (
-                  <div className="px-3.5 py-2 flex justify-between gap-2 text-emerald-700 font-bold bg-emerald-50/50">
-                    <span>4. Advance Credit Applied</span>
-                    <span className="font-mono-num whitespace-nowrap">
-                      −{formatPeso(bill.depositApplied)}
+                {(bill.securityDepositApplied || 0) > 0 && (
+                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-emerald-800 font-bold bg-emerald-50/60">
+                    <span>
+                      Required Deposit Paid Deducted
+                      {(bill.securityDepositRemainingAfterBill || 0) > 0
+                        ? ` (${formatPeso(bill.securityDepositRemainingAfterBill || 0)} carries to further months)`
+                        : ''}
+                    </span>
+                    <span className="font-mono-num shrink-0 text-right">
+                      −{formatPeso(bill.securityDepositApplied || 0)}
                     </span>
                   </div>
                 )}
 
-                {bill.securityDepositRequired > 0 && (
-                  <div className="px-3.5 py-2 flex justify-between gap-2 text-[11px] text-slate-600 bg-slate-50/60">
-                    <span className="inline-flex items-center gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      Security Deposit Held (Non-Deductible)
+                {(bill.advanceApplied || 0) > 0 && (
+                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-emerald-800 font-bold bg-emerald-50/40">
+                    <span>Advance Credit Applied</span>
+                    <span className="font-mono-num shrink-0 text-right">
+                      −{formatPeso(bill.advanceApplied || 0)}
                     </span>
-                    <span className="font-mono-num font-semibold whitespace-nowrap">
+                  </div>
+                )}
+
+                {bill.depositApplied > 0 &&
+                  !(bill.securityDepositApplied || 0) &&
+                  !(bill.advanceApplied || 0) && (
+                    <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-emerald-800 font-bold bg-emerald-50/50">
+                      <span>Deposit / Advance Credit Applied</span>
+                      <span className="font-mono-num shrink-0 text-right">
+                        −{formatPeso(bill.depositApplied)}
+                      </span>
+                    </div>
+                  )}
+
+                {bill.securityDepositRequired > 0 && (
+                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-xs text-slate-600 bg-slate-50/60">
+                    <span className="inline-flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>
+                        Required Security Deposit (Deductible When Paid)
+                      </span>
+                    </span>
+                    <span className="font-mono-num font-semibold shrink-0 text-right">
                       {formatPeso(bill.securityDepositRequired)}
                     </span>
                   </div>
@@ -814,27 +980,27 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
 
               {/* Settlement Summary Box */}
-              <div className="bg-slate-50 border-t-2 border-slate-900 px-3.5 py-3 space-y-1.5">
+              <div className="bg-slate-50 border-t-2 border-slate-900 px-3.5 sm:px-4 py-3 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs sm:text-sm font-black uppercase text-slate-950">
-                    Total Amount Due
+                    Net Total Amount Due
                   </span>
-                  <span className="text-lg sm:text-xl font-black font-mono-num text-slate-950 whitespace-nowrap">
+                  <span className="text-lg sm:text-xl font-black font-mono-num text-slate-950">
                     {formatPeso(bill.totalAmountDue)}
                   </span>
                 </div>
                 <div className="flex justify-between gap-2 text-xs text-slate-700">
                   <span>
-                    Amount Paid{bill.paymentMethod ? ` (${bill.paymentMethod})` : ''}
+                    Cash / Transfer Paid{bill.paymentMethod ? ` (${bill.paymentMethod})` : ''}
                   </span>
-                  <span className="font-mono-num font-bold text-emerald-700 whitespace-nowrap">
+                  <span className="font-mono-num font-bold text-emerald-700">
                     {formatPeso(bill.amountPaid)}
                   </span>
                 </div>
                 <div className="flex justify-between gap-2 text-xs font-black text-slate-900">
-                  <span>Remaining Balance</span>
+                  <span>Remaining Balance ({bill.billingPeriod})</span>
                   <span
-                    className={`font-mono-num font-black whitespace-nowrap ${
+                    className={`font-mono-num font-black ${
                       bill.remainingBalance > 0
                         ? 'text-red-700'
                         : 'text-emerald-700'
@@ -848,7 +1014,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <span>
                       Advance Credit ({cycleSchedule.nextLabel})
                     </span>
-                    <span className="font-mono-num whitespace-nowrap">
+                    <span className="font-mono-num">
                       +{formatPeso(bill.overpaymentToAdvance)}
                     </span>
                   </div>
@@ -856,16 +1022,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             </div>
 
-            {/* 6. Centered Verification Seal & Official Footer */}
+            {/* 6. Clean Verification Seal & Official Footer */}
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-1.5">
-              <div className="inline-flex items-center justify-center gap-1.5 text-[10px] text-slate-600 font-medium">
+              <div className="inline-flex items-center justify-center gap-1.5 text-[11px] text-slate-600 font-medium">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <span>
-                  Payment Window: 1st–10th Monthly • 4Rent Management System v1.0.0
+                  Payment Window: 1st–10th Monthly • Statement Verification
                 </span>
               </div>
               <div>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-mono-num font-black text-emerald-700 tracking-wider">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-mono-num font-black text-emerald-700 tracking-wider">
                   <span className="text-slate-500 uppercase font-bold">Seal:</span>
                   <span>{verificationSeal}</span>
                 </span>

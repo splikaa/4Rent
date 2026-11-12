@@ -58,6 +58,7 @@ export interface Room {
   tenant?: TenantProfile;
   unpaidBalance: number; // Carried-over unpaid or partial balance in ₱
   securityDeposit: number; // Required Security deposit held in ₱
+  securityDepositPaid?: number; // Remaining paid required deposit credit in ₱ (auto-deducts from monthly bills)
   advanceRent: number; // Withdrawable Advance payment balance (includes overpayments) in ₱
   advanceHistory?: AdvanceBalanceTransaction[];
   activeReceiptId?: string; // 1 Room = 1 Active Official Receipt
@@ -122,8 +123,11 @@ export interface BillRecord {
   // Financial Breakdown
   baseRent: number;
   securityDepositRequired: number;
+  securityDepositApplied?: number; // Paid required deposit deducted from this bill
+  securityDepositRemainingAfterBill?: number; // Remaining paid deposit carried forward to future bills
+  advanceApplied?: number; // Advance balance deducted from this bill
   previousBalanceCarryOver: number;
-  depositApplied: number; // Advance/Deposit credit applied to this bill
+  depositApplied: number; // Total Deposit + Advance credit deducted from this bill
   totalAmountDue: number;
   amountPaid: number;
   overpaymentToAdvance: number; // Any excess paid above totalAmountDue credited to room's Advance Balance
@@ -174,7 +178,8 @@ export interface AppSettings {
   landlordPhone: string;
   landlordMessenger: string;
   paymentInstructions: string;
-  defaultElectricRate: number; // Master ₱/kWh rate applied to ALL rooms
+  defaultElectricRate: number; // Master ₱/kWh fallback rate
+  monthlyElectricRates?: Record<string, number>; // Monthly rate overrides keyed by YYYY-MM (e.g. '2026-11': 11.84)
   defaultMonthlyRent: number;
   defaultSecurityDeposit: number;
   remindersPromptShown: boolean;

@@ -111,13 +111,12 @@ export interface PaymentAccountingDecision {
 }
 
 /**
- * Evaluates landlord payment application under strict Philippine Rent Law (RA 10173 & Rent Control Guidelines).
- * 
+ * Evaluates landlord payment application:
+ *
  * Rules:
- * 1. Security Deposit is strictly non-deductible for rent during active tenancy (reserved for property repairs).
- * 2. Available Advance Rent automatically deducts from the gross bill due.
- * 3. Any overpayment made by tenant strictly credits into Advance Rent for future months.
- * 4. Any unpaid remaining balance carries over into Unpaid Carried Balance.
+ * 1. Paid Required Deposit and Advance Rent automatically deduct from the current bill and carry remaining credit forward.
+ * 2. Any overpayment made by tenant strictly credits into Advance Rent for future months.
+ * 3. Any unpaid remaining balance carries over into Unpaid Carried Balance.
  */
 export function evaluatePaymentAccountingDecision(
   baseRent: number,

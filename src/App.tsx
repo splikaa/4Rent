@@ -31,6 +31,7 @@ import {
 import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
   isCloudConfigured,
+  mergeDatabaseSnapshots,
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
   subscribeToRealtimeSync,
@@ -38,11 +39,16 @@ import {
 import {
   applyPaymentWithOverpayment,
   clampDueDayOneToTen,
+  formatMonthKeyLabel,
+  getElectricRateForPeriod,
   isRunningInDesktopApp,
   isRunningInMobileApp,
   isStandaloneApp,
+  normalizeMonthKey,
+  recalculateActiveBillsForRates,
+  roundCurrency,
 } from './utils/billingCalculator';
-import { requestAndVerifyNotifications } from './services/ocrService';
+import { requestAndVerifyNotifications } from './services/notificationService';
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
 import { LockScreen } from './components/security/LockScreen';
 import { LoadingSplashScreen } from './components/common/LoadingSplashScreen';
@@ -89,10 +95,12 @@ export function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const deferredInstallPromptRef = useRef<any>(null);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
+      deferredInstallPromptRef.current = e;
       setDeferredInstallPrompt(e);
     };
 
@@ -222,22 +230,6 @@ export function App() {
     };
   }, []);
 
-  // PWA Install Prompt Reference
-  const deferredInstallPromptRef = useRef<any>(null);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      deferredInstallPromptRef.current = e;
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () =>
-      window.removeEventListener(
-        'beforeinstallprompt',
-        handleBeforeInstallPrompt
-      );
-  }, []);
-
   // Auto-Lock Inactivity Timer for Landlord & Tenant Privacy Protection
   useEffect(() => {
     const idleMins = settings.security.autoLockMinutes ?? 15;
@@ -305,18 +297,21 @@ export function App() {
         const idbSnap = await loadSnapshotFromIndexedDb();
         if (!mounted || !idbSnap) return;
         const currentRooms = loadRooms();
-        const hasIdbData =
-          (idbSnap.rooms && idbSnap.rooms.length > 0) ||
-          (idbSnap.bills && idbSnap.bills.length > 0) ||
-          (idbSnap.tenantHistory && idbSnap.tenantHistory.length > 0);
+        const currentBills = loadBills();
+        const currentHistory = loadTenantHistory();
+        const needsIdbRestore =
+          (currentRooms.length === 0 && Boolean(idbSnap.rooms?.length)) ||
+          (currentBills.length === 0 && Boolean(idbSnap.bills?.length)) ||
+          (currentHistory.length === 0 && Boolean(idbSnap.tenantHistory?.length));
 
-        if (currentRooms.length === 0 && hasIdbData) {
-          importDatabaseSnapshot(idbSnap);
-          setRooms(idbSnap.rooms || []);
-          setBills(idbSnap.bills || []);
-          setInquiries(idbSnap.inquiries || []);
-          setTenantHistory(idbSnap.tenantHistory || []);
-          if (idbSnap.settings) {
+        if (needsIdbRestore) {
+          const restored = mergeDatabaseSnapshots(exportDatabaseSnapshot(), idbSnap);
+          importDatabaseSnapshot(restored);
+          setRooms(loadRooms());
+          setBills(loadBills());
+          setInquiries(loadInquiries());
+          setTenantHistory(loadTenantHistory());
+          if (idbSnap.settings && !loadSettings().security?.isSetupComplete) {
             setSettings(idbSnap.settings);
             if (idbSnap.settings.security?.isSetupComplete) {
               setShowSecuritySetup(false);
@@ -360,7 +355,11 @@ export function App() {
 
               pullSnapshotFromCloud(nextSync).then((res) => {
                 if (res.ok && res.snapshot) {
-                  importDatabaseSnapshot(res.snapshot);
+                  const merged = mergeDatabaseSnapshots(
+                    exportDatabaseSnapshot(),
+                    res.snapshot
+                  );
+                  importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
                   setRooms(loadRooms());
                   setBills(loadBills());
                   setInquiries(loadInquiries());
@@ -404,7 +403,11 @@ export function App() {
       const unsubscribe = subscribeToRealtimeSync(
         settings.cloudSync,
         (remoteSnap) => {
-          importDatabaseSnapshot(remoteSnap);
+          const merged = mergeDatabaseSnapshots(
+            exportDatabaseSnapshot(),
+            remoteSnap
+          );
+          importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
           setRooms(loadRooms());
           setBills(loadBills());
           setInquiries(loadInquiries());
@@ -429,7 +432,11 @@ export function App() {
       if (isCloudConfigured(settings.cloudSync)) {
         const res = await pullSnapshotFromCloud(settings.cloudSync);
         if (res.ok && res.snapshot) {
-          importDatabaseSnapshot(res.snapshot);
+          const merged = mergeDatabaseSnapshots(
+            exportDatabaseSnapshot(),
+            res.snapshot
+          );
+          importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
           setRooms(loadRooms());
           setBills(loadBills());
           setInquiries(loadInquiries());
@@ -451,6 +458,7 @@ export function App() {
     settings.cloudSync.provider,
     settings.cloudSync.firebaseProjectId,
     settings.cloudSync.firebaseDatabaseUrl,
+    settings.cloudSync.propertyCode,
   ]);
 
   useEffect(() => {
@@ -636,10 +644,92 @@ export function App() {
           setTenantHistory((prev) => [entry, ...prev]);
         }
 
+        // If room is occupied and has available paid Required Deposit credit with an active unpaid bill,
+        // auto-deduct deposit toward that bill and keep any remaining deposit credit on the room for further cycles.
+        const availablePaidDeposit =
+          roomData.status === 'occupied'
+            ? Math.max(0, roomData.securityDepositPaid || 0)
+            : 0;
+        let depositUsedOnActiveBill = 0;
+        let finalRoomUnpaidBalance = roomData.unpaidBalance;
+
+        if (availablePaidDeposit > 0) {
+          const activeUnpaidBill = bills.find(
+            (b) =>
+              !b.isArchived &&
+              b.roomId === existingId &&
+              (b.id === roomData.activeReceiptId || b.remainingBalance > 0) &&
+              b.remainingBalance > 0
+          );
+
+          if (activeUnpaidBill) {
+            depositUsedOnActiveBill = roundCurrency(
+              Math.min(availablePaidDeposit, activeUnpaidBill.remainingBalance)
+            );
+            const remainingDepositAfter = Math.max(
+              0,
+              roundCurrency(availablePaidDeposit - depositUsedOnActiveBill)
+            );
+
+            setBills((prev) =>
+              prev.map((b) => {
+                if (b.id !== activeUnpaidBill.id) return b;
+                const nextSecDepApplied = roundCurrency(
+                  (b.securityDepositApplied || 0) + depositUsedOnActiveBill
+                );
+                const nextTotalApplied = roundCurrency(
+                  (b.depositApplied || 0) + depositUsedOnActiveBill
+                );
+                const nextTotalDue = Math.max(
+                  0,
+                  roundCurrency(b.totalAmountDue - depositUsedOnActiveBill)
+                );
+                const nextRemaining = Math.max(
+                  0,
+                  roundCurrency(b.remainingBalance - depositUsedOnActiveBill)
+                );
+                const nextStatus: BillRecord['status'] =
+                  nextRemaining <= 0.009
+                    ? 'paid'
+                    : b.amountPaid > 0 || nextTotalApplied > 0
+                    ? 'partial'
+                    : 'unpaid';
+                finalRoomUnpaidBalance = nextRemaining;
+
+                return {
+                  ...b,
+                  securityDepositApplied: nextSecDepApplied,
+                  securityDepositRemainingAfterBill: remainingDepositAfter,
+                  depositApplied: nextTotalApplied,
+                  totalAmountDue: nextTotalDue,
+                  remainingBalance: nextRemaining,
+                  status: nextStatus,
+                  paidAt: nextStatus === 'paid' ? b.paidAt || nowIso : b.paidAt,
+                  updatedAt: nowIso,
+                };
+              })
+            );
+          }
+        }
+
+        const remainingRoomPaidDeposit = Math.max(
+          0,
+          roundCurrency(availablePaidDeposit - depositUsedOnActiveBill)
+        );
+
         setRooms((prev) =>
           prev.map((r) =>
             r.id === existingId
-              ? { ...roomData, id: existingId, updatedAt: nowIso }
+              ? {
+                  ...roomData,
+                  securityDepositPaid: remainingRoomPaidDeposit,
+                  unpaidBalance:
+                    depositUsedOnActiveBill > 0
+                      ? finalRoomUnpaidBalance
+                      : roomData.unpaidBalance,
+                  id: existingId,
+                  updatedAt: nowIso,
+                }
               : r
           )
         );
@@ -969,15 +1059,16 @@ export function App() {
       setRooms((prev) =>
         prev.map((r) => {
           if (r.id !== newBill.roomId) return r;
+          const depUsed = Math.max(0, newBill.securityDepositApplied || 0);
+          const nextPaidDeposit = Math.max(
+            0,
+            roundCurrency((r.securityDepositPaid || 0) - depUsed)
+          );
+          const advUsed = advanceDeductedFromRoom;
           const currentAdv = r.advanceRent || 0;
           const nextAdv = Math.max(
             0,
-            Math.round(
-              (currentAdv -
-                advanceDeductedFromRoom +
-                overpaymentAddedToAdvance) *
-                100
-            ) / 100
+            roundCurrency(currentAdv - advUsed + overpaymentAddedToAdvance)
           );
 
           const newAdvEntries = [...(r.advanceHistory || [])];
@@ -1007,6 +1098,7 @@ export function App() {
             lastMeterCropDataUrl: updatedRoomLastCropUrl || r.lastMeterCropDataUrl,
             lastReadingDate: newBill.createdAt,
             unpaidBalance: updatedRoomUnpaidBalance,
+            securityDepositPaid: nextPaidDeposit,
             advanceRent: nextAdv,
             advanceHistory: newAdvEntries,
             activeReceiptId: newBill.id,
@@ -1528,47 +1620,53 @@ export function App() {
     }
   };
 
-  // Whenever global Electric Rate is updated in Settings, reflect it across active unpaid bills
+  // Whenever Electric Rates are updated in Settings, reflect instantly across active unpaid receipts
+  // while leaving previously applied/archived receipts untouched.
+  const applySettingsAndRecalculateBills = (nextSettings: AppSettings) => {
+    setSettings(nextSettings);
+    const { bills: nextBills, updatedCount, roomUnpaidMap } =
+      recalculateActiveBillsForRates(bills, nextSettings);
+
+    if (updatedCount > 0) {
+      setBills(nextBills);
+      setRooms((prev) =>
+        prev.map((r) =>
+          Object.prototype.hasOwnProperty.call(roomUnpaidMap, r.id)
+            ? {
+                ...r,
+                unpaidBalance: roomUnpaidMap[r.id],
+                updatedAt: new Date().toISOString(),
+              }
+            : r
+        )
+      );
+    }
+    return updatedCount;
+  };
+
   const handleUpdateSettings = (nextSettings: AppSettings) => {
     try {
-      const rateChanged =
-        nextSettings.defaultElectricRate !== settings.defaultElectricRate;
-      setSettings(nextSettings);
+      const ratesChanged =
+        nextSettings.defaultElectricRate !== settings.defaultElectricRate ||
+        JSON.stringify(nextSettings.monthlyElectricRates || {}) !==
+          JSON.stringify(settings.monthlyElectricRates || {});
 
-      if (rateChanged) {
-        const newRate = nextSettings.defaultElectricRate;
-        setBills((prev) =>
-          prev.map((b) => {
-            if (b.status === 'paid' || b.isArchived) return b;
-            const newElecTotal =
-              Math.round(b.consumptionKwh * newRate * 100) / 100;
-            const newTotalDue = Math.max(
-              0,
-              Math.round(
-                (b.baseRent +
-                  newElecTotal +
-                  b.previousBalanceCarryOver -
-                  b.depositApplied) *
-                  100
-              ) / 100
-            );
-            const newRemaining = Math.max(
-              0,
-              Math.round((newTotalDue - b.amountPaid) * 100) / 100
-            );
-            return {
-              ...b,
-              electricRate: newRate,
-              electricTotal: newElecTotal,
-              totalAmountDue: newTotalDue,
-              remainingBalance: newRemaining,
-            };
-          })
-        );
+      let updatedCount = 0;
+      if (ratesChanged) {
+        updatedCount = applySettingsAndRecalculateBills(nextSettings);
+      } else {
+        setSettings(nextSettings);
       }
+
+      const activeMonthRate = getElectricRateForPeriod(
+        nextSettings,
+        new Date().toISOString()
+      );
       triggerFeedback(
         'System Settings Saved',
-        `Electric Rate: ₱${nextSettings.defaultElectricRate.toFixed(2)}/kWh • Default Rent: ₱${nextSettings.defaultMonthlyRent.toLocaleString('en-PH')}.`,
+        updatedCount > 0
+          ? `Electric Rate ₱${activeMonthRate.toFixed(2)}/kWh applied to ${updatedCount} active receipt(s). Previous applied receipts remain unchanged.`
+          : `Current Month Rate: ₱${activeMonthRate.toFixed(2)}/kWh • Default Rent: ₱${nextSettings.defaultMonthlyRent.toLocaleString('en-PH')}.`,
         'success',
         'Back to Dashboard',
         () => setActiveTab('dashboard')
@@ -1581,6 +1679,33 @@ export function App() {
         'error'
       );
     }
+  };
+
+  const handleApplyMonthlyElectricRate = (monthOrPeriod: string, rate: number) => {
+    const monthKey = normalizeMonthKey(monthOrPeriod);
+    const cleanRate = roundCurrency(Math.max(0, rate));
+    const currentKey = normalizeMonthKey(new Date().toISOString());
+    const nextSettings: AppSettings = {
+      ...settings,
+      defaultElectricRate:
+        monthKey === currentKey ? cleanRate : settings.defaultElectricRate,
+      monthlyElectricRates: {
+        ...(settings.monthlyElectricRates || {}),
+        [monthKey]: cleanRate,
+      },
+    };
+    const updatedCount = applySettingsAndRecalculateBills(nextSettings);
+    appendAuditLog(
+      'Monthly Electric Rate Applied',
+      `${formatMonthKeyLabel(monthKey, 'long')}: ₱${cleanRate.toFixed(2)}/kWh (${updatedCount} active receipt(s) updated)`,
+      'billing'
+    );
+    triggerFeedback(
+      `${formatMonthKeyLabel(monthKey, 'long')} Rate Applied`,
+      `₱${cleanRate.toFixed(2)}/kWh reflected on active receipts immediately (previous applied receipts locked).`,
+      'success'
+    );
+    triggerOptionalCloudSync();
   };
 
   const handleOpenScanForRoom = (room?: Room) => {
@@ -1667,7 +1792,10 @@ export function App() {
             rooms={rooms}
             bills={bills}
             inquiries={inquiries}
-            globalElectricRate={settings.defaultElectricRate}
+            globalElectricRate={getElectricRateForPeriod(
+              settings,
+              new Date().toISOString()
+            )}
             privacyMaskEnabled={settings.privacyMaskEnabled}
             onTogglePrivacyMask={handleTogglePrivacyMask}
             onOpenDrawer={() => setIsDrawerOpen(true)}
@@ -1692,7 +1820,10 @@ export function App() {
           <ManageRoomsView
             rooms={rooms}
             bills={bills}
-            globalElectricRate={settings.defaultElectricRate}
+            globalElectricRate={getElectricRateForPeriod(
+              settings,
+              new Date().toISOString()
+            )}
             privacyMaskEnabled={settings.privacyMaskEnabled}
             onBack={() => setActiveTab('dashboard')}
             onOpenAddRoom={() => {
@@ -1760,6 +1891,7 @@ export function App() {
         {activeTab === 'payments' && (
           <AllPaymentsView
             bills={bills}
+            rooms={rooms}
             privacyMaskEnabled={settings.privacyMaskEnabled}
             onBack={() => setActiveTab('dashboard')}
             onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
@@ -1829,7 +1961,10 @@ export function App() {
         initialRoom={editingRoom}
         existingRooms={rooms}
         defaultRent={settings.defaultMonthlyRent}
-        globalElectricRate={settings.defaultElectricRate}
+        globalElectricRate={getElectricRateForPeriod(
+          settings,
+          new Date().toISOString()
+        )}
         onClose={() => {
           setIsRoomModalOpen(false);
           setEditingRoom(null);
@@ -1861,7 +1996,10 @@ export function App() {
               )
             : []
         }
-        globalElectricRate={settings.defaultElectricRate}
+        globalElectricRate={getElectricRateForPeriod(
+          settings,
+          new Date().toISOString()
+        )}
         privacyMaskEnabled={settings.privacyMaskEnabled}
         onClose={() => setSelectedRoomDetailsId(null)}
         onEditRoom={(room) => {
@@ -1878,16 +2016,26 @@ export function App() {
         isOpen={isScannerOpen}
         rooms={rooms}
         initialRoom={scannerTargetRoom}
-        globalElectricRate={settings.defaultElectricRate}
-        securityPin={settings.security?.pinCode || '1234'}
+        globalElectricRate={getElectricRateForPeriod(
+          settings,
+          new Date().toISOString()
+        )}
+        monthlyElectricRates={settings.monthlyElectricRates}
+        securityPin={settings.security?.pinCode || ''}
         onClose={() => setIsScannerOpen(false)}
         onGenerateBill={handleGenerateBill}
       />
 
       {/* Printable Receipt & Messenger Integration Modal */}
       <ReceiptModal
-        bill={activeReceiptBill}
+        bill={
+          activeReceiptBill
+            ? bills.find((b) => b.id === activeReceiptBill.id) ||
+              activeReceiptBill
+            : null
+        }
         settings={settings}
+        onApplyMonthlyRate={handleApplyMonthlyElectricRate}
         onClose={() => setActiveReceiptBill(null)}
       />
 

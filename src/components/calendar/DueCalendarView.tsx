@@ -23,7 +23,7 @@ import {
   formatPesoPrivacy,
   maskPhoneNumber,
 } from '../../utils/billingCalculator';
-import { openMessengerAppWithReceipt } from '../../services/ocrService';
+import { openMessengerAppWithReceipt } from '../../services/notificationService';
 
 interface DueCalendarViewProps {
   rooms: Room[];
@@ -328,7 +328,7 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
               <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
             </div>
             <div className="mt-2.5">
-              <div className="text-lg sm:text-2xl font-black text-white font-mono-num truncate">
+              <div className="text-base sm:text-2xl font-black text-white font-mono-num break-words">
                 {formatPesoPrivacy(summary.totalExpected, privacyMaskEnabled)}
               </div>
               <div className="text-[11px] text-slate-400 mt-1">
@@ -343,7 +343,7 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             </div>
             <div className="mt-2.5">
-              <div className="text-lg sm:text-2xl font-black text-emerald-400 font-mono-num truncate">
+              <div className="text-base sm:text-2xl font-black text-emerald-400 font-mono-num break-words">
                 {formatPesoPrivacy(summary.totalCollected, privacyMaskEnabled)}
               </div>
               <div className="text-[11px] text-emerald-400 mt-1 font-semibold">
@@ -358,7 +358,7 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
               <Clock className="w-4 h-4 text-rose-400 shrink-0" />
             </div>
             <div className="mt-2.5">
-              <div className="text-lg sm:text-2xl font-black text-rose-400 font-mono-num truncate">
+              <div className="text-base sm:text-2xl font-black text-rose-400 font-mono-num break-words">
                 {formatPesoPrivacy(summary.totalPending, privacyMaskEnabled)}
               </div>
               <div className="text-[11px] text-rose-300 mt-1 font-semibold">

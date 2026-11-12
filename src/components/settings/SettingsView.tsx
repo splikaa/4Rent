@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Bell,
+  Calendar,
   Check,
   Cloud,
   Copy,
@@ -12,6 +13,7 @@ import {
   FileCheck2,
   Laptop,
   Lock,
+  Plus,
   RefreshCw,
   Save,
   Share2,
@@ -21,6 +23,7 @@ import {
   Upload,
   Wifi,
   WifiOff,
+  Zap,
 } from 'lucide-react';
 import {
   AppDatabaseSnapshot,
@@ -39,10 +42,13 @@ import {
   pushSnapshotToCloud,
   FIREBASE_RULES_JSON,
 } from '../../services/firebaseSync';
-import { requestAndVerifyNotifications } from '../../services/ocrService';
+import { requestAndVerifyNotifications } from '../../services/notificationService';
 import {
+  formatMonthKeyLabel,
   formatPhoneNumber,
+  getScheduledMonthKeys,
   isMobileDevice,
+  normalizeMonthKey,
 } from '../../utils/billingCalculator';
 
 interface SettingsViewProps {
@@ -70,7 +76,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isMobile = isMobileDevice(),
 }) => {
   const [form, setForm] = useState<AppSettings>(settings);
+  const [customMonthInput, setCustomMonthInput] = useState(() =>
+    normalizeMonthKey(new Date().toISOString())
+  );
+  const [customRateInput, setCustomRateInput] = useState('');
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    setForm(settings);
+  }, [settings]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isVerifyingNotification, setIsVerifyingNotification] = useState(false);
   const [showDevCloudConfig, setShowDevCloudConfig] = useState(false);
@@ -130,7 +144,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (pullRes.ok && pullRes.snapshot) {
         // 2. Smart Merge
         finalSnap = mergeDatabaseSnapshots(localSnap, pullRes.snapshot);
-        importDatabaseSnapshot(finalSnap);
+        importDatabaseSnapshot(finalSnap, { preserveLocalSecurity: true });
         onReloadAllData();
       }
 
@@ -310,7 +324,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-amber-400 mb-1.5">
-                Electric Sub-Meter Rate (₱ / kWh)
+                Default Electric Rate Fallback (₱ / kWh)
               </label>
               <input
                 type="number"
@@ -345,13 +359,151 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
+          {/* Monthly Electric Rate Schedule (e.g. Nov: 11.84, Dec: 11.63) */}
+          <div className="pt-4 border-t border-[#232F44] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Monthly Electric Rate Schedule (₱ / kWh)</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                  Set rates per month (e.g. Nov: ₱11.84, Dec: ₱11.63). Saving reflects instantly on active receipts — previous applied receipts remain unchanged.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {getScheduledMonthKeys(new Date(), 3, form.monthlyElectricRates).map(
+                (monthKey, idx) => {
+                  const val =
+                    form.monthlyElectricRates?.[monthKey] ??
+                    form.defaultElectricRate;
+                  const currentKey = normalizeMonthKey(new Date().toISOString());
+                  const isCurrent = monthKey === currentKey;
+                  return (
+                    <div
+                      key={monthKey}
+                      className={`rounded-2xl bg-[#0D121B] border p-3 ${
+                        isCurrent ? 'border-amber-500/45' : 'border-[#263248]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                        <label className="text-xs font-bold text-white flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>{formatMonthKeyLabel(monthKey, 'long')}</span>
+                        </label>
+                        {isCurrent && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
+                            This Month
+                          </span>
+                        )}
+                        {!isCurrent && idx === 1 && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                            Next Month
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-amber-400">₱</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={val}
+                          onChange={(e) => {
+                            const parsed = parseFloat(e.target.value);
+                            setForm((prev) => ({
+                              ...prev,
+                              defaultElectricRate: isCurrent
+                                ? Number.isFinite(parsed)
+                                  ? parsed
+                                  : 0
+                                : prev.defaultElectricRate,
+                              monthlyElectricRates: {
+                                ...(prev.monthlyElectricRates || {}),
+                                [monthKey]: Number.isFinite(parsed) ? parsed : 0,
+                              },
+                            }));
+                          }}
+                          className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-2.5 text-sm font-bold text-amber-400 font-mono-num focus:border-amber-500 focus:outline-none"
+                        />
+                        <span className="text-[11px] text-slate-400 shrink-0">
+                          /kWh
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+            </div>
+
+            {/* Add / Override Any Custom Month */}
+            <div className="rounded-2xl bg-[#0D121B] border border-[#232F44] p-3 flex flex-col sm:flex-row sm:items-end gap-2.5">
+              <div className="flex-1 min-w-0">
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                  Add / Edit Specific Month
+                </label>
+                <input
+                  type="month"
+                  value={customMonthInput}
+                  onChange={(e) => setCustomMonthInput(e.target.value)}
+                  className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div className="w-full sm:w-40">
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                  Rate (₱/kWh)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="e.g., 11.84"
+                  value={customRateInput}
+                  onChange={(e) => setCustomRateInput(e.target.value)}
+                  className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs font-bold text-amber-400 font-mono-num focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const key = normalizeMonthKey(customMonthInput);
+                  const rate = parseFloat(customRateInput);
+                  if (!key || !Number.isFinite(rate) || rate < 0) return;
+                  const nextRates = {
+                    ...(form.monthlyElectricRates || {}),
+                    [key]: Math.round(rate * 100) / 100,
+                  };
+                  const currentKey = normalizeMonthKey(new Date().toISOString());
+                  const nextSettings: AppSettings = {
+                    ...form,
+                    defaultElectricRate:
+                      key === currentKey ? nextRates[key] : form.defaultElectricRate,
+                    monthlyElectricRates: nextRates,
+                  };
+                  setForm(nextSettings);
+                  onUpdateSettings(nextSettings);
+                  setCustomRateInput('');
+                  setStatusBanner(
+                    `Applied ${formatMonthKeyLabel(key, 'long')} rate: ₱${nextRates[key].toFixed(2)}/kWh`
+                  );
+                }}
+                className="h-9 px-3.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Apply Month Rate</span>
+              </button>
+            </div>
+          </div>
+
           <div className="flex justify-end pt-1">
             <button
               type="submit"
               className="px-5 py-2.5 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm flex items-center gap-2 cursor-pointer btn-fluid shadow-lg shadow-amber-500/20"
             >
               <Save className="w-4 h-4" />
-              <span>Save Rates</span>
+              <span>Save &amp; Apply Rates</span>
             </button>
           </div>
         </form>

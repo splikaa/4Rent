@@ -11,11 +11,18 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { BillRecord } from '../../types/rental';
-import { formatPeso, formatPesoPrivacy } from '../../utils/billingCalculator';
+import { BillRecord, Room } from '../../types/rental';
+import {
+  formatPeso,
+  formatPesoPrivacy,
+  getCurrentCalendarPeriodLabel,
+  getRoomMonthlyPaymentStatus,
+  normalizeMonthKey,
+} from '../../utils/billingCalculator';
 
 interface AllPaymentsViewProps {
   bills: BillRecord[];
+  rooms?: Room[];
   privacyMaskEnabled?: boolean;
   onBack: () => void;
   onSelectBillForReceipt: (bill: BillRecord) => void;
@@ -32,6 +39,7 @@ interface AllPaymentsViewProps {
 
 export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   bills,
+  rooms = [],
   privacyMaskEnabled = false,
   onBack,
   onSelectBillForReceipt,
@@ -40,7 +48,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   onOpenNewBillScanner,
   onOpenArchiveCenter,
 }) => {
-  const [filter, setFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+  const [filter, setFilter] = useState<'all' | 'this_month' | 'paid' | 'unpaid'>('all');
   const [payingBill, setPayingBill] = useState<BillRecord | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<
@@ -48,10 +56,24 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   >('GCash');
   const [payRef, setPayRef] = useState('');
 
+  const currentPeriodLabel = getCurrentCalendarPeriodLabel();
+  const currentMonthKey = normalizeMonthKey(currentPeriodLabel);
+  const occupiedRooms = rooms.filter((r) => !r.isArchived && r.status === 'occupied');
+  const monthlyRoomStatuses = occupiedRooms.map((room) => ({
+    room,
+    summary: getRoomMonthlyPaymentStatus(room, bills, currentMonthKey),
+  }));
+  const paidThisMonthCount = monthlyRoomStatuses.filter(
+    (item) => item.summary.status === 'paid'
+  ).length;
+
   // Active receipts (1 per room)
   const activeBills = bills.filter((b) => !b.isArchived);
 
   const filteredBills = activeBills.filter((b) => {
+    if (filter === 'this_month') {
+      return normalizeMonthKey(b.billingPeriod) === currentMonthKey;
+    }
     if (filter === 'paid') return b.status === 'paid';
     if (filter === 'unpaid')
       return b.status === 'unpaid' || b.status === 'partial';
@@ -133,11 +155,12 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
 
       <div className="flex-1 w-full max-w-5xl mx-auto px-5 sm:px-8 pt-8 flex flex-col">
         {/* Filter Pills + Record Count Row */}
-        <div className="flex items-center justify-between gap-3 mb-6">
-          <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <div className="flex flex-wrap items-center gap-2">
             {(
               [
                 { id: 'all', label: 'All' },
+                { id: 'this_month', label: `This Month (${currentPeriodLabel})` },
                 { id: 'paid', label: 'Paid' },
                 { id: 'unpaid', label: 'Unpaid' },
               ] as const
@@ -148,7 +171,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                   key={pill.id}
                   type="button"
                   onClick={() => setFilter(pill.id)}
-                  className={`px-5 py-2.5 rounded-full text-xs sm:text-sm font-extrabold transition cursor-pointer btn-fluid ${
+                  className={`px-4 py-2 rounded-full text-xs sm:text-sm font-extrabold transition cursor-pointer btn-fluid ${
                     active
                       ? 'bg-[#F59E0B] text-slate-950 shadow-lg shadow-amber-500/20'
                       : 'bg-[#161E2E] text-slate-400 hover:text-white border border-[#26324A]'
@@ -166,23 +189,85 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
           </span>
         </div>
 
+        {/* Current Month Tenant Payment Tracker */}
+        {monthlyRoomStatuses.length > 0 && (
+          <div className="surface-card rounded-3xl p-5 sm:p-6 mb-6 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm sm:text-base font-extrabold text-white">
+                  {currentPeriodLabel} Tenant Payment Status
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  At-a-glance status showing which tenants paid for {currentPeriodLabel}
+                </p>
+              </div>
+              <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-xs font-extrabold text-emerald-300 font-mono-num">
+                {paidThisMonthCount} of {monthlyRoomStatuses.length} Paid
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {monthlyRoomStatuses.map(({ room, summary }) => (
+                <button
+                  key={room.id}
+                  type="button"
+                  onClick={() =>
+                    summary.matchingBill
+                      ? onSelectBillForReceipt(summary.matchingBill)
+                      : onOpenNewBillScanner()
+                  }
+                  className="rounded-2xl bg-[#0D121B] hover:bg-[#151E2E] border border-[#222E44] p-3 text-left flex items-center justify-between gap-2.5 transition cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-extrabold text-white leading-snug">
+                      {room.name} • {room.tenant?.fullName || 'Occupied'}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                      {summary.detailText}
+                    </div>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold shrink-0 border ${
+                      summary.status === 'paid'
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                        : summary.status === 'partial'
+                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                        : summary.status === 'unpaid'
+                        ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
+                        : 'bg-slate-800/80 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    {summary.status === 'paid'
+                      ? 'Paid ✓'
+                      : summary.status === 'partial'
+                      ? 'Partial'
+                      : summary.status === 'unpaid'
+                      ? 'Unpaid'
+                      : 'Not Billed'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Summary Card: TOTAL PAID (REVENUE) & TOTAL UNPAID (DUE) */}
-        <div className="surface-card rounded-3xl p-6 sm:p-7 grid grid-cols-2 gap-6 mb-8">
+        <div className="surface-card rounded-3xl p-5 sm:p-7 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-8">
           <div>
             <div className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-400">
               TOTAL PAID (REVENUE)
             </div>
-            <div className="text-xl sm:text-3xl font-extrabold text-[#22C55E] font-mono-num mt-2">
+            <div className="text-2xl sm:text-3xl font-extrabold text-[#22C55E] font-mono-num mt-1.5 break-words">
               {formatPesoPrivacy(totalPaidRevenue, privacyMaskEnabled)}
             </div>
           </div>
 
-          <div className="border-l border-[#26334D] pl-6">
+          <div className="border-t sm:border-t-0 sm:border-l border-[#26334D] pt-4 sm:pt-0 sm:pl-6">
             <div className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-400">
               TOTAL UNPAID (DUE)
             </div>
             <div
-              className={`text-xl sm:text-3xl font-extrabold font-mono-num mt-2 ${
+              className={`text-2xl sm:text-3xl font-extrabold font-mono-num mt-1.5 break-words ${
                 totalUnpaidDue > 0 ? 'text-amber-400' : 'text-slate-400'
               }`}
             >
@@ -233,7 +318,11 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                               : 'bg-red-500/15 text-red-400 border border-red-500/35'
                           }`}
                         >
-                          {isPaid ? 'Paid' : isPartial ? 'Partial' : 'Unpaid'}
+                          {isPaid
+                            ? `Paid for ${bill.billingPeriod}`
+                            : isPartial
+                            ? `Partial • ${bill.billingPeriod}`
+                            : `Unpaid • ${bill.billingPeriod}`}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1.5">

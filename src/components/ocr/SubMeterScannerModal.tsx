@@ -25,8 +25,10 @@ import {
   clampDueDayOneToTen,
   formatPeso,
   getBillingPeriodOptions,
+  getElectricRateForPeriod,
   getNextDueDateInOneToTenWindow,
   isRunningInMobileApp,
+  roundCurrency,
 } from '../../utils/billingCalculator';
 import {
   generateSimulatedSubMeterDataUrl,
@@ -43,6 +45,7 @@ interface SubMeterScannerModalProps {
   rooms: Room[];
   initialRoom?: Room | null;
   globalElectricRate: number;
+  monthlyElectricRates?: Record<string, number>;
   securityPin?: string;
   onClose: () => void;
   onGenerateBill: (
@@ -61,7 +64,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   rooms,
   initialRoom,
   globalElectricRate,
-  securityPin = '1234',
+  monthlyElectricRates,
+  securityPin = '',
   onClose,
   onGenerateBill,
 }) => {
@@ -79,6 +83,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [currReading, setCurrReading] = useState('0');
   const [baseRent, setBaseRent] = useState('4500');
   const [carryOverBalance, setCarryOverBalance] = useState('0');
+  const [reqDepositApplied, setReqDepositApplied] = useState('0');
   const [depositApplied, setDepositApplied] = useState('0');
   const [billingPeriod, setBillingPeriod] = useState(() =>
     new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
@@ -209,6 +214,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       setCurrReading(String(prev));
       setBaseRent(String(selectedRoom.monthlyRent || 0));
       setCarryOverBalance(String(selectedRoom.unpaidBalance || 0));
+      setReqDepositApplied(String(selectedRoom.securityDepositPaid || 0));
       setDepositApplied(String(selectedRoom.advanceRent || 0));
       setDueDayOneToTen(
         String(clampDueDayOneToTen(selectedRoom.tenant?.dueDayOfMonth || 5))
@@ -688,14 +694,18 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const handleVerifyPinToUnlock = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanInput = pinInput.trim();
-    const cleanPin = (securityPin || '1234').trim();
-    if (cleanInput === cleanPin || cleanInput === '1234') {
+    const cleanPin = (securityPin || '').trim();
+    if (cleanPin && cleanInput === cleanPin) {
       setIsReadingsLocked(false);
       setShowPinUnlockModal(false);
       setPinInput('');
       setPinError(null);
     } else {
-      setPinError('Incorrect Landlord PIN. Please enter your 4-digit security code.');
+      setPinError(
+        cleanPin
+          ? 'Incorrect Landlord PIN. Please enter your 4-digit security code.'
+          : 'No security PIN configured. Set your PIN in Security Setup or Settings.'
+      );
     }
   };
 
@@ -813,6 +823,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     e.target.value = '';
   };
 
+  useEffect(() => {
+    const resolvedRate = getElectricRateForPeriod(
+      { defaultElectricRate: globalElectricRate, monthlyElectricRates },
+      billingPeriod
+    );
+    setMonthlyElectricRate(String(resolvedRate || 15.0));
+  }, [billingPeriod, globalElectricRate, monthlyElectricRates, isOpen]);
+
   if (!isOpen || !selectedRoom) return null;
 
   const prevNum = parseFloat(prevReading) || 0;
@@ -820,11 +838,6 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const rateNum = Math.max(0, parseFloat(monthlyElectricRate) || 0);
   const rentNum = parseFloat(baseRent) || 0;
   const carryNum = parseFloat(carryOverBalance) || 0;
-  const depNum = Math.min(
-    selectedRoom.advanceRent || 0,
-    Math.max(0, parseFloat(depositApplied) || 0)
-  );
-
   const isReset = rolloverType === 'meter_reset';
   const isRolloverActive = isRollover && currNum < prevNum;
 
@@ -836,6 +849,32 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     dialDigits,
     isReset: isRolloverActive && isReset,
   });
+
+  const grossBeforeCredit = roundCurrency(
+    Math.max(0, rentNum) + subMeterCheck.electricTotal + Math.max(0, carryNum)
+  );
+  const availablePaidDeposit = Math.max(0, selectedRoom.securityDepositPaid || 0);
+  const reqDepUsedNum = roundCurrency(
+    Math.min(
+      availablePaidDeposit,
+      Math.max(0, parseFloat(reqDepositApplied) || 0),
+      grossBeforeCredit
+    )
+  );
+  const remainingDepositAfterBill = Math.max(
+    0,
+    roundCurrency(availablePaidDeposit - reqDepUsedNum)
+  );
+
+  const availableAdvance = Math.max(0, selectedRoom.advanceRent || 0);
+  const advUsedNum = roundCurrency(
+    Math.min(
+      availableAdvance,
+      Math.max(0, parseFloat(depositApplied) || 0),
+      Math.max(0, grossBeforeCredit - reqDepUsedNum)
+    )
+  );
+  const depNum = roundCurrency(reqDepUsedNum + advUsedNum);
 
   const billBreakdown = calculateBillBreakdown({
     baseRent: rentNum,
@@ -937,6 +976,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       ocrConfidence: ocrConfidence ?? undefined,
       baseRent: rentNum,
       securityDepositRequired: selectedRoom.securityDeposit || rentNum,
+      securityDepositApplied: reqDepUsedNum,
+      securityDepositRemainingAfterBill: remainingDepositAfterBill,
+      advanceApplied: advUsedNum,
       previousBalanceCarryOver: carryNum,
       depositApplied: depNum,
       totalAmountDue: totalDue,
@@ -983,7 +1025,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       finalCurrPhoto,
       remainingBalance,
       overpaymentAddedToAdvance,
-      depNum,
+      advUsedNum,
       finalCurrCrop
     );
     onClose();
@@ -1785,7 +1827,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       <Lock className="w-4 h-4 text-amber-400" />
                       <div>
                         <span className="text-xs font-bold text-white block">Enter PIN to edit readings</span>
-                        <span className="text-[10px] text-slate-400">Default: 1234 (or PIN from Settings)</span>
+                        <span className="text-[10px] text-slate-400">Enter your 4-digit Landlord Security PIN</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1841,18 +1883,18 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
               )}
 
-              <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
-                <div className={`rounded-xl border p-2.5 transition ${
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className={`rounded-xl border p-3 transition ${
                   isReadingsLocked
                     ? 'bg-[#0D1119]/80 border-[#1E2738] opacity-90'
                     : 'bg-[#0D1119] border-[#252F42]'
                 }`}>
-                  <div className="flex items-center justify-between">
-                    <label className="block text-[10px] font-semibold text-slate-400">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-[11px] font-semibold text-slate-300">
                       1. Prev (kWh)
                     </label>
                     {isReadingsLocked && (
-                      <Lock className="w-2.5 h-2.5 text-slate-500" />
+                      <Lock className="w-3 h-3 text-slate-500 shrink-0" />
                     )}
                   </div>
                   <input
@@ -1868,7 +1910,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       }
                     }}
                     onChange={(e) => setPrevReading(e.target.value)}
-                    className={`mt-0.5 w-full bg-transparent text-sm sm:text-base font-extrabold font-mono-num focus:outline-none ${
+                    className={`mt-1 w-full bg-transparent text-base font-extrabold font-mono-num focus:outline-none ${
                       isReadingsLocked
                         ? 'text-slate-400 cursor-pointer'
                         : 'text-slate-200'
@@ -1876,22 +1918,22 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   />
                 </div>
 
-                <div className={`rounded-xl border-2 p-2.5 transition ${
+                <div className={`rounded-xl border-2 p-3 transition ${
                   isReadingsLocked
                     ? 'bg-[#15140F] border-amber-500/40'
                     : 'bg-[#1A1812] border-amber-500/80 ring-1 ring-amber-500/50'
                 }`}>
-                  <div className="flex items-center justify-between">
-                    <label className="block text-[10px] font-bold text-amber-400">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-[11px] font-bold text-amber-400">
                       2. Curr (kWh) *
                     </label>
                     {isReadingsLocked ? (
-                      <span className="text-[9px] text-amber-400/80 font-medium flex items-center gap-0.5">
-                        <Lock className="w-2.5 h-2.5" />
+                      <span className="text-[10px] text-amber-400/90 font-semibold inline-flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <Lock className="w-3 h-3" />
                         <span>Protected</span>
                       </span>
                     ) : (
-                      <span className="text-[9px] text-emerald-400 font-medium">Editable</span>
+                      <span className="text-[10px] text-emerald-400 font-semibold shrink-0">Editable</span>
                     )}
                   </div>
                   <input
@@ -1908,7 +1950,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       }
                     }}
                     onChange={(e) => setCurrReading(e.target.value)}
-                    className={`mt-0.5 w-full bg-transparent text-sm sm:text-base font-extrabold font-mono-num focus:outline-none ${
+                    className={`mt-1 w-full bg-transparent text-base font-extrabold font-mono-num focus:outline-none ${
                       isReadingsLocked
                         ? 'text-amber-300 cursor-pointer'
                         : 'text-amber-400'
@@ -1916,12 +1958,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   />
                 </div>
 
-                <div className="rounded-xl bg-[#0D1119] border border-amber-500/50 p-2.5">
-                  <label className="block text-[10px] font-bold text-amber-400">
-                    3. Rate (₱/kWh) *
+                <div className="rounded-xl bg-[#0D1119] border border-amber-500/50 p-3">
+                  <label className="block text-[11px] font-bold text-amber-400">
+                    3. Rate ({billingPeriod}) *
                   </label>
-                  <div className="flex items-center mt-0.5">
-                    <span className="text-xs font-bold text-amber-400 mr-0.5">₱</span>
+                  <div className="flex items-center mt-1">
+                    <span className="text-sm font-bold text-amber-400 mr-1">₱</span>
                     <input
                       type="number"
                       step="0.01"
@@ -1929,7 +1971,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       required
                       value={monthlyElectricRate}
                       onChange={(e) => setMonthlyElectricRate(e.target.value)}
-                      className="w-full bg-transparent text-sm sm:text-base font-extrabold text-amber-400 font-mono-num focus:outline-none"
+                      className="w-full bg-transparent text-base font-extrabold text-amber-400 font-mono-num focus:outline-none"
                     />
                   </div>
                 </div>
@@ -2078,42 +2120,62 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 items-start">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-start">
                 <div className="flex flex-col">
-                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
-                    Base Rent
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Base Rent (₱)
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     value={baseRent}
                     onChange={(e) => setBaseRent(e.target.value)}
-                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-2 text-xs font-bold text-white font-mono-num"
+                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-white font-mono-num"
                   />
                 </div>
                 <div className="flex flex-col">
-                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
-                    Prev Unpaid
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Prev Unpaid Carry-Over (₱)
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     value={carryOverBalance}
                     onChange={(e) => setCarryOverBalance(e.target.value)}
-                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-2 text-xs font-bold text-red-400 font-mono-num"
+                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-red-400 font-mono-num"
                   />
                 </div>
                 <div className="flex flex-col">
-                  <label className="block text-[10px] font-semibold text-emerald-400 mb-1 truncate">
-                    Adv ({formatPeso(selectedRoom.advanceRent || 0)})
+                  <label className="block text-[11px] font-semibold text-emerald-400 mb-1 leading-snug">
+                    Req. Deposit Deducted ({formatPeso(availablePaidDeposit)} avail)
                   </label>
                   <input
                     type="number"
                     step="0.01"
-                    max={selectedRoom.advanceRent || 0}
+                    min="0"
+                    max={availablePaidDeposit}
+                    value={reqDepositApplied}
+                    onChange={(e) => setReqDepositApplied(e.target.value)}
+                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-emerald-500/40 px-3 text-xs font-bold text-emerald-400 font-mono-num"
+                  />
+                  {remainingDepositAfterBill > 0 && (
+                    <span className="text-[10px] text-emerald-300 mt-1">
+                      {formatPeso(remainingDepositAfterBill)} carries to next months
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-col">
+                  <label className="block text-[11px] font-semibold text-emerald-400 mb-1 leading-snug">
+                    Advance Balance Deducted ({formatPeso(availableAdvance)})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max={availableAdvance}
                     value={depositApplied}
                     onChange={(e) => setDepositApplied(e.target.value)}
-                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-2 text-xs font-bold text-emerald-400 font-mono-num"
+                    className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-emerald-400 font-mono-num"
                   />
                 </div>
               </div>

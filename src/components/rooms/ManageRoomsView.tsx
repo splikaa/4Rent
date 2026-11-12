@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Calendar,
   Camera,
+  CheckCircle2,
   Edit3,
   History,
   Home,
@@ -22,6 +23,7 @@ import {
   formatPeso,
   formatPesoPrivacy,
   getNextDueDateInOneToTenWindow,
+  getRoomMonthlyPaymentStatus,
   maskPhoneNumber,
 } from '../../utils/billingCalculator';
 
@@ -131,6 +133,12 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
             {activeRooms.map((room) => {
               const isOccupied = room.status === 'occupied';
               const activeReceipt = getRoomActiveReceipt(room);
+              const monthPayStatus = isOccupied
+                ? getRoomMonthlyPaymentStatus(room, bills)
+                : null;
+              const paidDepositCredit = isOccupied
+                ? Math.max(0, room.securityDepositPaid || 0)
+                : 0;
               const roomBillsCount = bills.filter(
                 (b) => b.roomId === room.id
               ).length;
@@ -170,15 +178,35 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                             : 'Transactions'}
                         </p>
                       </div>
-                      <span
-                        className={`px-3.5 py-1 rounded-full text-xs font-bold ${
-                          isOccupied
-                            ? 'bg-amber-500/15 text-amber-400 border border-amber-500/35'
-                            : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/35'
-                        }`}
-                      >
-                        {isOccupied ? 'Occupied' : 'Vacant'}
-                      </span>
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                        {monthPayStatus && (
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold inline-flex items-center gap-1 border ${
+                              monthPayStatus.status === 'paid'
+                                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                                : monthPayStatus.status === 'partial'
+                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                                : monthPayStatus.status === 'unpaid'
+                                ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
+                                : 'bg-slate-800/80 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            {monthPayStatus.status === 'paid' && (
+                              <CheckCircle2 className="w-3 h-3 shrink-0" />
+                            )}
+                            <span>{monthPayStatus.badgeText}</span>
+                          </span>
+                        )}
+                        <span
+                          className={`px-3.5 py-1 rounded-full text-xs font-bold ${
+                            isOccupied
+                              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/35'
+                              : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/35'
+                          }`}
+                        >
+                          {isOccupied ? 'Occupied' : 'Vacant'}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Financial & Sub-Meter Grid */}
@@ -221,6 +249,11 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                             privacyMaskEnabled
                           )}
                         </span>
+                        {isOccupied && paidDepositCredit > 0 && (
+                          <span className="text-[10px] text-emerald-300 font-semibold block mt-0.5 leading-snug">
+                            Credit: {formatPesoPrivacy(paidDepositCredit, privacyMaskEnabled)}
+                          </span>
+                        )}
                       </div>
                       {isOccupied && (
                         <button
@@ -251,10 +284,10 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                       className="rounded-2xl bg-[#0E1522] border border-[#22304A] px-4 py-3 flex items-center justify-between gap-2"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <ReceiptText className="w-4 h-4 text-amber-400 shrink-0" />
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <ReceiptText className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                         {activeReceipt ? (
-                          <div className="text-xs truncate">
+                          <div className="text-xs leading-snug break-words">
                             <span className="font-bold text-white">
                               Room Receipt #{activeReceipt.receiptNo}
                             </span>

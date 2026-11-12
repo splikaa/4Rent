@@ -1,4 +1,4 @@
-import { BillRecord, PaymentTransaction } from '../types/rental';
+import { AppSettings, BillRecord, PaymentTransaction, Room } from '../types/rental';
 
 export interface OcrVerificationResult {
   rawReading: number;
@@ -297,6 +297,249 @@ export function getBillingPeriodOptions(): string[] {
     options.push(label);
   }
   return options;
+}
+
+export function roundCurrency(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+/**
+ * Normalizes a billing period ("Nov 2026", "November 2026", "2026-11", or ISO timestamp)
+ * into a canonical "YYYY-MM" key.
+ */
+export function normalizeMonthKey(periodOrDate?: string): string {
+  const trimmed = (periodOrDate || '').trim();
+  const ymMatch = trimmed.match(/^(\d{4})-(\d{2})/);
+  if (ymMatch) {
+    return `${ymMatch[1]}-${ymMatch[2]}`;
+  }
+
+  if (trimmed) {
+    const parsedFromLabel = new Date(`1 ${trimmed}`);
+    if (!Number.isNaN(parsedFromLabel.getTime())) {
+      const y = parsedFromLabel.getFullYear();
+      const m = String(parsedFromLabel.getMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    }
+    const parsedIso = new Date(trimmed);
+    if (!Number.isNaN(parsedIso.getTime())) {
+      const y = parsedIso.getFullYear();
+      const m = String(parsedIso.getMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    }
+  }
+
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function getAdjacentMonthKey(monthKey: string, offsetMonths: number): string {
+  const normalized = normalizeMonthKey(monthKey);
+  const [yStr, mStr] = normalized.split('-');
+  const baseDate = new Date(Number(yStr), Number(mStr) - 1 + offsetMonths, 1);
+  return `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function formatMonthKeyLabel(
+  monthKey: string,
+  style: 'short' | 'long' | 'month' = 'short'
+): string {
+  const normalized = normalizeMonthKey(monthKey);
+  const [yStr, mStr] = normalized.split('-');
+  const d = new Date(Number(yStr), Number(mStr) - 1, 1, 12, 0, 0);
+  if (style === 'month') {
+    return d.toLocaleDateString('en-US', { month: 'long' });
+  }
+  if (style === 'long') {
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+export function getCurrentCalendarPeriodLabel(date = new Date()): string {
+  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+/**
+ * Returns chronological "YYYY-MM" keys starting from `baseDate` (default: current month + upcoming months)
+ * merged with any custom monthly rate keys configured by the landlord.
+ */
+export function getScheduledMonthKeys(
+  baseDate = new Date(),
+  upcomingCount = 3,
+  configuredRates?: Record<string, number>
+): string[] {
+  const set = new Set<string>();
+  const baseKey = normalizeMonthKey(baseDate.toISOString());
+  for (let i = 0; i < Math.max(2, upcomingCount); i++) {
+    set.add(getAdjacentMonthKey(baseKey, i));
+  }
+  if (configuredRates) {
+    Object.keys(configuredRates).forEach((k) => {
+      if (/^\d{4}-\d{2}$/.test(k)) set.add(k);
+    });
+  }
+  return Array.from(set).sort();
+}
+
+/**
+ * Resolves the landlord's electric rate (₱/kWh) for a given billing period or month key,
+ * falling back to `settings.defaultElectricRate`.
+ */
+export function getElectricRateForPeriod(
+  settings: Pick<AppSettings, 'defaultElectricRate' | 'monthlyElectricRates'>,
+  periodOrDate?: string
+): number {
+  const key = normalizeMonthKey(periodOrDate);
+  const monthlyRate = settings.monthlyElectricRates?.[key];
+  if (typeof monthlyRate === 'number' && Number.isFinite(monthlyRate) && monthlyRate >= 0) {
+    return roundCurrency(monthlyRate);
+  }
+  return roundCurrency(settings.defaultElectricRate || 0);
+}
+
+/**
+ * Recalculates active unpaid/partial bills when the landlord applies updated monthly electric rates.
+ * Previous archived receipts or already paid/applied receipts remain strictly locked at their original rate.
+ */
+export function recalculateActiveBillsForRates(
+  bills: BillRecord[],
+  settings: Pick<AppSettings, 'defaultElectricRate' | 'monthlyElectricRates'>
+): { bills: BillRecord[]; updatedCount: number; roomUnpaidMap: Record<string, number> } {
+  let updatedCount = 0;
+  const roomUnpaidMap: Record<string, number> = {};
+  const nowIso = new Date().toISOString();
+
+  const updatedBills = bills.map((b) => {
+    // Previous/archived receipts or already paid/settled receipts must NOT change when rate updates
+    if (b.isArchived || b.status === 'paid') {
+      return b;
+    }
+
+    const nextRate = getElectricRateForPeriod(settings, b.billingPeriod);
+    const nextElecTotal = roundCurrency(b.consumptionKwh * nextRate);
+    const nextTotalDue = Math.max(
+      0,
+      roundCurrency(
+        b.baseRent + nextElecTotal + b.previousBalanceCarryOver - b.depositApplied
+      )
+    );
+    const nextRemaining = Math.max(0, roundCurrency(nextTotalDue - b.amountPaid));
+    const nextStatus: BillRecord['status'] =
+      nextRemaining <= 0.009 ? 'paid' : b.amountPaid > 0 ? 'partial' : 'unpaid';
+
+    roomUnpaidMap[b.roomId] = nextRemaining;
+
+    if (
+      nextRate !== b.electricRate ||
+      nextElecTotal !== b.electricTotal ||
+      nextTotalDue !== b.totalAmountDue ||
+      nextRemaining !== b.remainingBalance
+    ) {
+      updatedCount += 1;
+      return {
+        ...b,
+        electricRate: nextRate,
+        electricTotal: nextElecTotal,
+        totalAmountDue: nextTotalDue,
+        remainingBalance: nextRemaining,
+        status: nextStatus,
+        paidAt: nextStatus === 'paid' ? b.paidAt || nowIso : b.paidAt,
+        updatedAt: nowIso,
+      };
+    }
+
+    return b;
+  });
+
+  return { bills: updatedBills, updatedCount, roomUnpaidMap };
+}
+
+export interface MonthlyPaymentStatusSummary {
+  status: 'paid' | 'partial' | 'unpaid' | 'not_billed';
+  periodLabel: string;
+  monthKey: string;
+  badgeText: string;
+  detailText: string;
+  matchingBill: BillRecord | null;
+}
+
+/**
+ * Determines clearly whether a room's tenant has paid for the current billing month (e.g. "Paid for Nov 2026").
+ */
+export function getRoomMonthlyPaymentStatus(
+  room: Room,
+  bills: BillRecord[],
+  targetPeriodOrDate?: string
+): MonthlyPaymentStatusSummary {
+  const monthKey = normalizeMonthKey(targetPeriodOrDate);
+  const periodLabel = formatMonthKeyLabel(monthKey, 'short');
+
+  const roomBillsForMonth = bills
+    .filter(
+      (b) =>
+        b.roomId === room.id &&
+        normalizeMonthKey(b.billingPeriod) === monthKey &&
+        (!room.tenant?.fullName || b.tenantName === room.tenant.fullName || !b.isArchived)
+    )
+    .sort((a, b) => {
+      if (Boolean(a.isArchived) !== Boolean(b.isArchived)) {
+        return a.isArchived ? 1 : -1;
+      }
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+
+  const matchingBill = roomBillsForMonth[0] || null;
+
+  if (!matchingBill) {
+    return {
+      status: 'not_billed',
+      periodLabel,
+      monthKey,
+      badgeText: `Not Billed (${periodLabel})`,
+      detailText: `No ${periodLabel} bill issued yet`,
+      matchingBill: null,
+    };
+  }
+
+  if (matchingBill.status === 'paid') {
+    const paidDate = matchingBill.paidAt
+      ? new Date(matchingBill.paidAt).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+        })
+      : '';
+    return {
+      status: 'paid',
+      periodLabel,
+      monthKey,
+      badgeText: `Paid for ${periodLabel}`,
+      detailText: paidDate
+        ? `Paid ${paidDate}${matchingBill.paymentMethod ? ` • ${matchingBill.paymentMethod}` : ''}`
+        : 'Settled in full',
+      matchingBill,
+    };
+  }
+
+  if (matchingBill.status === 'partial') {
+    return {
+      status: 'partial',
+      periodLabel,
+      monthKey,
+      badgeText: `Partial (${periodLabel})`,
+      detailText: `Remaining: ${formatPeso(matchingBill.remainingBalance)}`,
+      matchingBill,
+    };
+  }
+
+  return {
+    status: 'unpaid',
+    periodLabel,
+    monthKey,
+    badgeText: `Unpaid (${periodLabel})`,
+    detailText: `Due: ${formatPeso(matchingBill.remainingBalance)}`,
+    matchingBill,
+  };
 }
 
 /**
@@ -779,7 +1022,8 @@ export function formatPeso(amount: number): string {
  */
 export function formatMessengerBillSummary(
   bill: BillRecord,
-  apartmentName: string
+  apartmentName: string,
+  settings?: Pick<AppSettings, 'defaultElectricRate' | 'monthlyElectricRates'>
 ): string {
   const statusLabel =
     bill.status === 'paid'
@@ -828,14 +1072,22 @@ export function formatMessengerBillSummary(
     year: 'numeric',
   });
 
+  const nextRate = settings
+    ? getElectricRateForPeriod(settings, nextCycleLabel)
+    : bill.electricRate;
+
   const lines = [
-    `🏠 *${apartmentName || '4Rent Management System'} • Statement & Receipt*`,
+    `🏠 *${apartmentName || 'Rental Management'} • Statement & Receipt*`,
     `Receipt #: ${bill.receiptNo} (${seal})`,
     `Unit: *${bill.roomName}* • Tenant: ${bill.tenantName}`,
     `────────────────────`,
-    `📅 *MONTHLY RATE SCHEDULE*`,
+    `⚡ *MONTHLY ELECTRIC RATE BREAKDOWN*`,
+    `• ${formatMonthKeyLabel(normalizeMonthKey(bill.billingPeriod), 'long')}: ${formatPeso(bill.electricRate)}/kWh (Applied)`,
+    `• ${formatMonthKeyLabel(normalizeMonthKey(nextCycleLabel), 'long')}: ${formatPeso(nextRate)}/kWh (Next Cycle)`,
+    `────────────────────`,
+    `📅 *CYCLE SCHEDULE*`,
     `• This Month (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}/mo + ${formatPeso(bill.electricRate)}/kWh • Due ${formattedDue}`,
-    `• Next Month (${nextCycleLabel}): ${formatPeso(bill.baseRent)}/mo + metered kWh (Start: ${bill.currReading.toFixed(1)} kWh) • Due ${nextDueDate}`,
+    `• Next Month (${nextCycleLabel}): ${formatPeso(bill.baseRent)}/mo + metered kWh (Start: ${bill.currReading.toFixed(1)} kWh @ ${formatPeso(nextRate)}/kWh) • Due ${nextDueDate}`,
     `────────────────────`,
     `⚡ *ELECTRIC SUB-METER PROOF*`,
     `• Previous: ${bill.prevReading.toFixed(1)} kWh → Current: ${bill.currReading.toFixed(1)} kWh`,
@@ -851,9 +1103,23 @@ export function formatMessengerBillSummary(
       `• Prior Unpaid Balance: ${formatPeso(bill.previousBalanceCarryOver)}`
     );
   }
-  if (bill.depositApplied > 0) {
+  if ((bill.securityDepositApplied || 0) > 0) {
     lines.push(
-      `• Advance Credit Applied: -${formatPeso(bill.depositApplied)}`
+      `• Required Deposit Deducted: -${formatPeso(bill.securityDepositApplied || 0)}`
+    );
+  }
+  if ((bill.advanceApplied || 0) > 0) {
+    lines.push(
+      `• Advance Credit Applied: -${formatPeso(bill.advanceApplied || 0)}`
+    );
+  } else if (bill.depositApplied > 0 && !(bill.securityDepositApplied || 0)) {
+    lines.push(
+      `• Deposit / Advance Deducted: -${formatPeso(bill.depositApplied)}`
+    );
+  }
+  if ((bill.securityDepositRemainingAfterBill || 0) > 0) {
+    lines.push(
+      `• Remaining Deposit Credit (For Further Bills): ${formatPeso(bill.securityDepositRemainingAfterBill || 0)}`
     );
   }
 

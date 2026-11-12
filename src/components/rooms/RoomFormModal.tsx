@@ -50,9 +50,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   const [requiredSecurityDeposit, setRequiredSecurityDeposit] = useState(
     String(defaultRent)
   );
-  const [amountDepositPaidByTenant, setAmountDepositPaidByTenant] = useState(
-    String(defaultRent)
-  );
+  const [amountDepositPaidByTenant, setAmountDepositPaidByTenant] = useState('0');
   const [advanceRent, setAdvanceRent] = useState('0');
   const [vacatedReason, setVacatedReason] = useState(
     'Stopped Paying Rent / Vacated'
@@ -84,7 +82,13 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
           ? initialRoom.securityDeposit
           : initialRoom.monthlyRent || defaultRent;
       setRequiredSecurityDeposit(String(reqDep));
-      setAmountDepositPaidByTenant(String(reqDep));
+      setAmountDepositPaidByTenant(
+        String(
+          initialRoom.securityDepositPaid !== undefined
+            ? initialRoom.securityDepositPaid
+            : 0
+        )
+      );
       setAdvanceRent(String(initialRoom.advanceRent || 0));
       setTenantName(initialRoom.tenant?.fullName || '');
       setTenantPhone(formatPhoneNumber(initialRoom.tenant?.phone || ''));
@@ -107,7 +111,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setStatus('occupied');
       setUnpaidBalance('0');
       setRequiredSecurityDeposit(String(defaultRent));
-      setAmountDepositPaidByTenant(String(defaultRent));
+      setAmountDepositPaidByTenant('0');
       setAdvanceRent('0');
       setTenantName('');
       setTenantPhone('');
@@ -230,6 +234,11 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
         ? prevAdvanceHistory
         : [];
 
+    const appliedSecurityDepositPaid =
+      status === 'occupied'
+        ? Math.round(Math.min(paidDepNum, reqDepNum) * 100) / 100
+        : 0;
+
     const roomPayload: Omit<Room, 'id' | 'updatedAt'> = {
       name: name.trim(),
       monthlyRent: Math.max(0, parseFloat(monthlyRent) || 0),
@@ -241,6 +250,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       unpaidBalance:
         status === 'occupied' ? Math.max(0, parseFloat(unpaidBalance) || 0) : 0,
       securityDeposit: reqDepNum,
+      securityDepositPaid: appliedSecurityDepositPaid,
       advanceRent: totalAdvance,
       advanceHistory: updatedAdvanceHistory,
       activeReceiptId:
@@ -447,7 +457,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
               } gap-4 items-start`}
             >
               <div className="flex flex-col">
-                <label className="block text-xs font-bold text-emerald-400 mb-1.5 whitespace-nowrap">
+                <label className="block text-xs font-bold text-emerald-400 mb-1.5">
                   Required Deposit (₱) *
                 </label>
                 <input
@@ -464,18 +474,33 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
               {status === 'occupied' && (
                 <>
                   <div className="flex flex-col">
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
-                      Deposit Paid (₱)
-                    </label>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-300">
+                        Deposit Paid Credit (₱)
+                      </label>
+                      {reqDepNum > 0 && paidDepNum < reqDepNum && (
+                        <button
+                          type="button"
+                          onClick={() => setAmountDepositPaidByTenant(String(reqDepNum))}
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 cursor-pointer"
+                        >
+                          Mark Full Paid
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       value={amountDepositPaidByTenant}
                       onChange={(e) =>
                         setAmountDepositPaidByTenant(e.target.value)
                       }
                       className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
                     />
+                    <span className="text-[10px] text-slate-400 block mt-1 leading-snug">
+                      Paid deposit deducts from current &amp; future bills until used.
+                    </span>
                     {excessDepositToAdvance > 0 && (
                       <span className="text-[10px] text-emerald-400 font-semibold block mt-1">
                         +{formatPeso(excessDepositToAdvance)} credited to
@@ -485,7 +510,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   </div>
 
                   <div className="flex flex-col">
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5 whitespace-nowrap">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                       Advance Balance (₱)
                     </label>
                     <input

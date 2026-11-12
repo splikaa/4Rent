@@ -31,6 +31,7 @@ import {
   formatPeso,
   formatPesoPrivacy,
   formatPhoneNumber,
+  getRoomMonthlyPaymentStatus,
   maskPhoneNumber,
   getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
@@ -68,7 +69,13 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   const isOccupied = room.status === 'occupied';
   const safeDeposit =
     room.securityDeposit > 0 ? room.securityDeposit : room.monthlyRent;
+  const paidDepositCredit = isOccupied
+    ? Math.max(0, room.securityDepositPaid || 0)
+    : 0;
   const safeAdvance = isOccupied ? Math.max(0, room.advanceRent || 0) : 0;
+  const monthPayStatus = isOccupied
+    ? getRoomMonthlyPaymentStatus(room, roomBills)
+    : null;
   const meterLogs = loadReadingLogs(room.id);
 
   const safeDueDay = clampDueDayOneToTen(room.tenant?.dueDayOfMonth || 5);
@@ -116,9 +123,27 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                   />
                   {isOccupied ? 'Occupied' : 'Vacant'}
                 </span>
+                {monthPayStatus && (
+                  <span
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold tracking-wide border ${
+                      monthPayStatus.status === 'paid'
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                        : monthPayStatus.status === 'partial'
+                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                        : monthPayStatus.status === 'unpaid'
+                        ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
+                        : 'bg-slate-800/80 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    {monthPayStatus.status === 'paid' && (
+                      <CheckCircle2 className="w-3 h-3 shrink-0" />
+                    )}
+                    <span>{monthPayStatus.badgeText}</span>
+                  </span>
+                )}
               </div>
-              <p className="text-[11px] sm:text-xs text-slate-400 truncate mt-0.5">
-                Room details, sub-meter reading & bills
+              <p className="text-[11px] sm:text-xs text-slate-400 leading-snug mt-1">
+                Room details, sub-meter reading &amp; bills
               </p>
             </div>
           </div>
@@ -150,53 +175,66 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 
         {/* Scrollable Content Container */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5">
-          {/* Summary Statistics Grid — Symmetrical on Both Mobile & Desktop (No Orphan Slots) */}
+          {/* Summary Statistics Grid — Symmetrical on Both Mobile & Desktop (Never Clips Numbers) */}
           <div
             className={`grid ${
               isOccupied
                 ? 'grid-cols-2 sm:grid-cols-4'
-                : 'grid-cols-3'
+                : 'grid-cols-2 sm:grid-cols-3'
             } gap-2.5 sm:gap-3.5`}
           >
             {/* Monthly Rent */}
-            <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between">
-              <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold">
+            <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between min-w-0">
+              <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug">
                 Monthly Rent
               </span>
-              <p className="text-sm sm:text-base md:text-lg font-black text-white font-mono-num mt-1 truncate">
+              <p className="text-sm sm:text-base md:text-lg font-black text-white font-mono-num mt-1 break-words">
                 {formatPesoPrivacy(room.monthlyRent, privacyMaskEnabled)}
               </p>
             </div>
 
             {/* Continuous Sub-Meter */}
-            <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between">
-              <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1">
+            <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between min-w-0">
+              <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug">
                 Continuous Meter
               </span>
-              <p className="text-sm sm:text-base md:text-lg font-black text-amber-400 font-mono-num mt-1 flex items-center gap-1 truncate">
+              <p className="text-sm sm:text-base md:text-lg font-black text-amber-400 font-mono-num mt-1 flex items-center gap-1 flex-wrap">
                 <Zap className="w-3.5 h-3.5 shrink-0" />
                 <span>{room.lastMeterReading.toFixed(1)} kWh</span>
               </p>
             </div>
 
             {/* Security Deposit */}
-            <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between">
-              <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold truncate">
-                {isOccupied ? 'Security Deposit' : 'Req. Deposit'}
+            <div
+              className={`bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between min-w-0 ${
+                !isOccupied ? 'col-span-2 sm:col-span-1' : ''
+              }`}
+            >
+              <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug">
+                Required Deposit
               </span>
-              <p className="text-sm sm:text-base md:text-lg font-black text-emerald-400 font-mono-num mt-1 flex items-center gap-1 truncate">
-                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                <span>{formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}</span>
-              </p>
+              <div className="mt-1">
+                <p className="text-sm sm:text-base md:text-lg font-black text-emerald-400 font-mono-num flex items-center gap-1 flex-wrap">
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>{formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}</span>
+                </p>
+                {isOccupied && (
+                  <span className="text-[10px] text-emerald-300/90 font-semibold block mt-0.5 leading-snug">
+                    {paidDepositCredit > 0
+                      ? `Paid Credit: ${formatPesoPrivacy(paidDepositCredit, privacyMaskEnabled)}`
+                      : 'Deposit Credit: ₱0.00'}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Advance Balance (Occupied Only) */}
             {isOccupied && (
-              <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between">
-                <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold truncate">
-                  Advance Bal.
+              <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between min-w-0">
+                <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug">
+                  Advance Balance
                 </span>
-                <p className="text-sm sm:text-base md:text-lg font-black text-emerald-400 font-mono-num mt-1 flex items-center gap-1 truncate">
+                <p className="text-sm sm:text-base md:text-lg font-black text-emerald-400 font-mono-num mt-1 flex items-center gap-1 flex-wrap">
                   <Wallet className="w-3.5 h-3.5 shrink-0" />
                   <span>{formatPesoPrivacy(safeAdvance, privacyMaskEnabled)}</span>
                 </p>
