@@ -320,28 +320,23 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       const vh = video.videoHeight || 480;
       if (vw < 32 || vh < 32) return;
 
+      // Match viewfinder aspect dynamically to the active camera orientation so mobile never crops the sides
+      const previewScale = Math.min(1, 720 / Math.max(vw, vh));
+      const targetCw = Math.max(320, Math.round(vw * previewScale));
+      const targetCh = Math.max(240, Math.round(vh * previewScale));
+      if (canvas.width !== targetCw || canvas.height !== targetCh) {
+        canvas.width = targetCw;
+        canvas.height = targetCh;
+      }
+
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) return;
 
       const cw = canvas.width;
       const ch = canvas.height;
-      const videoAspect = vw / vh;
-      const canvasAspect = cw / ch;
-
-      let sx = 0;
-      let sy = 0;
-      let sw = vw;
-      let sh = vh;
-      if (videoAspect > canvasAspect) {
-        sw = vh * canvasAspect;
-        sx = (vw - sw) / 2;
-      } else {
-        sh = vw / canvasAspect;
-        sy = (vh - sh) / 2;
-      }
 
       try {
-        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+        ctx.drawImage(video, 0, 0, vw, vh, 0, 0, cw, ch);
       } catch {
         return;
       }
@@ -512,8 +507,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         {
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
           audio: false,
         },
@@ -1181,159 +1176,114 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-3 mb-3">
-                {/* Slot 1: Previous */}
-                <div
-                  onClick={() => {
-                    setTargetMeterSlot('prev');
-                    if (!prevMeterSnapshotUrl) {
-                      fileInputRef.current?.click();
-                    }
-                  }}
-                  className={`p-3 rounded-2xl border text-left transition cursor-pointer relative ${
-                    targetMeterSlot === 'prev'
-                      ? 'bg-amber-500/15 border-amber-500 text-white'
-                      : 'bg-[#0D1119] border-[#252F42] text-slate-400'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span>1. Previous Sub-Meter</span>
-                    <span className="font-mono-num text-amber-400">
-                      {prevNum.toFixed(1)} kWh
-                    </span>
-                  </div>
-                  {prevMeterSnapshotUrl ? (
-                    <div className="space-y-1">
-                      <div
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openLightbox(
-                            prevMeterSnapshotUrl,
-                            `Previous Sub-Meter Proof — ${selectedRoom.name}`,
-                            prevMeterCropUrl,
-                            `${prevNum.toFixed(1)} kWh`
-                          );
-                        }}
-                        className="relative group cursor-zoom-in"
-                        title="Click to inspect full-resolution 1:1 photo"
-                      >
-                        <img
-                          src={prevMeterSnapshotUrl}
-                          alt="Previous Meter"
-                          className="h-28 sm:h-36 w-full object-contain rounded-lg bg-[#090C12] border border-slate-700/60 group-hover:border-amber-400 transition"
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold text-amber-300 transition">
-                          <ZoomIn className="w-4 h-4" />
-                          <span>100% Lossless Inspect</span>
-                        </div>
-                      </div>
-                      {prevMeterCropUrl && (
-                        <div className="relative">
+                {[
+                  {
+                    slot: 'prev' as const,
+                    title: '1. Previous Sub-Meter',
+                    lightboxLabel: 'Previous',
+                    altLabel: 'Previous',
+                    readingNum: prevNum,
+                    snapshotUrl: prevMeterSnapshotUrl,
+                    cropUrl: prevMeterCropUrl,
+                    selectedBorder: 'bg-amber-500/15 border-amber-500 text-white',
+                    cropBorder: 'border-emerald-500/50',
+                    badgeClass: 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/30',
+                    emptyBorder: 'border-slate-700 text-slate-400 hover:text-amber-300',
+                  },
+                  {
+                    slot: 'curr' as const,
+                    title: '2. Current Sub-Meter',
+                    lightboxLabel: 'Current',
+                    altLabel: 'Current',
+                    readingNum: currNum,
+                    snapshotUrl: currMeterSnapshotUrl,
+                    cropUrl: currMeterCropUrl,
+                    selectedBorder:
+                      'bg-amber-500/15 border-amber-500 text-white ring-1 ring-amber-500/50',
+                    cropBorder: 'border-amber-500/50',
+                    badgeClass: 'bg-amber-950/90 text-amber-300 border border-amber-500/30',
+                    emptyBorder: 'border-amber-500/40 text-amber-300 hover:text-amber-200',
+                  },
+                ].map((slotCfg) => (
+                  <div
+                    key={slotCfg.slot}
+                    onClick={() => {
+                      setTargetMeterSlot(slotCfg.slot);
+                      if (!slotCfg.snapshotUrl) {
+                        fileInputRef.current?.click();
+                      }
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition cursor-pointer relative ${
+                      targetMeterSlot === slotCfg.slot
+                        ? slotCfg.selectedBorder
+                        : 'bg-[#0D1119] border-[#252F42] text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-xs font-bold mb-1 gap-1">
+                      <span className="truncate">{slotCfg.title}</span>
+                      <span className="font-mono-num text-amber-400 shrink-0">
+                        {slotCfg.readingNum.toFixed(1)} kWh
+                      </span>
+                    </div>
+                    {slotCfg.snapshotUrl ? (
+                      <div className="space-y-1">
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openLightbox(
+                              slotCfg.snapshotUrl,
+                              `${slotCfg.lightboxLabel} Sub-Meter Proof — ${selectedRoom.name}`,
+                              slotCfg.cropUrl,
+                              `${slotCfg.readingNum.toFixed(1)} kWh`
+                            );
+                          }}
+                          className="relative group cursor-zoom-in"
+                          title="Click to inspect full-resolution 1:1 photo"
+                        >
                           <img
-                            src={prevMeterCropUrl}
-                            alt="Previous Value Crop"
-                            className="h-12 sm:h-14 w-full object-contain rounded-lg border border-emerald-500/50 bg-[#090C12]"
+                            src={slotCfg.snapshotUrl}
+                            alt={`${slotCfg.altLabel} Meter`}
+                            className="h-28 sm:h-36 w-full object-contain rounded-lg bg-[#090C12] border border-slate-700/60 group-hover:border-amber-400 transition"
                           />
-                          <span className="absolute bottom-1 right-1.5 text-[9px] font-bold bg-emerald-950/90 text-emerald-300 px-1.5 py-0.5 rounded shadow">
-                            HD Crop
-                          </span>
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold text-amber-300 transition">
+                            <ZoomIn className="w-4 h-4" />
+                            <span>100% Lossless Inspect</span>
+                          </div>
                         </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setTargetMeterSlot('prev');
-                          fileInputRef.current?.click();
-                        }}
-                        className="w-full text-center text-[10px] text-amber-400/90 hover:text-amber-300 py-0.5"
-                      >
-                        Change Photo
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="h-16 w-full rounded-lg bg-[#090C12] border border-dashed border-slate-700 flex flex-col items-center justify-center text-[10px] text-slate-400 hover:text-amber-300 transition">
-                      <ImagePlus className="w-3.5 h-3.5 mb-0.5" />
-                      <span>Tap to attach photo</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Slot 2: Current */}
-                <div
-                  onClick={() => {
-                    setTargetMeterSlot('curr');
-                    if (!currMeterSnapshotUrl) {
-                      fileInputRef.current?.click();
-                    }
-                  }}
-                  className={`p-3 rounded-2xl border text-left transition cursor-pointer relative ${
-                    targetMeterSlot === 'curr'
-                      ? 'bg-amber-500/15 border-amber-500 text-white ring-1 ring-amber-500/50'
-                      : 'bg-[#0D1119] border-[#252F42] text-slate-400'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span>2. Current Sub-Meter</span>
-                    <span className="font-mono-num text-amber-400">
-                      {currNum.toFixed(1)} kWh
-                    </span>
-                  </div>
-                  {currMeterSnapshotUrl ? (
-                    <div className="space-y-1">
-                      <div
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openLightbox(
-                            currMeterSnapshotUrl,
-                            `Current Sub-Meter Proof — ${selectedRoom.name}`,
-                            currMeterCropUrl,
-                            `${currNum.toFixed(1)} kWh`
-                          );
-                        }}
-                        className="relative group cursor-zoom-in"
-                        title="Click to inspect full-resolution 1:1 photo"
-                      >
-                        <img
-                          src={currMeterSnapshotUrl}
-                          alt="Current Meter"
-                          className="h-28 sm:h-36 w-full object-contain rounded-lg bg-[#090C12] border border-slate-700/60 group-hover:border-amber-400 transition"
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold text-amber-300 transition">
-                          <ZoomIn className="w-4 h-4" />
-                          <span>100% Lossless Inspect</span>
-                        </div>
+                        {slotCfg.cropUrl && (
+                          <div className={`rounded-lg border ${slotCfg.cropBorder} bg-[#090C12] overflow-hidden`}>
+                            <img
+                              src={slotCfg.cropUrl}
+                              alt={`${slotCfg.altLabel} Value Crop`}
+                              className="h-12 sm:h-14 w-full object-contain"
+                            />
+                            <div className="flex items-center justify-end px-1.5 py-0.5 border-t border-slate-800/80">
+                              <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${slotCfg.badgeClass}`}>
+                                HD Crop
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTargetMeterSlot(slotCfg.slot);
+                            fileInputRef.current?.click();
+                          }}
+                          className="w-full text-center text-[10px] text-amber-400/90 hover:text-amber-300 py-0.5"
+                        >
+                          Change Photo
+                        </button>
                       </div>
-                      {currMeterCropUrl && (
-                        <div className="relative">
-                          <img
-                            src={currMeterCropUrl}
-                            alt="Current Value Crop"
-                            className="h-12 sm:h-14 w-full object-contain rounded-lg border border-amber-500/50 bg-[#090C12]"
-                          />
-                          <span className="absolute bottom-1 right-1.5 text-[9px] font-bold bg-amber-950/90 text-amber-300 px-1.5 py-0.5 rounded shadow">
-                            HD Crop
-                          </span>
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setTargetMeterSlot('curr');
-                          fileInputRef.current?.click();
-                        }}
-                        className="w-full text-center text-[10px] text-amber-400/90 hover:text-amber-300 py-0.5"
-                      >
-                        Change Photo
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="h-16 w-full rounded-lg bg-[#090C12] border border-dashed border-amber-500/40 flex flex-col items-center justify-center text-[10px] text-amber-300 hover:text-amber-200 transition">
-                      <ImagePlus className="w-4 h-4 mb-0.5" />
-                      <span>Tap to attach photo</span>
-                    </div>
-                  )}
-                </div>
+                    ) : (
+                      <div className={`h-16 w-full rounded-lg bg-[#090C12] border border-dashed flex flex-col items-center justify-center text-[10px] transition ${slotCfg.emptyBorder}`}>
+                        <ImagePlus className="w-3.5 h-3.5 mb-0.5" />
+                        <span>Tap to attach photo</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
 
               {/* Mode Tabs / Platform Selection */}
@@ -1410,8 +1360,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         <canvas
                           ref={viewfinderCanvasRef}
                           width={640}
-                          height={360}
-                          className="w-full h-full object-cover block"
+                          height={480}
+                          className="w-full h-full object-contain block"
                         />
 
                         {/* Brief Still-Capture Shutter Cue */}

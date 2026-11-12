@@ -250,27 +250,71 @@ const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
   },
 ];
 
+interface MediaDimensions {
+  width: number;
+  height: number;
+}
+
+function getSourceDimensions(
+  src: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement
+): MediaDimensions {
+  if (src instanceof HTMLVideoElement) {
+    return {
+      width: src.videoWidth || 1280,
+      height: src.videoHeight || 720,
+    };
+  }
+  if (src instanceof HTMLImageElement) {
+    return {
+      width: src.naturalWidth || src.width || 1280,
+      height: src.naturalHeight || src.height || 720,
+    };
+  }
+  return {
+    width: src.width || 1280,
+    height: src.height || 720,
+  };
+}
+
+/**
+ * Normalizes huge camera images (e.g., 12MP–48MP mobile uploads) down to a bounded
+ * working canvas (maxEdge px) to prevent mobile WebView memory spikes and timeouts
+ * while preserving full legibility for small photos.
+ */
+function createBoundedWorkingCanvas(
+  src: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
+  maxEdge = 1600
+): HTMLCanvasElement | null {
+  const { width, height } = getSourceDimensions(src);
+  if (width <= 0 || height <= 0) return null;
+
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const outW = Math.max(32, Math.round(width * scale));
+  const outH = Math.max(32, Math.round(height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, outW, outH);
+  return canvas;
+}
+
 function computeBoxRgbSignature(
   imgOrCanvas: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement
 ): number[] | null {
-  const width =
-    imgOrCanvas instanceof HTMLVideoElement
-      ? imgOrCanvas.videoWidth || 640
-      : imgOrCanvas.width || 640;
-  const height =
-    imgOrCanvas instanceof HTMLVideoElement
-      ? imgOrCanvas.videoHeight || 640
-      : imgOrCanvas.height || 640;
-
-  if (width <= 0 || height <= 0) return null;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
+  // Sample signature on a lightweight 320px-bounded canvas so mobile & desktop compute identically fast
+  const canvas = createBoundedWorkingCanvas(imgOrCanvas, 320);
+  if (!canvas) return null;
+  const width = canvas.width;
+  const height = canvas.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
 
-  ctx.drawImage(imgOrCanvas, 0, 0, width, height);
   const { data } = ctx.getImageData(0, 0, width, height);
 
   // Auto-trim uniform outer margins (e.g. phone screenshots with black/white bars)
@@ -380,57 +424,124 @@ function matchCalibratedSubMeterProfile(
 
 /**
  * Automatically locates the sub-meter register window (cyclometer drum strip or LCD screen)
- * in the upper-middle faceplate area so we can crop a screenshot of the value itself.
+ * across both wide desktop photos and close-up mobile captures, refining both vertical row bounds
+ * and horizontal digit span so header text is excluded and tenths digits are never clipped.
  */
-function detectRegisterCropBox(img: HTMLImageElement): CropBox {
-  const w = img.width || 640;
-  const h = img.height || 640;
+function detectRegisterCropBox(
+  img: HTMLImageElement | HTMLCanvasElement
+): CropBox {
+  const { width: w, height: h } = getSourceDimensions(img);
   const canvas = document.createElement('canvas');
-  const sw = 160;
-  const sh = 160;
+  const sw = 200;
+  const sh = 200;
   canvas.width = sw;
   canvas.height = sh;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return { x: 0.2, y: 0.18, w: 0.6, h: 0.22 };
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return { x: 0.14, y: 0.2, w: 0.72, h: 0.18 };
 
   ctx.drawImage(img, 0, 0, w, h, 0, 0, sw, sh);
   const { data } = ctx.getImageData(0, 0, sw, sh);
 
-  let bestRowStart = Math.floor(sh * 0.17);
-  let bestScore = -1;
-  const bandH = Math.floor(sh * 0.19);
+  // Build per-row & per-column horizontal contrast maps
+  const rowContrast = new Float32Array(sh);
+  const rowRedAccent = new Float32Array(sh);
 
-  // Scan upper-middle portion of meter (12% to 48% height) for high horizontal contrast + red drum
-  for (let y0 = Math.floor(sh * 0.12); y0 <= Math.floor(sh * 0.45); y0 += 2) {
-    let contrastSum = 0;
-    let redDrumBonus = 0;
-    for (let y = y0; y < Math.min(sh - 1, y0 + bandH); y++) {
-      for (let x = Math.floor(sw * 0.2); x < Math.floor(sw * 0.8) - 1; x++) {
-        const idx = (y * sw + x) * 4;
-        const nextIdx = (y * sw + x + 1) * 4;
-        const lum1 = data[idx] * 0.3 + data[idx + 1] * 0.59 + data[idx + 2] * 0.11;
-        const lum2 =
-          data[nextIdx] * 0.3 + data[nextIdx + 1] * 0.59 + data[nextIdx + 2] * 0.11;
-        contrastSum += Math.abs(lum1 - lum2);
+  for (let y = 0; y < sh; y++) {
+    let contrast = 0;
+    let redHits = 0;
+    for (let x = Math.floor(sw * 0.08); x < Math.floor(sw * 0.92) - 1; x++) {
+      const idx = (y * sw + x) * 4;
+      const nextIdx = (y * sw + x + 1) * 4;
+      const lum1 = data[idx] * 0.3 + data[idx + 1] * 0.59 + data[idx + 2] * 0.11;
+      const lum2 =
+        data[nextIdx] * 0.3 + data[nextIdx + 1] * 0.59 + data[nextIdx + 2] * 0.11;
+      const diff = Math.abs(lum1 - lum2);
+      if (diff > 10) contrast += diff;
 
-        // Rightmost drum on cyclometer meters is often red (tenths drum)
-        if (x > sw * 0.52 && data[idx] - Math.max(data[idx + 1], data[idx + 2]) > 28) {
-          redDrumBonus += 18;
-        }
+      if (x > sw * 0.45 && data[idx] > 110 && data[idx] - Math.max(data[idx + 1], data[idx + 2]) > 26) {
+        redHits++;
       }
     }
-    const totalScore = contrastSum + redDrumBonus;
-    if (totalScore > bestScore) {
-      bestScore = totalScore;
+    rowContrast[y] = contrast;
+    rowRedAccent[y] = redHits;
+  }
+
+  // Scan broad vertical window (y0 = 0.08..0.72) to support zoomed-out photos AND mobile center-framed snaps
+  const bandH = Math.max(18, Math.floor(sh * 0.14));
+  let bestRowStart = Math.floor(sh * 0.18);
+  let bestScore = -1;
+
+  for (let y0 = Math.floor(sh * 0.08); y0 <= Math.floor(sh * 0.72); y0 += 2) {
+    let bandContrast = 0;
+    let bandRed = 0;
+    const yEnd = Math.min(sh, y0 + bandH);
+    for (let y = y0; y < yEnd; y++) {
+      bandContrast += rowContrast[y];
+      bandRed += rowRedAccent[y];
+    }
+    const centerBias = 1 - Math.abs(y0 / sh - 0.34) * 0.22;
+    const score = (bandContrast + bandRed * 24) * centerBias;
+    if (score > bestScore) {
+      bestScore = score;
       bestRowStart = y0;
     }
   }
 
+  // Refine vertical row bounds around peak digit activity so small header labels above aren't included
+  const winTop = Math.max(0, bestRowStart - 4);
+  const winBot = Math.min(sh - 1, bestRowStart + bandH + 4);
+  let peakRowContrast = 1;
+  for (let y = winTop; y <= winBot; y++) {
+    if (rowContrast[y] > peakRowContrast) peakRowContrast = rowContrast[y];
+  }
+
+  let activeTop = bestRowStart;
+  let activeBot = Math.min(sh - 1, bestRowStart + bandH);
+  const rowThreshold = peakRowContrast * 0.34;
+  while (activeTop < activeBot && rowContrast[activeTop] < rowThreshold) activeTop++;
+  while (activeBot > activeTop && rowContrast[activeBot] < rowThreshold) activeBot--;
+
+  // Refine horizontal span within the localized digit strip so edge digits (e.g. .7) are never cut off
+  const colActivity = new Float32Array(sw);
+  let maxColAct = 1;
+  for (let x = 2; x < sw - 2; x++) {
+    let act = 0;
+    for (let y = activeTop; y <= activeBot; y++) {
+      const idx = (y * sw + x) * 4;
+      const nextIdx = (y * sw + x + 1) * 4;
+      const lum1 = data[idx] * 0.3 + data[idx + 1] * 0.59 + data[idx + 2] * 0.11;
+      const lum2 =
+        data[nextIdx] * 0.3 + data[nextIdx + 1] * 0.59 + data[nextIdx + 2] * 0.11;
+      act += Math.abs(lum1 - lum2);
+      if (data[idx] > 110 && data[idx] - Math.max(data[idx + 1], data[idx + 2]) > 26) {
+        act += 20;
+      }
+    }
+    colActivity[x] = act;
+    if (act > maxColAct) maxColAct = act;
+  }
+
+  let leftCol = Math.floor(sw * 0.06);
+  let rightCol = Math.floor(sw * 0.94);
+  const colThreshold = maxColAct * 0.18;
+  while (leftCol < Math.floor(sw * 0.45) && colActivity[leftCol] < colThreshold) leftCol++;
+  while (rightCol > Math.floor(sw * 0.55) && colActivity[rightCol] < colThreshold) rightCol--;
+
+  const padX = 0.06;
+  const padY = 0.02;
+  const normX = Math.max(0.04, leftCol / sw - padX);
+  const normRight = Math.min(0.96, rightCol / sw + padX);
+  const normW = Math.min(0.92, Math.max(0.46, normRight - normX));
+
+  const normY = Math.max(0.05, activeTop / sh - padY);
+  const rawH = (activeBot - activeTop + 1) / sh + padY * 2;
+  const normH = Math.max(0.11, Math.min(0.24, rawH));
+
   return {
-    x: 0.18,
-    y: Math.max(0.1, Math.min(0.45, bestRowStart / sh - 0.015)),
-    w: 0.64,
-    h: 0.22,
+    x: normX,
+    y: Math.min(0.84 - normH, normY),
+    w: normW,
+    h: normH,
   };
 }
 
@@ -444,10 +555,7 @@ export function buildVerifiedValueCropScreenshot(
   readingValue: number | null,
   label = 'VERIFIED REGISTER VALUE'
 ): string {
-  const srcW =
-    img instanceof HTMLVideoElement ? img.videoWidth || 1280 : img.width || 1280;
-  const srcH =
-    img instanceof HTMLVideoElement ? img.videoHeight || 720 : img.height || 720;
+  const { width: srcW, height: srcH } = getSourceDimensions(img);
 
   const sx = Math.max(0, Math.floor(srcW * cropBox.x));
   const sy = Math.max(0, Math.floor(srcH * cropBox.y));
@@ -585,31 +693,37 @@ export function generateSimulatedValueCropDataUrl(readingValue: number): string 
   return canvas.toDataURL('image/png');
 }
 
+interface OfflineWindowAnalysis {
+  reading: number | null;
+  confidence: number;
+  hasRegisterStructure: boolean;
+  inspection: SubMeterHardwareInspection;
+}
+
 /**
  * Local 100% Offline Register Window Analyzer Fallback:
- * When offline or when Tesseract cannot parse a stylized mechanical cyclometer drum or unpowered LCD,
- * inspects the cropped register window directly on Canvas to determine the reading.
- * Authentic analysis: never injects pseudo-random modulo digits.
+ * Inspects the cropped register window directly on Canvas to verify cyclometer / LCD
+ * sub-meter hardware features and extract unambiguous readings without fabricating digits.
  */
 function analyzeRegisterWindowOffline(
-  img: HTMLImageElement,
+  img: HTMLImageElement | HTMLCanvasElement,
   cropBox: CropBox
-): { reading: number | null; confidence: number; inspection: SubMeterHardwareInspection } {
-  const w = img.width || 1280;
-  const h = img.height || 720;
+): OfflineWindowAnalysis {
+  const { width: w, height: h } = getSourceDimensions(img);
   const sx = Math.max(0, Math.floor(w * cropBox.x));
   const sy = Math.max(0, Math.floor(h * cropBox.y));
-  const sw = Math.max(48, Math.floor(w * cropBox.w));
-  const sh = Math.max(24, Math.floor(h * cropBox.h));
+  const sw = Math.max(48, Math.min(w - sx, Math.floor(w * cropBox.w)));
+  const sh = Math.max(24, Math.min(h - sy, Math.floor(h * cropBox.h)));
 
   const canvas = document.createElement('canvas');
   canvas.width = 240;
   canvas.height = 80;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) {
     return {
       reading: null,
       confidence: 0,
+      hasRegisterStructure: false,
       inspection: {
         brandModel: 'Electric Sub-Meter',
         registerType: 'Register Window Scan',
@@ -623,14 +737,16 @@ function analyzeRegisterWindowOffline(
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 240, 80);
   const { data } = ctx.getImageData(0, 0, 240, 80);
 
-  // Check luminance variance, red tenth drum localization, and drum structure
+  // Check luminance variance, red tenths accent, dark drums, and sharp horizontal digit transitions
   let lumSum = 0;
   let lumSqSum = 0;
   let redRightPixels = 0;
   let redLeftPixels = 0;
   let darkDrumsCount = 0;
+  let digitTransitions = 0;
 
   for (let y = 12; y < 68; y++) {
+    let prevLum = -1;
     for (let x = 16; x < 224; x++) {
       const idx = (y * 240 + x) * 4;
       const r = data[idx];
@@ -639,13 +755,16 @@ function analyzeRegisterWindowOffline(
       const lum = r * 0.299 + g * 0.587 + b * 0.114;
       lumSum += lum;
       lumSqSum += lum * lum;
+      if (prevLum >= 0 && Math.abs(lum - prevLum) > 28) {
+        digitTransitions++;
+      }
+      prevLum = lum;
 
-      // Authentic cyclometer sub-meters have a red tenths drum strictly on the right (x > 170)
-      const isRed = r > 110 && (r - Math.max(g, b)) > 26;
+      const isRed = r > 110 && r - Math.max(g, b) > 26;
       if (isRed) {
-        if (x > 170) {
+        if (x > 165) {
           redRightPixels++;
-        } else if (x < 155) {
+        } else if (x < 150) {
           redLeftPixels++;
         }
       } else if (x < 165 && lum < 80) {
@@ -659,17 +778,22 @@ function analyzeRegisterWindowOffline(
   const variance = Math.max(0, lumSqSum / sampleCount - meanLum * meanLum);
   const stdDev = Math.sqrt(variance);
 
-  // Mechanical cyclometer has red drum localized to the right 1/6th, dark drums on the left
   const isCyclometerDrums =
     redRightPixels >= 25 &&
-    redRightPixels > redLeftPixels * 1.8 &&
-    darkDrumsCount > 200;
+    redRightPixels > redLeftPixels * 1.6 &&
+    darkDrumsCount > 180;
+
+  const isStructuredLcdRegister =
+    stdDev > 20 &&
+    digitTransitions > 180 &&
+    (redRightPixels >= 18 || (meanLum >= 60 && meanLum <= 210));
 
   // Unpowered LCD has low variance within mid-tone grey/green glass bounds (not pure white or pitch black)
   if (stdDev < 14 && redRightPixels < 25 && meanLum >= 45 && meanLum <= 170) {
     return {
       reading: 0.0,
       confidence: 96,
+      hasRegisterStructure: true,
       inspection: {
         brandModel: 'Digital LCD Sub-Meter',
         registerType: 'Digital LCD Register (Blank / Unpowered)',
@@ -681,103 +805,30 @@ function analyzeRegisterWindowOffline(
     };
   }
 
-  // Analyze 6 drum slots across the active register strip (x: 36..204, y: 18..62)
-  const digits: number[] = [];
-  let isConfident = true;
-  const slotW = (204 - 36) / 6;
-
-  for (let slot = 0; slot < 6; slot++) {
-    const x0 = Math.floor(36 + slot * slotW + 3);
-    const x1 = Math.floor(36 + (slot + 1) * slotW - 3);
-    let topInk = 0;
-    let midInk = 0;
-    let botInk = 0;
-    let leftInk = 0;
-    let rightInk = 0;
-    let centerInk = 0;
-    let totalInk = 0;
-
-    for (let y = 20; y < 60; y++) {
-      for (let x = x0; x < x1; x++) {
-        const idx = (y * 240 + x) * 4;
-        const lum = data[idx] * 0.3 + data[idx + 1] * 0.59 + data[idx + 2] * 0.11;
-        // Digits on dark drums are bright (> meanLum + 26); digits on light LCD are dark (< meanLum - 26)
-        const isInk = meanLum < 135 ? lum > meanLum + 26 : lum < meanLum - 26;
-        if (isInk) {
-          totalInk++;
-          const ny = (y - 20) / 40;
-          const nx = (x - x0) / Math.max(1, x1 - x0);
-          if (ny < 0.33) topInk++;
-          else if (ny < 0.66) midInk++;
-          else botInk++;
-
-          if (nx < 0.35) leftInk++;
-          else if (nx > 0.65) rightInk++;
-          else centerInk++;
-        }
-      }
-    }
-
-    // Authentic structural digit matching - NO speculative guessing!
-    if (totalInk < 12 || (slot < 3 && centerInk < totalInk * 0.28)) {
-      digits.push(0);
-    } else if (centerInk < totalInk * 0.22 && leftInk > totalInk * 0.15 && rightInk > totalInk * 0.15) {
-      digits.push(0);
-    } else if (centerInk > totalInk * 0.52 && leftInk < rightInk * 0.5) {
-      digits.push(1);
-    } else if (topInk > botInk * 1.35 && rightInk > leftInk * 1.3) {
-      digits.push(7);
-    } else if (midInk > topInk * 0.95 && rightInk > leftInk * 1.25 && botInk > totalInk * 0.2) {
-      digits.push(3);
-    } else {
-      // Slot is ambiguous: never invent or guess numbers; require manual confirmation
-      isConfident = false;
-      break;
-    }
-  }
-
-  if (!isConfident || digits.length !== 6) {
-    return {
-      reading: null,
-      confidence: 0,
-      inspection: {
-        brandModel: isCyclometerDrums
-          ? 'Mechanical Cyclometer kWh Sub-Meter'
-          : 'Unrecognized Device (Not an Electric Sub-Meter)',
-        registerType: isCyclometerDrums
-          ? 'Sub-Meter Cyclometer Dial Scan (Manual Verification Required)'
-          : 'Non-Sub-Meter Object Detected',
-        registerBreakdown: isCyclometerDrums
-          ? 'Cyclometer dial detected, but digits were ambiguous. Please enter reading manually from photo.'
-          : 'No electric sub-meter cyclometer dials or kWh display found in this image.',
-        serialOrBarcode: 'N/A',
-        electricalSpecs: isCyclometerDrums ? '220-240V • 60Hz Single-Phase' : 'N/A',
-      },
-    };
-  }
-
-  const intVal =
-    digits[0] * 10000 +
-    digits[1] * 1000 +
-    digits[2] * 100 +
-    digits[3] * 10 +
-    digits[4];
-  const decVal = digits[5] / 10;
-  const reading = Math.round((intVal + decVal) * 10) / 10;
-
   return {
-    reading,
-    confidence: isCyclometerDrums ? 88 : 50,
+    reading: null,
+    confidence: 0,
+    hasRegisterStructure: isCyclometerDrums || isStructuredLcdRegister,
     inspection: {
       brandModel: isCyclometerDrums
         ? 'Mechanical Cyclometer kWh Sub-Meter'
-        : 'Digital kWh Sub-Meter',
+        : isStructuredLcdRegister
+        ? 'Digital LCD kWh Sub-Meter'
+        : 'Unrecognized Device (Not an Electric Sub-Meter)',
       registerType: isCyclometerDrums
-        ? 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)'
-        : 'Digital Register Window',
-      registerBreakdown: `Register: Black Drums: ${digits.slice(0, 5).join('')} • Red Tenths Drum: .${digits[5]} → ${reading.toFixed(1)} kWh`,
+        ? 'Sub-Meter Cyclometer Dial Scan (Manual Verification Required)'
+        : isStructuredLcdRegister
+        ? 'Digital Register Window (Manual Verification Required)'
+        : 'Non-Sub-Meter Object Detected',
+      registerBreakdown:
+        isCyclometerDrums || isStructuredLcdRegister
+          ? 'Sub-meter register detected, but digits were ambiguous. Please verify reading from close-up photo.'
+          : 'No electric sub-meter cyclometer dials or kWh display found in this image.',
       serialOrBarcode: 'Faceplate Serial Excluded',
-      electricalSpecs: '220-240V • 60Hz Single-Phase',
+      electricalSpecs:
+        isCyclometerDrums || isStructuredLcdRegister
+          ? '220-240V • 60Hz Single-Phase'
+          : 'N/A',
     },
   };
 }
@@ -790,14 +841,7 @@ export function preprocessMeterImage(
   sourceCanvasOrImg: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
   cropRatio = { x: 0, y: 0, w: 1, h: 1 }
 ): string {
-  const srcWidth =
-    sourceCanvasOrImg instanceof HTMLVideoElement
-      ? sourceCanvasOrImg.videoWidth || 1920
-      : sourceCanvasOrImg.width || 1920;
-  const srcHeight =
-    sourceCanvasOrImg instanceof HTMLVideoElement
-      ? sourceCanvasOrImg.videoHeight || 1080
-      : sourceCanvasOrImg.height || 1080;
+  const { width: srcWidth, height: srcHeight } = getSourceDimensions(sourceCanvasOrImg);
 
   const sx = Math.max(0, Math.floor(srcWidth * cropRatio.x));
   const sy = Math.max(0, Math.floor(srcHeight * cropRatio.y));
@@ -880,108 +924,119 @@ function computeOtsuThreshold(grayData: Uint8Array, total: number): number {
   return bestThreshold;
 }
 
-/**
- * Crops the dial register window with contrast normalization, dark drum inversion,
- * adaptive Otsu binarization, and sharpening for high-accuracy Tesseract character recognition.
- */
-function buildRegisterWindowCropForOcr(
-  img: HTMLImageElement,
-  cropBox: CropBox
-): string {
-  const w = img.width || 1280;
-  const h = img.height || 720;
+function computeHistogramPercentile(
+  histogram: Int32Array,
+  total: number,
+  fraction: number
+): number {
+  const target = total * fraction;
+  let acc = 0;
+  for (let i = 0; i < 256; i++) {
+    acc += histogram[i];
+    if (acc >= target) return i;
+  }
+  return 255;
+}
 
+function expandCropBox(box: CropBox, padX: number, padY: number): CropBox {
+  const x = Math.max(0, box.x - padX);
+  const y = Math.max(0, box.y - padY);
+  const right = Math.min(1, box.x + box.w + padX);
+  const bottom = Math.min(1, box.y + box.h + padY);
+  return {
+    x,
+    y,
+    w: Math.max(0.1, right - x),
+    h: Math.max(0.08, bottom - y),
+  };
+}
+
+/**
+ * Renders a normalized, quiet-bordered OCR image variant for the cropped register window.
+ * Preserves dark-digit contrast inside red tenths boxes via red-channel blending and avoids
+ * destructive polarity flips on backlit/silver LCD meters.
+ */
+function buildOcrVariantUrl(
+  img: HTMLImageElement | HTMLCanvasElement,
+  cropBox: CropBox,
+  options: { forceInvert?: boolean; applyOtsu?: boolean } = {}
+): string {
+  const { width: w, height: h } = getSourceDimensions(img);
   const sx = Math.max(0, Math.floor(w * cropBox.x));
   const sy = Math.max(0, Math.floor(h * cropBox.y));
-  const sw = Math.max(64, Math.floor(w * cropBox.w));
-  const sh = Math.max(32, Math.floor(h * cropBox.h));
+  const sw = Math.max(64, Math.min(w - sx, Math.floor(w * cropBox.w)));
+  const sh = Math.max(32, Math.min(h - sy, Math.floor(h * cropBox.h)));
 
-  // Maintain crisp resolution for OCR: width at least 960 or natural sw
-  const targetW = Math.max(960, sw);
-  const targetH = Math.max(240, Math.round((targetW * sh) / sw));
+  const innerW = Math.max(960, sw);
+  const innerH = Math.max(180, Math.round((innerW * sh) / sw));
+  const border = 20;
+  const targetW = innerW + border * 2;
+  const targetH = innerH + border * 2;
 
   const canvas = document.createElement('canvas');
   canvas.width = targetW;
   canvas.height = targetH;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return '';
 
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, targetW, targetH);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH);
+  ctx.drawImage(img, sx, sy, sw, sh, border, border, innerW, innerH);
 
-  const imgData = ctx.getImageData(0, 0, targetW, targetH);
+  const imgData = ctx.getImageData(border, border, innerW, innerH);
   const data = imgData.data;
-  const totalPixels = targetW * targetH;
-
-  // 1. Calculate luminance and compute min/max for contrast normalization
-  const lumArray = new Float32Array(totalPixels);
-  let minLum = 255;
-  let maxLum = 0;
-  let lumSum = 0;
+  const totalPixels = innerW * innerH;
+  const luma = new Float32Array(totalPixels);
+  const histogram = new Int32Array(256);
 
   for (let i = 0; i < totalPixels; i++) {
     const idx = i * 4;
-    const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-    lumArray[i] = lum;
-    if (lum < minLum) minLum = lum;
-    if (lum > maxLum) maxLum = lum;
-    lumSum += lum;
+    const r = data[idx];
+    const g = data[idx + 1];
+    const b = data[idx + 2];
+    const baseLum = 0.299 * r + 0.587 * g + 0.114 * b;
+    // Keep black/dark digits inside red tenths frames legible by lifting pure red background luminance
+    const isRedTint = r > 105 && r - Math.max(g, b) > 26;
+    const blendedLum = isRedTint ? Math.max(baseLum, 0.72 * r + 0.25 * g) : baseLum;
+    luma[i] = blendedLum;
+    histogram[Math.min(255, Math.max(0, Math.round(blendedLum)))]++;
   }
 
-  const meanLum = lumSum / totalPixels;
-  // Dark drum inversion: mechanical cyclometer drums are typically dark (mean lum < 125) with bright digits.
-  // Inverting makes digits dark on light background, matching Tesseract's training model.
-  const isDarkDrum = meanLum < 125;
+  const p2 = computeHistogramPercentile(histogram, totalPixels, 0.02);
+  const median = computeHistogramPercentile(histogram, totalPixels, 0.5);
+  const p98 = computeHistogramPercentile(histogram, totalPixels, 0.98);
+  const range = Math.max(24, p98 - p2);
 
-  const range = Math.max(20, maxLum - minLum);
+  // Only invert automatically for true dark cyclometer drums (white digits on black background)
+  const autoDarkDrum = median < 105 && p98 - median > 45;
+  const shouldInvert = options.forceInvert ? !autoDarkDrum : autoDarkDrum;
   const grayData = new Uint8Array(totalPixels);
 
   for (let i = 0; i < totalPixels; i++) {
-    const norm = Math.min(255, Math.max(0, ((lumArray[i] - minLum) / range) * 255));
-    const inverted = isDarkDrum ? 255 - norm : norm;
-    grayData[i] = Math.round(inverted);
+    const stretched = Math.min(255, Math.max(0, ((luma[i] - p2) / range) * 255));
+    grayData[i] = Math.round(shouldInvert ? 255 - stretched : stretched);
   }
 
-  // 2. Adaptive Binarization (Otsu threshold)
-  const otsuThreshold = computeOtsuThreshold(grayData, totalPixels);
-
-  // 3. Contrast adjustment with edge preservation
+  const otsu = options.applyOtsu ? computeOtsuThreshold(grayData, totalPixels) : -1;
   for (let i = 0; i < totalPixels; i++) {
     const idx = i * 4;
-    const val = grayData[i];
-    const binarized =
-      val < otsuThreshold - 12
-        ? 0
-        : val > otsuThreshold + 12
-        ? 255
-        : Math.round(((val - (otsuThreshold - 12)) / 24) * 255);
-    data[idx] = binarized;
-    data[idx + 1] = binarized;
-    data[idx + 2] = binarized;
-  }
-
-  // 4. Sharpening filter to enhance digit stroke contours
-  const copy = new Uint8ClampedArray(data);
-  const cw = targetW;
-  const ch = targetH;
-  for (let y = 1; y < ch - 1; y++) {
-    for (let x = 1; x < cw - 1; x++) {
-      const idx = (y * cw + x) * 4;
-      const top = ((y - 1) * cw + x) * 4;
-      const bot = ((y + 1) * cw + x) * 4;
-      const left = (y * cw + (x - 1)) * 4;
-      const right = (y * cw + (x + 1)) * 4;
-
-      const val = 5 * copy[idx] - copy[top] - copy[bot] - copy[left] - copy[right];
-      const clamped = Math.max(0, Math.min(255, val));
-      data[idx] = clamped;
-      data[idx + 1] = clamped;
-      data[idx + 2] = clamped;
+    let outVal = grayData[i];
+    if (options.applyOtsu) {
+      outVal =
+        outVal < otsu - 10
+          ? 0
+          : outVal > otsu + 10
+          ? 255
+          : Math.round(((outVal - (otsu - 10)) / 20) * 255);
     }
+    data[idx] = outVal;
+    data[idx + 1] = outVal;
+    data[idx + 2] = outVal;
   }
 
-  ctx.putImageData(imgData, 0, 0);
+  ctx.putImageData(imgData, border, border);
   return canvas.toDataURL('image/png');
 }
 
@@ -995,12 +1050,116 @@ function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
   });
 }
 
+// Persistent shared Tesseract worker to avoid mobile cold-start/WASM reload timeouts on every pass
+let sharedWorkerPromise: Promise<Tesseract.Worker> | null = null;
+let workerQueue: Promise<unknown> = Promise.resolve();
+let activeProgressCallback: ((pct: number) => void) | undefined;
+
+async function getSharedTesseractWorker(): Promise<Tesseract.Worker> {
+  if (!sharedWorkerPromise) {
+    sharedWorkerPromise = Promise.race([
+      Tesseract.createWorker('eng', 1, {
+        logger: (m: any) => {
+          if (m.status === 'recognizing text' && activeProgressCallback) {
+            activeProgressCallback(
+              Math.min(94, 45 + Math.round((m.progress || 0) * 50))
+            );
+          }
+        },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Tesseract worker init timeout')), 28000)
+      ),
+    ]).catch((err) => {
+      sharedWorkerPromise = null;
+      throw err;
+    });
+  }
+  return sharedWorkerPromise;
+}
+
+function runTesseractPass(
+  url: string,
+  psmMode: string,
+  whitelist: string,
+  timeoutMs: number,
+  onProgress?: (pct: number) => void
+): Promise<{ text: string; confidence: number } | null> {
+  const execPass = async (): Promise<{ text: string; confidence: number } | null> => {
+    activeProgressCallback = onProgress;
+    const recognizePromise = (async () => {
+      const worker = await getSharedTesseractWorker();
+      await worker.setParameters({
+        tessedit_char_whitelist: whitelist,
+        tessedit_pageseg_mode: psmMode as any,
+      });
+      const res = await worker.recognize(url);
+      if (!res?.data) return null;
+      return {
+        text: res.data.text || '',
+        confidence: Math.round(res.data.confidence || 0),
+      };
+    })();
+
+    try {
+      return await Promise.race([
+        recognizePromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+      ]);
+    } catch {
+      sharedWorkerPromise = null;
+      return null;
+    } finally {
+      activeProgressCallback = undefined;
+    }
+  };
+
+  const next = workerQueue.then(execPass, execPass);
+  workerQueue = next.catch(() => undefined);
+  return next;
+}
+
+const SUBMETER_KEYWORD_REGEX =
+  /(?:kwh|kw[\.·\-]?h|watthour|watt[\s-]hour|meter|imp[\s/]*kwh|\b220\s*v\b|\b240\s*v\b|\b120\s*v\b|\b60\s*hz\b|\b50\s*hz\b|single[\s-]phase|1[\s-]phase|1phase|\b10\(60\)a\b|\b5\(30\)a\b|safari|cirtech|type[\s-]sp1|sub[\s-]?meter|ge\s*kv2c)/i;
+
+function detectBrandMetadata(
+  rawText: string,
+  isCyclometer: boolean
+): { brandModel: string; electricalSpecs: string; serialOrBarcode: string } {
+  let brandModel = isCyclometer
+    ? 'Mechanical Cyclometer kWh Sub-Meter'
+    : 'Electric kWh Sub-Meter';
+  let electricalSpecs = '220–240V • 60Hz Sub-Meter';
+  let serialOrBarcode = 'Faceplate Serial Excluded';
+
+  if (/safari|sy-?168/i.test(rawText)) {
+    brandModel = 'Safari SY-168 Digital Kilowatt Hour Meter';
+    electricalSpecs = '240V • 10(60)A • 1Phase • 60Hz';
+  } else if (/static|sp1|type-?sp1/i.test(rawText)) {
+    brandModel = 'Static Watthour Meter TYPE-SP1';
+    electricalSpecs = '240V • 5-30A • 50Hz • 3200 imp/kWh';
+  } else if (/cirtech|mt-?60i|cl-?60/i.test(rawText)) {
+    brandModel = 'Cirtech MT-60i Digital Sub-Meter';
+    electricalSpecs = '240V • 10(60)A • 60Hz • 1600 imp/kWh';
+  }
+
+  const serialMatch = rawText.match(
+    /\b(?:no\.?|s\.?\s*no|serial)\s*[:#-]?\s*([A-Z0-9\-]+)/i
+  );
+  if (serialMatch) {
+    serialOrBarcode = `No. ${serialMatch[1]} (Excluded)`;
+  }
+
+  return { brandModel, electricalSpecs, serialOrBarcode };
+}
+
 /**
  * Multi-Stage Sub-Meter Visual Inspector, Value Cropper & Auto-Reader:
- * 1. Matches calibrated landlord sub-meter profiles.
- * 2. Generates a zoomed-in cropped screenshot of the register value (`registerCropDataUrl`).
- * 3. Runs Tesseract OCR with character whitelist ('0123456789.') and Page Segmentation Mode (PSM 7/8).
- * 4. Fallback to clean offline analysis without fabricated digits.
+ * 1. Normalizes oversized mobile camera uploads to prevent WebView OOM/hangs.
+ * 2. Matches calibrated landlord sub-meter profiles when applicable.
+ * 3. Runs persistent-worker Tesseract across smooth red-safe grayscale, inverted Otsu,
+ *    expanded context band, and unwhitelisted full-faceplate passes.
+ * 4. Falls back cleanly to structural canvas analysis without fabricating digits.
  */
 export async function recognizeSubMeterReading(
   imageDataUrl: string,
@@ -1014,15 +1173,15 @@ export async function recognizeSubMeterReading(
   try {
     if (onProgress) onProgress(15);
     const img = await loadImageElement(imageDataUrl);
-    const preservedColorUrl = preprocessMeterImage(img, {
-      x: 0,
-      y: 0,
-      w: 1,
-      h: 1,
-    });
+    const preservedColorUrl = preprocessMeterImage(img, { x: 0, y: 0, w: 1, h: 1 });
+    const workingCanvas = createBoundedWorkingCanvas(img, 1400);
+    const workingSource: HTMLImageElement | HTMLCanvasElement = workingCanvas || img;
+    const workingDataUrl = workingCanvas
+      ? workingCanvas.toDataURL('image/jpeg', 0.93)
+      : preservedColorUrl || imageDataUrl;
 
     if (onProgress) onProgress(35);
-    const sig = computeBoxRgbSignature(img);
+    const sig = computeBoxRgbSignature(workingSource);
     const matchedProfile = matchCalibratedSubMeterProfile(sig);
 
     if (matchedProfile) {
@@ -1047,117 +1206,107 @@ export async function recognizeSubMeterReading(
       };
     }
 
-    // Detect register window bounding box for general sub-meter image
-    const detectedCropBox = detectRegisterCropBox(img);
-    const ocrCropUrl = buildRegisterWindowCropForOcr(img, detectedCropBox);
+    const detectedCropBox = detectRegisterCropBox(workingSource);
+    const offlineAnalysis = analyzeRegisterWindowOffline(workingSource, detectedCropBox);
+    const primaryCropUrl = buildOcrVariantUrl(workingSource, detectedCropBox, {
+      forceInvert: false,
+      applyOtsu: false,
+    });
 
     let reading: number | null = null;
     let rawText = '';
+    let contextText = '';
     let confidence = 0;
 
-    // Configured Tesseract OCR with Whitelist ('0123456789.') and PSM (SINGLE_LINE: 7 / SINGLE_WORD: 8)
     if (typeof navigator === 'undefined' || navigator.onLine !== false) {
-      try {
-        const runTesseract = async (
-          url: string,
-          timeoutMs: number,
-          psmMode: string = Tesseract.PSM.SINGLE_LINE
-        ) => {
-          let worker: Tesseract.Worker | null = null;
-          const timeoutPromise = new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), timeoutMs)
-          );
+      const passSpecs: Array<{
+        getUrl: () => string;
+        psm: string;
+        whitelist: string;
+        timeoutMs: number;
+      }> = [
+        // Pass 1: Smooth red-safe grayscale tight register crop (SINGLE_LINE, digits only)
+        {
+          getUrl: () => primaryCropUrl,
+          psm: Tesseract.PSM.SINGLE_LINE,
+          whitelist: '0123456789.',
+          timeoutMs: 10000,
+        },
+        // Pass 2: Inverted / Otsu contrast fallback for dark white-on-black cyclometer drums
+        {
+          getUrl: () =>
+            buildOcrVariantUrl(workingSource, detectedCropBox, {
+              forceInvert: true,
+              applyOtsu: true,
+            }),
+          psm: Tesseract.PSM.SINGLE_LINE,
+          whitelist: '0123456789.',
+          timeoutMs: 10000,
+        },
+        // Pass 3: Tight primary with SINGLE_WORD
+        {
+          getUrl: () => primaryCropUrl,
+          psm: Tesseract.PSM.SINGLE_WORD,
+          whitelist: '0123456789.',
+          timeoutMs: 8000,
+        },
+        // Pass 4: Wider register band with letters allowed so '003020.7 kW·h' is captured intact
+        {
+          getUrl: () =>
+            buildOcrVariantUrl(
+              workingSource,
+              expandCropBox(detectedCropBox, 0.1, 0.14),
+              { forceInvert: false, applyOtsu: false }
+            ),
+          psm: Tesseract.PSM.AUTO,
+          whitelist: '',
+          timeoutMs: 10000,
+        },
+        // Pass 5: Bounded full photo fallback (no whitelist so brand/specs & kW·h anchor work)
+        {
+          getUrl: () => workingDataUrl,
+          psm: Tesseract.PSM.AUTO,
+          whitelist: '',
+          timeoutMs: 12000,
+        },
+      ];
 
-          const ocrPromise = (async () => {
-            try {
-              const createdWorker = await Tesseract.createWorker('eng', 1, {
-                logger: (m: any) => {
-                  if (m.status === 'recognizing text' && onProgress) {
-                    onProgress(Math.min(94, 45 + Math.round((m.progress || 0) * 50)));
-                  }
-                },
-              });
-              worker = createdWorker;
-
-              await createdWorker.setParameters({
-                tessedit_char_whitelist: '0123456789.',
-                tessedit_pageseg_mode: (psmMode as any),
-              });
-
-              const res = await createdWorker.recognize(url);
-              return res;
-            } catch {
-              // Fallback to basic recognize if worker parameters throw
-              try {
-                return await Tesseract.recognize(url, 'eng', {
-                  logger: (m: any) => {
-                    if (m.status === 'recognizing text' && onProgress) {
-                      onProgress(Math.min(94, 45 + Math.round((m.progress || 0) * 50)));
-                    }
-                  },
-                });
-              } catch {
-                return null;
-              }
-            } finally {
-              if (worker) {
-                await worker.terminate().catch(() => {});
-              }
-            }
-          })();
-
-          return Promise.race([ocrPromise, timeoutPromise]);
-        };
-
-        // Pass 1: Enhanced cropped register window with PSM SINGLE_LINE (up to 15s)
-        const pass1Result = await runTesseract(ocrCropUrl || imageDataUrl, 15000, Tesseract.PSM.SINGLE_LINE);
-        if (pass1Result && pass1Result.data) {
-          rawText = pass1Result.data.text || '';
-          confidence = Math.round(pass1Result.data.confidence || 0);
-          reading = extractMeterDigitsFromOcrText(rawText);
+      for (const pass of passSpecs) {
+        const url = pass.getUrl();
+        if (!url) continue;
+        const res = await runTesseractPass(url, pass.psm, pass.whitelist, pass.timeoutMs, onProgress);
+        if (!res) continue;
+        contextText = `${contextText}\n${res.text}`.trim();
+        const extracted = extractMeterDigitsFromOcrText(res.text);
+        if (extracted !== null) {
+          reading = extracted;
+          rawText = res.text;
+          confidence = Math.max(confidence, res.confidence);
+          break;
         }
+      }
 
-        // Pass 1b: If PSM SINGLE_LINE had no result, retry crop with PSM SINGLE_WORD
-        if (reading === null && ocrCropUrl) {
-          const pass1bResult = await runTesseract(ocrCropUrl, 8000, Tesseract.PSM.SINGLE_WORD);
-          if (pass1bResult && pass1bResult.data) {
-            const pass1bText = pass1bResult.data.text || '';
-            const pass1bReading = extractMeterDigitsFromOcrText(pass1bText);
-            if (pass1bReading !== null) {
-              reading = pass1bReading;
-              rawText = pass1bText;
-              confidence = Math.max(confidence, Math.round(pass1bResult.data.confidence || 0));
-            }
-          }
+      // If digits-only pass succeeded and we still need device verification keywords
+      if (
+        reading !== null &&
+        !SUBMETER_KEYWORD_REGEX.test(contextText) &&
+        !offlineAnalysis.hasRegisterStructure
+      ) {
+        const metaRes = await runTesseractPass(workingDataUrl, Tesseract.PSM.AUTO, '', 9000);
+        if (metaRes?.text) {
+          contextText = `${contextText}\n${metaRes.text}`.trim();
         }
-
-        // Pass 2: Full photo fallback if crop gave no reading (up to 12s)
-        if (reading === null && ocrCropUrl && imageDataUrl) {
-          const pass2Result = await runTesseract(imageDataUrl, 12000, Tesseract.PSM.AUTO);
-          if (pass2Result && pass2Result.data) {
-            const pass2Text = pass2Result.data.text || '';
-            const pass2Reading = extractMeterDigitsFromOcrText(pass2Text);
-            if (pass2Reading !== null) {
-              reading = pass2Reading;
-              rawText = pass2Text;
-              confidence = Math.max(confidence, Math.round(pass2Result.data.confidence || 0));
-            }
-          }
-        }
-      } catch {
-        // Offline or worker unavailable — fall through to local canvas analyzer
       }
     }
 
-    // Offline / Fallback Local Register Drum & LCD Analyzer (authentic, zero modulo guessing)
-    const offlineAnalysis = analyzeRegisterWindowOffline(img, detectedCropBox);
-
-    // Verify whether the photo actually captures an electric sub-meter device
-    const SUBMETER_KEYWORD_REGEX = /(?:kwh|kw[\.·]?h|watthour|watt[\s-]hour|meter|imp[\s/]*kwh|\b220\s*v\b|\b240\s*v\b|\b120\s*v\b|\b60\s*hz\b|\b50\s*hz\b|single[\s-]phase|1[\s-]phase|1phase|\b10\(60\)a\b|\b5\(30\)a\b|safari|cirtech|type[\s-]sp1|sub[\s-]?meter|ge\s*kv2c)/i;
-    const hasMeterKeywords = SUBMETER_KEYWORD_REGEX.test(rawText);
+    const combinedText = `${rawText}\n${contextText}`.trim();
+    const hasMeterKeywords = SUBMETER_KEYWORD_REGEX.test(combinedText);
     const isCyclometer = offlineAnalysis.inspection?.brandModel?.includes('Cyclometer') === true;
     const isBlankLcd = offlineAnalysis.inspection?.isBlankUnpoweredLcd === true;
-    const isSubMeterDevice = hasMeterKeywords || isCyclometer || isBlankLcd;
+    const isSubMeterDevice =
+      hasMeterKeywords ||
+      offlineAnalysis.hasRegisterStructure ||
+      isBlankLcd;
 
     let finalReading: number | null = null;
     let isAuthentic = false;
@@ -1165,58 +1314,47 @@ export async function recognizeSubMeterReading(
     let finalInspection: SubMeterHardwareInspection;
 
     if (!isSubMeterDevice) {
-      // Reject non-meter objects (e.g. keyboard, monitor, media play buttons, random objects)
       finalReading = null;
       isAuthentic = false;
       finalConfidence = 0;
       finalInspection = {
         brandModel: 'Not an Electric Sub-Meter',
         registerType: 'Unrecognized Device',
-        registerBreakdown: 'No electric sub-meter dials or LCD kWh display detected in this photo. Please frame a physical sub-meter.',
+        registerBreakdown:
+          'No electric sub-meter dials or LCD kWh display detected in this photo. Please frame a physical sub-meter.',
         serialOrBarcode: 'N/A',
         electricalSpecs: 'N/A',
       };
     } else {
       finalReading = reading !== null ? reading : offlineAnalysis.reading;
       isAuthentic = true;
-      finalConfidence = reading !== null ? Math.max(confidence, 75) : offlineAnalysis.confidence;
+      finalConfidence =
+        reading !== null ? Math.max(confidence, 75) : offlineAnalysis.confidence;
 
-      // Detect known models from OCR raw text if available
-      let detectedBrand = isCyclometer
-        ? 'Mechanical Cyclometer kWh Sub-Meter'
-        : 'Electric kWh Sub-Meter';
-      let detectedSpecs = '220–240V • 60Hz Sub-Meter';
-      let detectedSerial = 'Faceplate Serial Excluded';
-      if (/safari|sy-?168/i.test(rawText)) {
-        detectedBrand = 'Safari SY-168 Digital Kilowatt Hour Meter';
-        detectedSpecs = '240V • 10(60)A • 1Phase • 60Hz';
-      } else if (/static|sp1|type-?sp1/i.test(rawText)) {
-        detectedBrand = 'Static Watthour Meter TYPE-SP1';
-        detectedSpecs = '240V • 5-30A • 50Hz • 3200 imp/kWh';
-      } else if (/cirtech|mt-?60i|cl-?60/i.test(rawText)) {
-        detectedBrand = 'Cirtech MT-60i Digital Sub-Meter';
-        detectedSpecs = '240V • 10(60)A • 60Hz • 1600 imp/kWh';
-      }
-
-      const serialMatch = rawText.match(/\b(?:no\.?|s\.?\s*no|serial)\s*[:#-]?\s*([A-Z0-9\-]+)/i);
-      if (serialMatch) {
-        detectedSerial = `No. ${serialMatch[1]} (Excluded)`;
-      }
-
+      const meta = detectBrandMetadata(combinedText, isCyclometer);
       finalInspection =
         reading !== null
           ? {
-              brandModel: detectedBrand,
+              brandModel: meta.brandModel,
               registerType: 'Digital Register Window Digit Extraction',
               registerBreakdown: `Verified Register: ${reading.toFixed(1)} kWh`,
-              serialOrBarcode: detectedSerial,
-              electricalSpecs: detectedSpecs,
+              serialOrBarcode: meta.serialOrBarcode,
+              electricalSpecs: meta.electricalSpecs,
             }
-          : offlineAnalysis.inspection;
+          : {
+              ...offlineAnalysis.inspection,
+              brandModel:
+                meta.brandModel !== 'Electric kWh Sub-Meter'
+                  ? meta.brandModel
+                  : offlineAnalysis.inspection.brandModel,
+              electricalSpecs:
+                meta.electricalSpecs !== '220–240V • 60Hz Sub-Meter'
+                  ? meta.electricalSpecs
+                  : offlineAnalysis.inspection.electricalSpecs,
+            };
     }
 
     const readingValueStr = finalReading !== null ? finalReading.toFixed(1) : '';
-
     const registerCropDataUrl = buildVerifiedValueCropScreenshot(
       img,
       detectedCropBox,
@@ -1234,7 +1372,7 @@ export async function recognizeSubMeterReading(
       readingValue: readingValueStr,
       confidence: finalConfidence,
       rawText:
-        rawText.trim() ||
+        combinedText ||
         `${finalInspection.brandModel} | ${finalInspection.registerBreakdown}`,
       processedImageDataUrl: preservedColorUrl || imageDataUrl,
       fullResUrl: preservedColorUrl || imageDataUrl,
@@ -1258,7 +1396,8 @@ export async function recognizeSubMeterReading(
       inspection: {
         brandModel: 'Electric Sub-Meter',
         registerType: 'Manual Verification Required',
-        registerBreakdown: 'Could not auto-detect digits with high confidence. Please verify from the close-up photo above.',
+        registerBreakdown:
+          'Could not auto-detect digits with high confidence. Please verify from the close-up photo above.',
         serialOrBarcode: 'Faceplate Serial Excluded',
         electricalSpecs: '220-240V • 60Hz',
       },

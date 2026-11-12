@@ -819,12 +819,13 @@ export function applyPaymentToBill(
 export function extractMeterDigitsFromOcrText(rawText: string): number | null {
   if (!rawText || !rawText.trim() || !/\d/.test(rawText)) return null;
 
-  // Step 0: Pre-clean character substitutions and circled counter prefixes
+  // Step 0: Pre-clean character substitutions, circled counter prefixes, and spaced decimals
   const preCleaned = rawText
     .replace(/[②③]|(\(\s*[123]\s*\))/g, ' ')
     .replace(/[OoQq](?=\d)|(?<=\d)[OoQq]/g, '0')
     .replace(/[Il|!](?=\d)|(?<=\d)[Il|!]/g, '1')
-    .replace(/,/g, '.');
+    .replace(/,/g, '.')
+    .replace(/(\d)\s*\.\s*(\d)/g, '$1.$2');
 
   // Step 1: Explicit kWh / kW·h unit anchored readings (HIGHEST PRIORITY)
   // Sub-meters explicitly display the unit "kW·h", "kW-h", "kWh", or "kW.h" immediately after the reading.
@@ -922,6 +923,22 @@ export function extractMeterDigitsFromOcrText(rawText: string): number | null {
   }
 
   // Step 4: Check for 7-digit reading (6 integer digits + 1 tenths digit, e.g. "0030207" -> 3020.7)
+  // Also catch leading-zero 6+1 split across the tenths frame border (e.g. "003020 7" -> 3020.7)
+  // before bare 6-digit matching can misread "003020" as 302.0.
+  const spacedSevenMatch = cleanedText.match(/\b(0\d{5})\s+(\d)\b/);
+  if (spacedSevenMatch) {
+    const intPart = parseInt(spacedSevenMatch[1], 10);
+    const tenthsPart = parseInt(spacedSevenMatch[2], 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+  }
+
+  const spacedSixMatch = cleanedText.match(/\b(0\d{4})\s+(\d)\b/);
+  if (spacedSixMatch) {
+    const intPart = parseInt(spacedSixMatch[1], 10);
+    const tenthsPart = parseInt(spacedSixMatch[2], 10);
+    return Math.round((intPart + tenthsPart / 10) * 10) / 10;
+  }
+
   const sevenDrumMatches = cleanedText.match(/\b(\d{7})\b/g);
   if (sevenDrumMatches && sevenDrumMatches.length > 0) {
     for (const d of sevenDrumMatches) {
