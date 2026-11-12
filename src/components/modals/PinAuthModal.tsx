@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Delete, Fingerprint, Lock, ShieldAlert, X } from 'lucide-react';
 import { SecurityConfig } from '../../types/rental';
-import { verifyDeviceBiometrics } from '../../services/ocrService';
+import { verifyDeviceBiometrics } from '../../services/authService';
 import { isMobileDevice } from '../../utils/billingCalculator';
 
 interface PinAuthModalProps {
@@ -27,7 +27,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const expectedPin = security.pinCode || '1234';
+  const expectedPin = security.pinCode;
 
   const handleDigit = (digit: string) => {
     setError(null);
@@ -37,12 +37,16 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
 
     if (next.length === 4) {
       setTimeout(() => {
-        if (next === expectedPin) {
+        if (expectedPin && next === expectedPin) {
           setPin('');
           onAuthorized();
           onClose();
         } else {
-          setError('Incorrect 4-digit PIN. Room removal denied.');
+          setError(
+            expectedPin
+              ? 'Incorrect 4-digit PIN. Room removal denied.'
+              : 'No security PIN configured. Set your PIN in Settings first.'
+          );
           setPin('');
         }
       }, 140);
@@ -88,13 +92,10 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
           </button>
         </div>
 
-        {!security.lockEnabled && (
+        {!security.pinCode && (
           <div className="mb-4 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-[11px] text-amber-300 flex items-center gap-2">
             <Lock className="w-3.5 h-3.5 shrink-0" />
-            <span>
-              Default Admin PIN is <strong className="font-mono-num">1234</strong>{' '}
-              (Customize in Settings).
-            </span>
+            <span>No Landlord PIN configured. Set a custom PIN in Settings.</span>
           </div>
         )}
 

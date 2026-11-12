@@ -18,6 +18,7 @@ Thumbs.db
 
 # Workspace Agent Skill Directories (excluded from 4Rent application repo)
 .agents/
+_repos/
 awesome-agent-skills/
 agentic-awesome-skills/
 agent-skills/

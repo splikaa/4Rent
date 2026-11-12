@@ -9,7 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
-import { registerDeviceBiometrics } from '../../services/ocrService';
+import { registerDeviceBiometrics } from '../../services/authService';
 import { SecurityConfig } from '../../types/rental';
 import { isMobileDevice } from '../../utils/billingCalculator';
 
@@ -30,6 +30,9 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRegisteringBio, setIsRegisteringBio] = useState(false);
   const [bioSuccess, setBioSuccess] = useState(false);
+  const [enrolledCredentialId, setEnrolledCredentialId] = useState<string | null>(
+    null
+  );
 
   const handleRegisterFingerprint = async () => {
     setErrorMessage(null);
@@ -39,17 +42,17 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
     const res = await registerDeviceBiometrics();
     setIsRegisteringBio(false);
 
-    if (res.ok) {
+    if (res.ok && res.credentialId) {
       setBioSuccess(true);
+      setEnrolledCredentialId(res.credentialId);
       setTimeout(() => {
-        onComplete({
-          isSetupComplete: true,
-          lockEnabled: true,
-          authMethod: 'fingerprint',
-          pinCode: '1234',
-          webAuthnCredentialId: res.credentialId || `mobile-bio-${Date.now()}`,
-        });
-      }, 450);
+        // Require a custom backup PIN instead of falling back to a hardcoded PIN
+        setBioSuccess(false);
+        setMode('pin');
+        setPinStep('create');
+        setFirstPin('');
+        setCurrentPin('');
+      }, 650);
     } else {
       setErrorMessage(res.message);
     }
@@ -72,8 +75,11 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
             onComplete({
               isSetupComplete: true,
               lockEnabled: true,
-              authMethod: 'pin',
+              authMethod: enrolledCredentialId ? 'fingerprint' : 'pin',
               pinCode: next,
+              ...(enrolledCredentialId
+                ? { webAuthnCredentialId: enrolledCredentialId }
+                : {}),
             });
           } else {
             setErrorMessage('PIN codes did not match. Please try again.');

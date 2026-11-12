@@ -93,7 +93,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         }
 
         // Expose Native Android Hardware Bridges to JavaScript
@@ -154,11 +154,14 @@ public class MainActivity extends Activity {
                 }
 
                 String scheme = uri.getScheme();
-                // Handle android intent:// scheme safely without triggering net::ERR_UNKNOWN_URL_SCHEME
+                // Handle android intent:// scheme safely without exposing internal non-exported components
                 if ("intent".equalsIgnoreCase(scheme)) {
                     try {
                         Intent intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME);
                         if (intent != null) {
+                            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+                            intent.setComponent(null);
+                            intent.setSelector(null);
                             startActivity(intent);
                             return true;
                         }
@@ -166,7 +169,7 @@ public class MainActivity extends Activity {
                         try {
                             Intent intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME);
                             String fallbackUrl = intent != null ? intent.getStringExtra("browser_fallback_url") : null;
-                            if (fallbackUrl != null) {
+                            if (fallbackUrl != null && (fallbackUrl.startsWith("https://") || fallbackUrl.startsWith("http://"))) {
                                 view.loadUrl(fallbackUrl);
                                 return true;
                             }
@@ -218,6 +221,13 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        Uri origin = request.getOrigin();
+                        String originHost = origin != null ? origin.getHost() : null;
+                        if (!LOCAL_HOST.equalsIgnoreCase(originHost) && !APP_HOST.equalsIgnoreCase(originHost)) {
+                            request.deny();
+                            return;
+                        }
+
                         boolean requiresCamera = false;
                         for (String res : request.getResources()) {
                             if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res)) {
@@ -566,7 +576,7 @@ public class MainActivity extends Activity {
     public class AndroidBiometricBridge {
         @JavascriptInterface
         public boolean isSupported() {
-            return true;
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P;
         }
 
         @JavascriptInterface
@@ -608,7 +618,10 @@ public class MainActivity extends Activity {
                                                     || errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
                                                 notifyBiometricResult(false, "Fingerprint scan cancelled. Tap to retry.");
                                             } else {
-                                                notifyBiometricResult(true, "Mobile biometric sensor verified.");
+                                                String msg = errString != null && errString.length() > 0
+                                                        ? errString.toString()
+                                                        : "Biometric verification failed. Use 4-Digit PIN.";
+                                                notifyBiometricResult(false, msg);
                                             }
                                         }
 
@@ -619,10 +632,12 @@ public class MainActivity extends Activity {
                                     }
                             );
                             return;
-                        } catch (Exception ignored) {
+                        } catch (Exception e) {
+                            notifyBiometricResult(false, "Biometric authentication failed. Use 4-Digit PIN.");
+                            return;
                         }
                     }
-                    notifyBiometricResult(true, "Mobile biometric sensor verified.");
+                    notifyBiometricResult(false, "Biometric authentication is not supported on this Android version. Use 4-Digit PIN.");
                 }
             });
         }
@@ -649,7 +664,7 @@ public class MainActivity extends Activity {
         WebResourceResponse response = new WebResourceResponse(mime, "UTF-8", is);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             Map<String, String> headers = new HashMap<String, String>();
-            headers.put("Access-Control-Allow-Origin", "*");
+            headers.put("Access-Control-Allow-Origin", "https://" + LOCAL_HOST);
             headers.put("Cache-Control", "no-cache");
             response.setResponseHeaders(headers);
         }

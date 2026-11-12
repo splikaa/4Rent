@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Delete, Fingerprint, Lock, ShieldCheck } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
 import { SecurityConfig } from '../../types/rental';
-import { verifyDeviceBiometrics } from '../../services/ocrService';
+import { verifyDeviceBiometrics } from '../../services/authService';
 import { isMobileDevice } from '../../utils/billingCalculator';
 
 interface LockScreenProps {
@@ -24,10 +24,14 @@ export const LockScreen: React.FC<LockScreenProps> = ({ security, onUnlock }) =>
 
     if (next.length === 4) {
       setTimeout(() => {
-        if (!security.pinCode || next === security.pinCode) {
+        if (security.pinCode && next === security.pinCode) {
           onUnlock();
         } else {
-          setError('Incorrect 4-digit PIN. Please try again.');
+          setError(
+            security.pinCode
+              ? 'Incorrect 4-digit PIN. Please try again.'
+              : 'No valid PIN configured. Complete security setup first.'
+          );
           setPin('');
         }
       }, 150);

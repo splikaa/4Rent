@@ -20,14 +20,14 @@ export const FIREBASE_RULES_JSON = `{
   "rules": {
     "properties": {
       "$propertyCode": {
-        ".read": true,
-        ".write": true
+        ".read": "auth != null",
+        ".write": "auth != null"
       }
     },
     "system_registry": {
-      ".read": true,
       "$propertyCode": {
-        ".write": true
+        ".read": "auth != null",
+        ".write": "auth != null"
       }
     }
   }
@@ -66,7 +66,22 @@ export async function pushSnapshotToFirebase(
   const baseUrl = getFirebaseDatabaseUrl(config);
   const propCode = config.propertyCode || '4RENT-MAIN';
   const syncedAt = new Date().toISOString();
-  const payloadSnapshot = { ...snapshot, exportedAt: syncedAt };
+  // Never upload local PIN or WebAuthn credential identifiers to cloud snapshots
+  const sanitizedSettings = snapshot.settings
+    ? {
+        ...snapshot.settings,
+        security: {
+          ...snapshot.settings.security,
+          pinCode: '',
+          webAuthnCredentialId: undefined,
+        },
+      }
+    : snapshot.settings;
+  const payloadSnapshot = {
+    ...snapshot,
+    settings: sanitizedSettings,
+    exportedAt: syncedAt,
+  };
 
   let url = `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`;
   const apiKey = config.firebaseApiKey || DEFAULT_FIREBASE_CONFIG.apiKey;
@@ -200,30 +215,33 @@ export function subscribeToFirebaseRealtime(
 
   const baseUrl = getFirebaseDatabaseUrl(config);
   const propCode = config.propertyCode || '4RENT-MAIN';
-  const url = `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`;
+  let url = `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`;
+  const apiKey = config.firebaseApiKey || DEFAULT_FIREBASE_CONFIG.apiKey;
+  if (apiKey && apiKey.trim()) {
+    url += `?auth=${encodeURIComponent(apiKey.trim())}`;
+  }
+
+  const handleEvent = (event: MessageEvent) => {
+    try {
+      const parsed = JSON.parse(event.data);
+      if (!parsed || parsed.data == null) return;
+
+      if (parsed.path === '/' && parsed.data.snapshot) {
+        onRemoteSnapshot(parsed.data.snapshot as AppDatabaseSnapshot);
+      } else if (parsed.path === '/snapshot' && typeof parsed.data === 'object') {
+        onRemoteSnapshot(parsed.data as AppDatabaseSnapshot);
+      } else if (parsed.data.snapshot) {
+        onRemoteSnapshot(parsed.data.snapshot as AppDatabaseSnapshot);
+      }
+    } catch {
+      // ignore malformed SSE payloads
+    }
+  };
 
   try {
     const es = new EventSource(url);
-    es.addEventListener('put', (event) => {
-      try {
-        const parsed = JSON.parse(event.data);
-        if (parsed && parsed.data && parsed.data.snapshot) {
-          onRemoteSnapshot(parsed.data.snapshot);
-        } else if (parsed && parsed.snapshot) {
-          onRemoteSnapshot(parsed.snapshot);
-        }
-      } catch {}
-    });
-    es.addEventListener('patch', (event) => {
-      try {
-        const parsed = JSON.parse(event.data);
-        if (parsed && parsed.data && parsed.data.snapshot) {
-          onRemoteSnapshot(parsed.data.snapshot);
-        } else if (parsed && parsed.snapshot) {
-          onRemoteSnapshot(parsed.snapshot);
-        }
-      } catch {}
-    });
+    es.addEventListener('put', handleEvent as EventListener);
+    es.addEventListener('patch', handleEvent as EventListener);
     return () => es.close();
   } catch {
     return () => {};
@@ -377,9 +395,20 @@ export function mergeDatabaseSnapshots(
     historyMap.set(h.id, h);
   }
 
+  const meterLogMap = new Map<string, any>();
+  for (const m of remote.meterLogs || []) {
+    meterLogMap.set(m.id, m);
+  }
+  for (const m of local.meterLogs || []) {
+    meterLogMap.set(m.id, m);
+  }
+
+  // Keep local device security credentials intact when merging remote settings
   const mergedSettings = {
     ...(remote.settings || {}),
     ...(local.settings || {}),
+    security: local.settings?.security || remote.settings?.security,
+    cloudSync: local.settings?.cloudSync || remote.settings?.cloudSync,
   };
 
   return {
@@ -389,6 +418,9 @@ export function mergeDatabaseSnapshots(
     bills: Array.from(billMap.values()),
     inquiries: Array.from(inquiryMap.values()),
     tenantHistory: Array.from(historyMap.values()),
+    meterLogs: Array.from(meterLogMap.values()).sort((a, b) =>
+      String(b.readingDate || '').localeCompare(String(a.readingDate || ''))
+    ),
     settings: mergedSettings,
   };
 }
