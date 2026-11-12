@@ -34,10 +34,16 @@ import {
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   loadAuditLogs,
+  saveSettings,
+  setPendingCloudApply,
+  setStoredMobileAppliedMonth,
 } from '../../services/storageService';
 import {
+  generatePropertyCode,
+  getMobileCodeMonthlyLock,
   getNetworkStatus,
   mergeDatabaseSnapshots,
+  normalizePropertyCode,
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
   FIREBASE_RULES_JSON,
@@ -76,15 +82,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isMobile = isMobileDevice(),
 }) => {
   const [form, setForm] = useState<AppSettings>(settings);
+  const [mobileCodeDraft, setMobileCodeDraft] = useState<string>(
+    () => settings.cloudSync.propertyCode || '4RENT-MAIN'
+  );
+  const [isApplyingMobileCode, setIsApplyingMobileCode] = useState(false);
   const [customMonthInput, setCustomMonthInput] = useState(() =>
-    normalizeMonthKey(new Date().toISOString())
+    normalizeMonthKey()
   );
   const [customRateInput, setCustomRateInput] = useState('');
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
   useEffect(() => {
     setForm(settings);
+    setMobileCodeDraft(settings.cloudSync.propertyCode || '4RENT-MAIN');
   }, [settings]);
+
+  const mobileLock = getMobileCodeMonthlyLock(form.cloudSync);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isVerifyingNotification, setIsVerifyingNotification] = useState(false);
   const [showDevCloudConfig, setShowDevCloudConfig] = useState(false);
@@ -170,6 +183,70 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   /**
+   * Mobile-only one-shot monthly Property Space Code application:
+   * validates network & cloud snapshot before refreshing the app and applying its data.
+   */
+  const handleApplyMobilePropertyCode = async () => {
+    if (!isMobile) return;
+    if (mobileLock.isLockedThisMonth) {
+      setStatusBanner(
+        `Monthly limit reached: code already applied this month. Next change opens ${mobileLock.nextEligibleMonthLabel}.`
+      );
+      return;
+    }
+
+    const nextCode = normalizePropertyCode(mobileCodeDraft);
+    if (nextCode.length < 4) {
+      setStatusBanner('Enter a valid Property Space Code from Desktop/Web.');
+      return;
+    }
+
+    const net = getNetworkStatus();
+    if (!net.isOnline) {
+      setStatusBanner('Connect to Wi-Fi or Mobile Data to apply a Property Space Code.');
+      return;
+    }
+
+    setIsApplyingMobileCode(true);
+    setStatusBanner(null);
+
+    try {
+      const candidateSync = {
+        ...form.cloudSync,
+        enabled: true,
+        provider: 'firebase' as const,
+        propertyCode: nextCode,
+      };
+      const pullRes = await pullSnapshotFromCloud(candidateSync);
+      if (!pullRes.ok || !pullRes.snapshot) {
+        setIsApplyingMobileCode(false);
+        setStatusBanner(
+          pullRes.message || `No cloud data found for "${nextCode}". Sync from Desktop/Web first.`
+        );
+        return;
+      }
+
+      const appliedAt = new Date().toISOString();
+      const updatedSettings: AppSettings = {
+        ...form,
+        cloudSync: {
+          ...candidateSync,
+          mobileCodeAppliedMonth: mobileLock.currentMonthKey,
+          mobileCodeAppliedAt: appliedAt,
+        },
+      };
+
+      setStoredMobileAppliedMonth(mobileLock.currentMonthKey);
+      setPendingCloudApply(nextCode, mobileLock.currentMonthKey);
+      saveSettings(updatedSettings);
+      window.location.reload();
+    } catch {
+      setIsApplyingMobileCode(false);
+      setStatusBanner('Could not verify Property Space Code. Your local data was kept safe.');
+    }
+  };
+
+  /**
    * Requires and verifies notification permission on the OS
    */
   const handleVerifyNotificationPermission = async () => {
@@ -238,6 +315,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     };
     setForm(next);
     onUpdateSettings(next);
+  };
+
+  const getPropertyCodeHint = (): string => {
+    if (!isMobile) {
+      return 'Generate a private code on Desktop/Web, sync your data, then enter it once per month on Mobile.';
+    }
+    if (mobileLock.isLockedThisMonth) {
+      return `Active code (${form.cloudSync.propertyCode || '4RENT-MAIN'}) applied for ${formatMonthKeyLabel(mobileLock.currentMonthKey, 'long')}. Code changes are limited to once per month on mobile.`;
+    }
+    return 'Paste the code from Desktop/Web and tap Apply Code & Refresh. Refreshes the app and loads all data inside that code (allowed once per month).';
   };
 
   return (
@@ -379,7 +466,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   const val =
                     form.monthlyElectricRates?.[monthKey] ??
                     form.defaultElectricRate;
-                  const currentKey = normalizeMonthKey(new Date().toISOString());
+                  const currentKey = normalizeMonthKey();
                   const isCurrent = monthKey === currentKey;
                   return (
                     <div
@@ -475,7 +562,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     ...(form.monthlyElectricRates || {}),
                     [key]: Math.round(rate * 100) / 100,
                   };
-                  const currentKey = normalizeMonthKey(new Date().toISOString());
+                  const currentKey = normalizeMonthKey();
                   const nextSettings: AppSettings = {
                     ...form,
                     defaultElectricRate:
@@ -668,106 +755,162 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex-1">
-              <label className="block text-xs font-bold text-white mb-1.5">
-                Property Space Code (Multi-User Partition):
-              </label>
+          {/* Public Sharing & Data Safety Warning */}
+          <div className="rounded-2xl bg-rose-500/10 border border-rose-500/35 px-4 py-3 flex items-start gap-2.5 text-xs text-rose-200">
+            <Shield className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <p className="leading-snug">
+              <strong className="text-white">Keep This Code Private:</strong>{' '}
+              Sharing your Property Space Code exposes all rooms, tenants, and receipts inside it publicly. Never share it with others.
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                <label className="block text-xs font-bold text-white">
+                  Property Space Code ({isMobile ? 'Mobile Import' : 'Desktop/Web Host'}):
+                </label>
+                {isMobile && mobileLock.isLockedThisMonth && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/35 text-[10px] font-bold text-amber-300">
+                    <Lock className="w-3 h-3 shrink-0" />
+                    <span>
+                      Locked until {mobileLock.nextEligibleMonthLabel}
+                    </span>
+                  </span>
+                )}
+              </div>
+
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
-                  value={form.cloudSync.propertyCode || '4RENT-MAIN'}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      cloudSync: {
-                        ...form.cloudSync,
-                        propertyCode: e.target.value.trim().toUpperCase(),
-                        enabled: true,
-                      },
-                    })
+                  value={
+                    isMobile
+                      ? mobileCodeDraft
+                      : form.cloudSync.propertyCode || '4RENT-MAIN'
                   }
-                  placeholder="e.g. 4R-7K2M"
-                  className="h-9 px-3 rounded-xl bg-[#151B26] border border-amber-500/40 text-amber-400 font-mono font-bold text-xs uppercase focus:outline-none focus:border-amber-400 min-w-[140px]"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const randomCode = '4R-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-                    setForm({
-                      ...form,
-                      cloudSync: {
-                        ...form.cloudSync,
-                        propertyCode: randomCode,
-                        enabled: true,
-                      },
-                    });
+                  disabled={isMobile && (mobileLock.isLockedThisMonth || isApplyingMobileCode)}
+                  onChange={(e) => {
+                    const nextVal = normalizePropertyCode(e.target.value);
+                    if (isMobile) {
+                      setMobileCodeDraft(nextVal);
+                    } else {
+                      setForm({
+                        ...form,
+                        cloudSync: {
+                          ...form.cloudSync,
+                          propertyCode: nextVal,
+                          enabled: true,
+                        },
+                      });
+                    }
                   }}
-                  className="px-2.5 py-2 rounded-xl bg-[#1A2334] hover:bg-[#233047] border border-[#2B3B59] text-[11px] font-bold text-amber-300 transition cursor-pointer"
-                  title="Generate a unique random property space code for this device"
-                >
-                  Generate New Code
-                </button>
+                  placeholder="e.g. 4R-7K2M9A"
+                  className="h-9 px-3 rounded-xl bg-[#151B26] border border-amber-500/40 text-amber-400 font-mono font-bold text-xs uppercase focus:outline-none focus:border-amber-400 min-w-[150px] disabled:opacity-60 disabled:cursor-not-allowed"
+                />
+
+                {!isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const randomCode = generatePropertyCode();
+                      setForm({
+                        ...form,
+                        cloudSync: {
+                          ...form.cloudSync,
+                          propertyCode: randomCode,
+                          enabled: true,
+                        },
+                      });
+                    }}
+                    className="px-2.5 py-2 rounded-xl bg-[#1A2334] hover:bg-[#233047] border border-[#2B3B59] text-[11px] font-bold text-amber-300 transition cursor-pointer"
+                    title="Generate a unique property space code on Desktop/Web"
+                  >
+                    Generate New Code
+                  </button>
+                )}
+
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={handleApplyMobilePropertyCode}
+                    disabled={mobileLock.isLockedThisMonth || isApplyingMobileCode}
+                    className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${isApplyingMobileCode ? 'animate-spin' : ''}`}
+                    />
+                    <span>
+                      {isApplyingMobileCode
+                        ? 'Applying & Refreshing...'
+                        : 'Apply Code & Refresh'}
+                    </span>
+                  </button>
+                )}
               </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">
-                Each code creates an isolated property partition in Firebase so multiple landlords never share or overwrite data. Share this code to pair your phone and PC.
+
+              <p className="text-[11px] text-slate-400 mt-1.5 leading-snug">
+                {getPropertyCodeHint()}
               </p>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(
-                    form.cloudSync.propertyCode || '4RENT-MAIN'
-                  );
-                  setCopiedSyncCode(true);
-                  setTimeout(() => setCopiedSyncCode(false), 2500);
-                }}
-                className="px-3 py-2 rounded-xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-amber-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                {copiedSyncCode ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-emerald-400">Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy Code</span>
-                  </>
-                )}
-              </button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {!isMobile && (
+                <>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(
+                        form.cloudSync.propertyCode || '4RENT-MAIN'
+                      );
+                      setCopiedSyncCode(true);
+                      setTimeout(() => setCopiedSyncCode(false), 2500);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-amber-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {copiedSyncCode ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Code</span>
+                      </>
+                    )}
+                  </button>
 
-              <button
-                type="button"
-                onClick={async () => {
-                  const prop = encodeURIComponent(
-                    form.cloudSync.propertyCode || '4RENT-MAIN'
-                  );
-                  const proj = form.cloudSync.firebaseProjectId
-                    ? `&proj=${encodeURIComponent(form.cloudSync.firebaseProjectId)}`
-                    : '';
-                  const link = `${window.location.origin}${window.location.pathname}?prop=${prop}${proj}`;
-                  await navigator.clipboard.writeText(link);
-                  setCopiedMobileLink(true);
-                  setTimeout(() => setCopiedMobileLink(false), 2500);
-                }}
-                className="px-3 py-2 rounded-xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-emerald-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                title="Send this 1-click link to your phone or desktop to sync data instantly"
-              >
-                {copiedMobileLink ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Link Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Smartphone className="w-3.5 h-3.5" />
-                    <span>Pair Mobile</span>
-                  </>
-                )}
-              </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const prop = encodeURIComponent(
+                        form.cloudSync.propertyCode || '4RENT-MAIN'
+                      );
+                      const proj = form.cloudSync.firebaseProjectId
+                        ? `&proj=${encodeURIComponent(form.cloudSync.firebaseProjectId)}`
+                        : '';
+                      const link = `${window.location.origin}${window.location.pathname}?prop=${prop}${proj}`;
+                      await navigator.clipboard.writeText(link);
+                      setCopiedMobileLink(true);
+                      setTimeout(() => setCopiedMobileLink(false), 2500);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-[#182235] hover:bg-[#212E46] border border-[#2B3B59] text-emerald-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                    title="Send this 1-click link to your phone to apply the code (once/month on mobile)"
+                  >
+                    {copiedMobileLink ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Link Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Smartphone className="w-3.5 h-3.5" />
+                        <span>Pair Mobile</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
 
               <button
                 type="button"
@@ -1004,31 +1147,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  To sync with your {isDesktop ? 'Android phone' : 'Windows PC'}, use this Property Code to isolate and access all your rooms and receipts.
+                  {isMobile
+                    ? 'Mobile can only apply a code generated from Desktop/Web (once per month). Never share your code — sharing it exposes your data publicly.'
+                    : 'Generate this code on Desktop/Web and apply it on Mobile (once/month). Never share it — anyone with this code can access your data.'}
                 </p>
-                <div className="pt-2 border-t border-[#1C2536] flex items-center justify-between">
-                  <span className="text-xs text-slate-400">Space Code:</span>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(settings.cloudSync?.propertyCode || '4RENT-MAIN');
-                      setCopiedExeDirect(true);
-                      setTimeout(() => setCopiedExeDirect(false), 2400);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-[#162031] hover:bg-[#1E2B42] border border-[#2A3B57] text-amber-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                  >
-                    {copiedExeDirect ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400">Code Copied</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy Code</span>
-                      </>
-                    )}
-                  </button>
+                <div className="pt-2 border-t border-[#1C2536] flex items-center justify-between gap-2">
+                  <span className="text-xs text-slate-400">
+                    {isMobile ? 'Monthly Limit:' : 'Space Code:'}
+                  </span>
+                  {isMobile ? (
+                    <span className="text-xs font-bold text-amber-300">
+                      {mobileLock.isLockedThisMonth
+                        ? `Locked until ${mobileLock.nextEligibleMonthLabel}`
+                        : '1 change available this month'}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(settings.cloudSync?.propertyCode || '4RENT-MAIN');
+                        setCopiedExeDirect(true);
+                        setTimeout(() => setCopiedExeDirect(false), 2400);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#162031] hover:bg-[#1E2B42] border border-[#2A3B57] text-amber-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      {copiedExeDirect ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400">Code Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Code</span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

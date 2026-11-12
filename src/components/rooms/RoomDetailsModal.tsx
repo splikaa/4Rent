@@ -20,6 +20,10 @@ import {
   MessageCircle,
   ChevronRight,
   Sparkles,
+  Archive,
+  Trash2,
+  UserMinus,
+  Lock,
 } from 'lucide-react';
 import {
   Room,
@@ -49,6 +53,9 @@ interface RoomDetailsModalProps {
   onOpenScannerForRoom: (room: Room) => void;
   onOpenReceipt: (bill: BillRecord) => void;
   onOpenAdvanceModal: (room: Room) => void;
+  onRequestMoveOutTenant?: (room: Room) => void;
+  onRequestArchiveRoom?: (roomId: string) => void;
+  onRequestDeleteRoom?: (room: Room) => void;
 }
 
 export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
@@ -63,6 +70,9 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   onOpenScannerForRoom,
   onOpenReceipt,
   onOpenAdvanceModal,
+  onRequestMoveOutTenant,
+  onRequestArchiveRoom,
+  onRequestDeleteRoom,
 }) => {
   if (!room) return null;
 
@@ -388,6 +398,42 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 </button>
               )}
             </div>
+
+            {(onRequestMoveOutTenant || onRequestArchiveRoom || onRequestDeleteRoom) && (
+              <div className="mt-3 pt-3 border-t border-[#1C263A] flex flex-wrap items-center gap-2">
+                {isOccupied && onRequestMoveOutTenant && (
+                  <button
+                    type="button"
+                    onClick={() => onRequestMoveOutTenant(room)}
+                    className="flex-1 min-w-[140px] py-2.5 px-3.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <UserMinus className="w-3.5 h-3.5 shrink-0" />
+                    <span>Tenant Vacated</span>
+                  </button>
+                )}
+                {onRequestArchiveRoom && !room.isArchived && (
+                  <button
+                    type="button"
+                    onClick={() => onRequestArchiveRoom(room.id)}
+                    className="flex-1 min-w-[125px] py-2.5 px-3.5 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/35 text-blue-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Archive className="w-3.5 h-3.5 shrink-0" />
+                    <span>Archive Room</span>
+                  </button>
+                )}
+                {onRequestDeleteRoom && (
+                  <button
+                    type="button"
+                    onClick={() => onRequestDeleteRoom(room)}
+                    className="flex-1 min-w-[135px] py-2.5 px-3.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/35 text-red-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                    <Lock className="w-3 h-3 shrink-0" />
+                    <span>Remove Room</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Sub-Meter Usage History & Reading Logs (Feature 19) */}

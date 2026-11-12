@@ -3,12 +3,20 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   CalendarClock,
+  Fingerprint,
   History,
+  Lock,
   Wallet,
   X,
 } from 'lucide-react';
 import { Room } from '../../types/rental';
-import { formatPeso } from '../../utils/billingCalculator';
+import {
+  formatMonthKeyLabel,
+  formatPeso,
+  getAdjacentMonthKey,
+  isMobileDevice,
+  normalizeMonthKey,
+} from '../../utils/billingCalculator';
 
 interface AdvanceBalanceModalProps {
   room: Room | null;
@@ -26,17 +34,37 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
 }) => {
   const [actionType, setActionType] = useState<'add' | 'withdraw'>('add');
   const [amount, setAmount] = useState('');
+  const [targetCycleNote, setTargetCycleNote] = useState<string>('next_month');
+  const [refundReason, setRefundReason] = useState<string>(
+    'Tenant Moving Out — Advance Refund'
+  );
   const [error, setError] = useState<string | null>(null);
 
   if (!room) return null;
 
+  const isMobile = isMobileDevice();
   const currentAdvance = room.advanceRent || 0;
   const currentUnpaid = room.unpaidBalance || 0;
+  const baseKey = normalizeMonthKey(new Date());
+  const nextMonthLabel = formatMonthKeyLabel(getAdjacentMonthKey(baseKey, 1), 'long');
+  const secondNextMonthLabel = formatMonthKeyLabel(
+    getAdjacentMonthKey(baseKey, 2),
+    'long'
+  );
+  const enteredAmount = Math.max(0, Math.round((parseFloat(amount) || 0) * 100) / 100);
+  const previewAppliedUnpaid =
+    actionType === 'add'
+      ? Math.round(Math.min(enteredAmount, currentUnpaid) * 100) / 100
+      : 0;
+  const previewAddedAdvance =
+    actionType === 'add'
+      ? Math.round(Math.max(0, enteredAmount - previewAppliedUnpaid) * 100) / 100
+      : 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    const val = Math.round((parseFloat(amount) || 0) * 100) / 100;
+    const val = enteredAmount;
     if (val <= 0) {
       setError('Please enter a valid amount greater than ₱0.00.');
       return;
@@ -45,7 +73,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
     if (actionType === 'withdraw') {
       if (val > currentAdvance) {
         setError(
-          `Cannot withdraw more than available Advance Balance (${formatPeso(
+          `Cannot refund/withdraw more than available Advance Balance (${formatPeso(
             currentAdvance
           )}).`
         );
@@ -54,20 +82,22 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
       onWithdrawAdvance(
         room.id,
         val,
-        'Advance Payment Balance Withdrawal'
+        refundReason.trim() || 'Tenant Moving Out — Advance Refund'
       );
       setAmount('');
-      onClose();
     } else {
-      onAddAdvanceDeposit(
-        room.id,
-        val,
-        currentUnpaid > 0
-          ? 'Added Advance Payment (Auto-applied to active bill & future billing)'
-          : 'Added Advance Payment (Auto-deducts on next billing cycle)'
-      );
+      const targetLabel =
+        targetCycleNote === 'following_month'
+          ? secondNextMonthLabel
+          : targetCycleNote === 'prepaid_credit'
+          ? 'Next / Succeeding Months'
+          : nextMonthLabel;
+      const depositNote =
+        previewAppliedUnpaid > 0
+          ? `Settled ${formatPeso(previewAppliedUnpaid)} unpaid bill; +${formatPeso(previewAddedAdvance)} Advance for ${targetLabel}`
+          : `Advance Payment for ${targetLabel} (Auto-deducts on billing day)`;
+      onAddAdvanceDeposit(room.id, val, depositNote);
       setAmount('');
-      onClose();
     }
   };
 
@@ -118,22 +148,28 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
             </div>
           </div>
 
-          {/* Automatic Bill Deduction Info Banner */}
+          {/* Landlord Quick Guide Banner */}
           <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/25 p-3.5 flex items-start gap-2.5 text-xs text-emerald-200">
             <CalendarClock className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            <div>
+            <div className="space-y-1">
               <strong className="text-white block">
-                Automatic Billing Deduction Active
+                How Advance Payment &amp; Refunds Work
               </strong>
-              <span className="text-slate-300 text-[11px] leading-relaxed">
-                Any Advance Balance added here will automatically deduct from{' '}
-                {room.name}&apos;s bill when the monthly billing cycle arrives
-                {currentUnpaid > 0
-                  ? ` (and immediately settles up to ${formatPeso(
-                      currentUnpaid
-                    )} of the current unpaid balance).`
-                  : '.'}
-              </span>
+              <ul className="text-slate-300 text-[11px] leading-relaxed space-y-0.5">
+                <li>
+                  • <strong className="text-white">Step 1:</strong> Credits any remaining unpaid rent + kWh balance first ({formatPeso(currentUnpaid)} due now).
+                </li>
+                <li>
+                  • <strong className="text-white">Step 2:</strong> Excess goes to Advance Balance and auto-deducts for <strong className="text-emerald-300">{nextMonthLabel}</strong> / succeeding months.
+                </li>
+                <li>
+                  • <strong className="text-white">Step 3:</strong> Requires{' '}
+                  <strong className="text-amber-300">
+                    {isMobile ? 'Fingerprint Auth' : '4-Digit PIN Auth'}
+                  </strong>
+                  . If tenant moves out, use <strong className="text-amber-300">Withdraw / Refund</strong> to return unused credit.
+                </li>
+              </ul>
             </div>
           </div>
 
@@ -153,7 +189,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
               }`}
             >
               <ArrowDownLeft className="w-3.5 h-3.5" />
-              <span>Add Advance Payment</span>
+              <span>Advance for Next Month</span>
             </button>
 
             <button
@@ -170,7 +206,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
               }`}
             >
               <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>Withdraw / Refund</span>
+              <span>Refund / Withdraw</span>
             </button>
           </div>
 
@@ -181,11 +217,87 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
+            {actionType === 'add' ? (
+              <div className="space-y-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Apply Advance Balance Toward
+                  </label>
+                  <select
+                    value={targetCycleNote}
+                    onChange={(e) => setTargetCycleNote(e.target.value)}
+                    className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3 text-xs font-bold text-emerald-300 focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="next_month">
+                      Next Month ({nextMonthLabel})
+                    </option>
+                    <option value="following_month">
+                      Next Succeeding Month ({secondNextMonthLabel})
+                    </option>
+                    <option value="prepaid_credit">
+                      Advance Credit (Auto-apply Across Upcoming Months)
+                    </option>
+                  </select>
+                </div>
+
+                {room.monthlyRent > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAmount(String(room.monthlyRent))}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#0E131C] hover:bg-[#192334] border border-emerald-500/30 text-[11px] font-bold text-emerald-300 cursor-pointer"
+                    >
+                      +1 Month Rent ({formatPeso(room.monthlyRent)})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAmount(String(room.monthlyRent * 2))}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#0E131C] hover:bg-[#192334] border border-[#252F42] text-[11px] font-bold text-slate-300 cursor-pointer"
+                    >
+                      +2 Months ({formatPeso(room.monthlyRent * 2)})
+                    </button>
+                    {currentUnpaid > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAmount(String(currentUnpaid + room.monthlyRent))
+                        }
+                        className="px-2.5 py-1.5 rounded-lg bg-[#0E131C] hover:bg-[#192334] border border-amber-500/35 text-[11px] font-bold text-amber-300 cursor-pointer"
+                      >
+                        Pay Due + Next Month ({formatPeso(currentUnpaid + room.monthlyRent)})
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Refund / Withdrawal Reason *
+                </label>
+                <select
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  className="w-full h-10 rounded-xl bg-[#0E131C] border border-[#252F42] px-3 text-xs font-bold text-amber-300 focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="Tenant Moving Out — Advance Refund">
+                    Tenant Moving Out — Advance Refund
+                  </option>
+                  <option value="Tenant Requested Overpayment Refund">
+                    Tenant Requested Overpayment Refund
+                  </option>
+                  <option value="Lease Completed — Final Advance Return">
+                    Lease Completed — Final Advance Return
+                  </option>
+                </select>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                 {actionType === 'add'
                   ? 'Advance Payment Amount to Credit (₱) *'
-                  : 'Withdrawal Amount to Release to Tenant (₱) *'}
+                  : 'Refund / Withdrawal Amount to Release to Tenant (₱) *'}
               </label>
               <input
                 type="number"
@@ -198,13 +310,45 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
               />
             </div>
 
+            {enteredAmount > 0 && actionType === 'add' && (
+              <div className="rounded-xl bg-[#0E131C] border border-emerald-500/25 p-3 text-[11px] space-y-1">
+                {previewAppliedUnpaid > 0 && (
+                  <div className="flex justify-between text-slate-300">
+                    <span>Applied to Current Unpaid Balance:</span>
+                    <strong className="text-amber-300 font-mono-num">
+                      {formatPeso(previewAppliedUnpaid)}
+                    </strong>
+                  </div>
+                )}
+                <div className="flex justify-between text-slate-300">
+                  <span>Added to Advance Balance (Next Month):</span>
+                  <strong className="text-emerald-400 font-mono-num">
+                    +{formatPeso(previewAddedAdvance)}
+                  </strong>
+                </div>
+                <div className="flex justify-between text-white pt-1 border-t border-[#1E2738]">
+                  <span className="font-bold">New Advance Balance Total:</span>
+                  <strong className="text-emerald-400 font-mono-num">
+                    {formatPeso(currentAdvance + previewAddedAdvance)}
+                  </strong>
+                </div>
+              </div>
+            )}
+
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm transition cursor-pointer"
+              className="w-full py-3 rounded-xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
             >
-              {actionType === 'add'
-                ? 'Save Advance Payment (Auto-Deducts on Bill)'
-                : 'Confirm Tenant Advance Withdrawal'}
+              {isMobile ? (
+                <Fingerprint className="w-4 h-4" />
+              ) : (
+                <Lock className="w-4 h-4" />
+              )}
+              <span>
+                {actionType === 'add'
+                  ? `Verify (${isMobile ? 'Fingerprint / PIN' : '4-Digit PIN'}) & Save Advance`
+                  : `Verify (${isMobile ? 'Fingerprint / PIN' : '4-Digit PIN'}) & Confirm Refund`}
+              </span>
             </button>
           </form>
 

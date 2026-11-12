@@ -68,9 +68,11 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
     new Date().toISOString().slice(0, 10)
   );
   const [dueDayOfMonth, setDueDayOfMonth] = useState('5'); // Strictly 1 to 10
+  const [confirmVacateInForm, setConfirmVacateInForm] = useState(false);
 
   useEffect(() => {
     setFormError(null);
+    setConfirmVacateInForm(false);
     if (initialRoom) {
       setName(initialRoom.name);
       setMonthlyRent(String(initialRoom.monthlyRent));
@@ -272,6 +274,17 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
           : undefined,
     };
 
+    const isVacatingNow =
+      initialRoom?.status === 'occupied' &&
+      Boolean(initialRoom?.tenant) &&
+      status === 'vacant';
+    if (isVacatingNow && !confirmVacateInForm) {
+      setFormError(
+        `Please check the confirmation box below to vacate ${initialRoom?.tenant?.fullName} and move them to Previous Tenant History.`
+      );
+      return;
+    }
+
     onSave(roomPayload, initialRoom?.id, vacatedReason);
     onClose();
   };
@@ -440,6 +453,20 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                   </option>
                 </select>
               </div>
+              <label className="flex items-start gap-2.5 pt-1 text-xs text-amber-200 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={confirmVacateInForm}
+                  onChange={(e) => setConfirmVacateInForm(e.target.checked)}
+                  className="mt-0.5 rounded border-amber-500/50 bg-[#0D121B] text-amber-500 focus:ring-amber-500"
+                />
+                <span>
+                  I confirm that{' '}
+                  <strong>{initialRoom?.tenant?.fullName}</strong> has vacated{' '}
+                  <strong>{initialRoom?.name}</strong> and should be moved to
+                  Previous Tenants History.
+                </span>
+              </label>
             </div>
           )}
 

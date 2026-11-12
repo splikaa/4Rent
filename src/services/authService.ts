@@ -3,76 +3,89 @@
  * Fails closed on unavailable, cancelled, or error states so callers fall back to PIN verification.
  */
 
+interface AndroidBiometricWindow {
+  AndroidBiometrics?: {
+    isSupported?: () => boolean;
+    authenticate: (title: string, subtitle: string) => void;
+  };
+  __onAndroidBiometricResult?: (ok: boolean, msg: string) => void;
+}
+
+function runAndroidBiometricPrompt(
+  title: string,
+  subtitle: string,
+  messages: { timeout: string; cancel: string; error: string },
+  vibratePattern: number | number[]
+): Promise<{ ok: boolean; message: string } | null> {
+  const win = window as unknown as AndroidBiometricWindow;
+  const androidBio = win.AndroidBiometrics;
+  if (
+    !androidBio ||
+    typeof androidBio.authenticate !== 'function' ||
+    (typeof androidBio.isSupported === 'function' && !androidBio.isSupported())
+  ) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: { ok: boolean; message: string }) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      delete win.__onAndroidBiometricResult;
+      resolve(result);
+    };
+
+    timer = setTimeout(() => {
+      finish({ ok: false, message: messages.timeout });
+    }, 20000);
+
+    win.__onAndroidBiometricResult = (ok: boolean, msg: string) => {
+      if (ok) {
+        try {
+          navigator.vibrate?.(vibratePattern);
+        } catch {
+          // ignore
+        }
+        finish({ ok: true, message: 'Verified.' });
+      } else {
+        finish({ ok: false, message: msg || messages.cancel });
+      }
+    };
+
+    try {
+      androidBio.authenticate(title, subtitle);
+    } catch {
+      finish({ ok: false, message: messages.error });
+    }
+  });
+}
+
 export async function registerDeviceBiometrics(): Promise<{
   ok: boolean;
   credentialId?: string;
   message: string;
 }> {
-  const win = window as unknown as {
-    AndroidBiometrics?: {
-      isSupported?: () => boolean;
-      authenticate: (title: string, subtitle: string) => void;
-    };
-    __onAndroidBiometricResult?: (ok: boolean, msg: string) => void;
-  };
-
-  const androidBio = win.AndroidBiometrics;
-  if (
-    androidBio &&
-    typeof androidBio.authenticate === 'function' &&
-    (typeof androidBio.isSupported !== 'function' || androidBio.isSupported())
-  ) {
-    return new Promise((resolve) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          resolve({
-            ok: false,
-            message: 'Biometric enrollment timed out. Please try again or create a 4-Digit PIN.',
-          });
+  const androidRes = await runAndroidBiometricPrompt(
+    '4Rent Biometric Security',
+    'Touch fingerprint sensor to register Landlord access',
+    {
+      timeout: 'Biometric enrollment timed out. Please try again or create a 4-Digit PIN.',
+      cancel: 'Fingerprint enrollment cancelled.',
+      error: 'Could not start biometric enrollment. Please use a 4-Digit PIN.',
+    },
+    [35, 45, 60]
+  );
+  if (androidRes) {
+    return androidRes.ok
+      ? {
+          ok: true,
+          credentialId: `android-bio-${Date.now()}`,
+          message: 'Device Fingerprint registered!',
         }
-      }, 20000);
-
-      win.__onAndroidBiometricResult = (ok: boolean, msg: string) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (ok) {
-          try {
-            navigator.vibrate?.([35, 45, 60]);
-          } catch {
-            // ignore
-          }
-          resolve({
-            ok: true,
-            credentialId: `android-bio-${Date.now()}`,
-            message: 'Device Fingerprint registered!',
-          });
-        } else {
-          resolve({
-            ok: false,
-            message: msg || 'Fingerprint enrollment cancelled.',
-          });
-        }
-      };
-
-      try {
-        androidBio.authenticate(
-          '4Rent Biometric Security',
-          'Touch fingerprint sensor to register Landlord access'
-        );
-      } catch {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve({
-            ok: false,
-            message: 'Could not start biometric enrollment. Please use a 4-Digit PIN.',
-          });
-        }
-      }
-    });
+      : { ok: false, message: androidRes.message };
   }
 
   try {
@@ -139,64 +152,20 @@ export async function registerDeviceBiometrics(): Promise<{
 export async function verifyDeviceBiometrics(
   credentialIdBase64?: string
 ): Promise<{ ok: boolean; message: string }> {
-  const win = window as unknown as {
-    AndroidBiometrics?: {
-      isSupported?: () => boolean;
-      authenticate: (title: string, subtitle: string) => void;
-    };
-    __onAndroidBiometricResult?: (ok: boolean, msg: string) => void;
-  };
-
-  const androidBio = win.AndroidBiometrics;
-  if (
-    androidBio &&
-    typeof androidBio.authenticate === 'function' &&
-    (typeof androidBio.isSupported !== 'function' || androidBio.isSupported())
-  ) {
-    return new Promise((resolve) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          resolve({
-            ok: false,
-            message: 'Fingerprint scan timed out. Tap to try again or enter your 4-digit PIN.',
-          });
-        }
-      }, 20000);
-
-      win.__onAndroidBiometricResult = (ok: boolean, msg: string) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (ok) {
-          try {
-            navigator.vibrate?.(45);
-          } catch {
-            // ignore
-          }
-          resolve({ ok: true, message: 'Fingerprint verified.' });
-        } else {
-          resolve({
-            ok: false,
-            message: msg || 'Fingerprint not recognized. Try again or use PIN.',
-          });
-        }
-      };
-
-      try {
-        androidBio.authenticate('Unlock 4Rent', 'Scan fingerprint to unlock');
-      } catch {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve({
-            ok: false,
-            message: 'Biometric prompt failed. Please enter your 4-digit PIN.',
-          });
-        }
-      }
-    });
+  const androidRes = await runAndroidBiometricPrompt(
+    'Unlock 4Rent',
+    'Scan fingerprint to unlock',
+    {
+      timeout: 'Fingerprint scan timed out. Tap to try again or enter your 4-digit PIN.',
+      cancel: 'Fingerprint not recognized. Try again or use PIN.',
+      error: 'Biometric prompt failed. Please enter your 4-digit PIN.',
+    },
+    45
+  );
+  if (androidRes) {
+    return androidRes.ok
+      ? { ok: true, message: 'Fingerprint verified.' }
+      : androidRes;
   }
 
   if (

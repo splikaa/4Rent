@@ -304,17 +304,35 @@ export function roundCurrency(value: number): number {
 }
 
 /**
- * Normalizes a billing period ("Nov 2026", "November 2026", "2026-11", or ISO timestamp)
- * into a canonical "YYYY-MM" key.
+ * Normalizes a billing period ("Nov 2026", "November 2026", "2026-11", ISO timestamp, or Date)
+ * into a canonical local "YYYY-MM" key.
  */
-export function normalizeMonthKey(periodOrDate?: string): string {
+export function normalizeMonthKey(periodOrDate?: string | Date): string {
+  if (periodOrDate instanceof Date) {
+    const safe = Number.isNaN(periodOrDate.getTime()) ? new Date() : periodOrDate;
+    return `${safe.getFullYear()}-${String(safe.getMonth() + 1).padStart(2, '0')}`;
+  }
+
   const trimmed = (periodOrDate || '').trim();
-  const ymMatch = trimmed.match(/^(\d{4})-(\d{2})/);
-  if (ymMatch) {
-    return `${ymMatch[1]}-${ymMatch[2]}`;
+  const ymExactMatch = trimmed.match(/^(\d{4})-(\d{2})$/);
+  if (ymExactMatch) {
+    return `${ymExactMatch[1]}-${ymExactMatch[2]}`;
   }
 
   if (trimmed) {
+    // Parse full ISO timestamps first in local time so UTC midnight offsets don't shift months
+    if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
+      const parsedIso = new Date(trimmed);
+      if (!Number.isNaN(parsedIso.getTime())) {
+        return `${parsedIso.getFullYear()}-${String(parsedIso.getMonth() + 1).padStart(2, '0')}`;
+      }
+    }
+
+    const ymPrefixMatch = trimmed.match(/^(\d{4})-(\d{2})/);
+    if (ymPrefixMatch) {
+      return `${ymPrefixMatch[1]}-${ymPrefixMatch[2]}`;
+    }
+
     const parsedFromLabel = new Date(`1 ${trimmed}`);
     if (!Number.isNaN(parsedFromLabel.getTime())) {
       const y = parsedFromLabel.getFullYear();
@@ -365,12 +383,12 @@ export function getCurrentCalendarPeriodLabel(date = new Date()): string {
  * merged with any custom monthly rate keys configured by the landlord.
  */
 export function getScheduledMonthKeys(
-  baseDate = new Date(),
+  baseDateOrPeriod: Date | string = new Date(),
   upcomingCount = 3,
   configuredRates?: Record<string, number>
 ): string[] {
   const set = new Set<string>();
-  const baseKey = normalizeMonthKey(baseDate.toISOString());
+  const baseKey = normalizeMonthKey(baseDateOrPeriod);
   for (let i = 0; i < Math.max(2, upcomingCount); i++) {
     set.add(getAdjacentMonthKey(baseKey, i));
   }
@@ -1159,4 +1177,66 @@ export function formatMessengerBillSummary(
   lines.push(`• Status: ${statusLabel}`);
   lines.push(`Payment Window: Every 1st–10th Monthly • 4Rent v1.0.0`);
   return lines.join('\n');
+}
+
+export interface CalendarMeterScanEligibility {
+  canScan: boolean;
+  reason: 'allowed' | 'paid' | 'future_month' | 'outside_pay_window';
+  buttonLabel: string;
+  helperText: string;
+}
+
+/**
+ * Determines whether a landlord can click Scan Meter on the Due Calendar.
+ * Scan Meter is locked when already paid for the month, when browsing future months,
+ * or outside Pay Time Days (Day 1–10); Room Details remains viewable anytime.
+ */
+export function getCalendarMeterScanEligibility(
+  calendarYear: number,
+  calendarMonthZeroIndexed: number,
+  isPaidForMonth: boolean,
+  today: Date = new Date()
+): CalendarMeterScanEligibility {
+  if (isPaidForMonth) {
+    return {
+      canScan: false,
+      reason: 'paid',
+      buttonLabel: 'Paid (Scan Locked)',
+      helperText: 'Already settled for this month. Open Room Details or Receipt.',
+    };
+  }
+
+  const todayYear = today.getFullYear();
+  const todayMonth = today.getMonth();
+  const isFutureMonth =
+    calendarYear > todayYear ||
+    (calendarYear === todayYear && calendarMonthZeroIndexed > todayMonth);
+
+  if (isFutureMonth) {
+    return {
+      canScan: false,
+      reason: 'future_month',
+      buttonLabel: 'Pay Days Only (1–10)',
+      helperText:
+        'Future billing month. Scan Meter unlocks during Pay Days (Day 1–10) of that month.',
+    };
+  }
+
+  const dayOfMonth = today.getDate();
+  if (dayOfMonth < 1 || dayOfMonth > 10) {
+    return {
+      canScan: false,
+      reason: 'outside_pay_window',
+      buttonLabel: 'Pay Days Only (1–10)',
+      helperText:
+        'Outside Pay Time Days (Day 1–10). Open Room Details until the next pay window.',
+    };
+  }
+
+  return {
+    canScan: true,
+    reason: 'allowed',
+    buttonLabel: 'Scan Meter',
+    helperText: 'Active Pay Window (Day 1–10). Ready to scan sub-meter.',
+  };
 }

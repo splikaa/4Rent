@@ -414,14 +414,15 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => onOpenEditRoom(room)}
-                        className="p-2.5 rounded-2xl bg-[#1A2334] hover:bg-[#243046] text-slate-200 transition cursor-pointer btn-fluid"
+                        className="px-3 py-2 rounded-2xl bg-[#1A2334] hover:bg-[#243046] border border-[#2A3750] text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer btn-fluid"
                         title="Edit Room & Tenant"
                       >
-                        <Edit3 className="w-4 h-4" />
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
                       </button>
                       {isOccupied && (
                         <button
@@ -432,28 +433,31 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                               'Stopped Paying Rent / Vacated (Moved to History)'
                             )
                           }
-                          className="p-2.5 rounded-2xl bg-[#1A2334] hover:bg-amber-500/20 text-amber-400 transition cursor-pointer btn-fluid"
-                          title="Tenant Vacated / Stopped Paying Rent -> Move to Previous Tenant History"
+                          className="px-3 py-2 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                          title="Tenant Vacated / Move Out -> Move to Previous Tenant History (Requires Confirmation)"
                         >
-                          <UserMinus className="w-4 h-4" />
+                          <UserMinus className="w-3.5 h-3.5" />
+                          <span>Tenant Vacated</span>
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => onArchiveRoom(room.id)}
-                        className="p-2.5 rounded-2xl bg-[#1A2334] hover:bg-blue-500/20 text-blue-400 transition cursor-pointer btn-fluid"
-                        title="Archive Room"
+                        className="px-3 py-2 rounded-2xl bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/35 text-blue-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                        title="Archive Room (Requires Confirmation)"
                       >
-                        <Archive className="w-4 h-4" />
+                        <Archive className="w-3.5 h-3.5" />
+                        <span>Archive</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => onRequestDeleteRoomWithPin(room)}
-                        className="p-2.5 rounded-2xl bg-[#1A2334] hover:bg-red-500/20 text-red-400 transition cursor-pointer flex items-center gap-0.5 btn-fluid"
-                        title="Remove Room (Requires 4-Digit Security PIN)"
+                        className="px-3 py-2 rounded-2xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/35 text-red-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                        title="Remove Room Permanently (Requires Confirmation & Security Auth)"
                       >
-                        <Trash2 className="w-4 h-4" />
-                        <Lock className="w-2.5 h-2.5" />
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <Lock className="w-3 h-3" />
+                        <span>Remove Room</span>
                       </button>
                     </div>
                   </div>

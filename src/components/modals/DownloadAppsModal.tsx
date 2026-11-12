@@ -360,7 +360,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                       Current Property Code: <span className="text-amber-400 font-mono">{propertyCode}</span>
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      Syncs data between your desktop launcher and mobile app automatically.
+                      Apply on Mobile (once/month) to refresh &amp; load all data. Never share this code publicly.
                     </div>
                   </div>
                 </div>

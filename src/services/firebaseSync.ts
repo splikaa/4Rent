@@ -1,4 +1,56 @@
 import { AppDatabaseSnapshot, CloudSyncConfig } from '../types/rental';
+import {
+  formatMonthKeyLabel,
+  getAdjacentMonthKey,
+  normalizeMonthKey,
+} from '../utils/billingCalculator';
+import { getStoredMobileAppliedMonth } from './storageService';
+
+export function normalizePropertyCode(raw: string): string {
+  return (raw || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+}
+
+export function generatePropertyCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = new Uint8Array(6);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  let suffix = '';
+  for (const b of bytes) {
+    suffix += alphabet[b % alphabet.length];
+  }
+  return `4R-${suffix}`;
+}
+
+export interface MobileCodeMonthlyLockState {
+  isLockedThisMonth: boolean;
+  appliedMonthKey: string;
+  currentMonthKey: string;
+  nextEligibleMonthLabel: string;
+}
+
+export function getMobileCodeMonthlyLock(
+  cloudSync?: Pick<CloudSyncConfig, 'mobileCodeAppliedMonth'>
+): MobileCodeMonthlyLockState {
+  const currentMonthKey = normalizeMonthKey();
+  const appliedMonthKey =
+    cloudSync?.mobileCodeAppliedMonth || getStoredMobileAppliedMonth() || '';
+  const isLockedThisMonth = Boolean(
+    appliedMonthKey && appliedMonthKey === currentMonthKey
+  );
+  const nextMonthKey = getAdjacentMonthKey(currentMonthKey, 1);
+  return {
+    isLockedThisMonth,
+    appliedMonthKey,
+    currentMonthKey,
+    nextEligibleMonthLabel: formatMonthKeyLabel(nextMonthKey, 'long'),
+  };
+}
 
 /**
  * 4Rent Production Firebase Configuration for Web & Mobile
@@ -55,6 +107,16 @@ export function isCloudConfigured(config?: CloudSyncConfig): boolean {
   );
 }
 
+function appendFirebaseAuthParam(url: string, config: CloudSyncConfig): string {
+  const token = (config.firebaseApiKey || '').trim();
+  // Never pass a Firebase Web API key (AIza...) as ?auth=; RTDB ?auth= expects an ID token or DB secret.
+  if (!token || /^AIza[0-9A-Za-z_-]{20,}$/.test(token)) {
+    return url;
+  }
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}auth=${encodeURIComponent(token)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Firebase Realtime Database REST & SSE Sync Engine
 // ---------------------------------------------------------------------------
@@ -83,16 +145,14 @@ export async function pushSnapshotToFirebase(
     exportedAt: syncedAt,
   };
 
-  let url = `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`;
-  const apiKey = config.firebaseApiKey || DEFAULT_FIREBASE_CONFIG.apiKey;
-  if (apiKey && apiKey.trim()) {
-    url += `?auth=${encodeURIComponent(apiKey.trim())}`;
-  }
+  const url = appendFirebaseAuthParam(
+    `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`,
+    config
+  );
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-
     const response = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -103,7 +163,6 @@ export async function pushSnapshotToFirebase(
       }),
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
@@ -113,12 +172,14 @@ export async function pushSnapshotToFirebase(
       };
     }
 
-    // Simultaneously register this property in system_registry so property owners/admins can see all active users in Firebase Console
+    // Best-effort registration in system_registry
     try {
-      let regUrl = `${baseUrl}/system_registry/${encodeURIComponent(propCode)}.json`;
-      if (apiKey && apiKey.trim()) {
-        regUrl += `?auth=${encodeURIComponent(apiKey.trim())}`;
-      }
+      const regUrl = appendFirebaseAuthParam(
+        `${baseUrl}/system_registry/${encodeURIComponent(propCode)}.json`,
+        config
+      );
+      const regController = new AbortController();
+      const regTimeout = setTimeout(() => regController.abort(), 5000);
       fetch(regUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -132,8 +193,13 @@ export async function pushSnapshotToFirebase(
           lastActiveAt: syncedAt,
           clientVersion: '1.0.0',
         }),
-      }).catch(() => {});
-    } catch {}
+        signal: regController.signal,
+      })
+        .catch(() => undefined)
+        .finally(() => clearTimeout(regTimeout));
+    } catch {
+      // ignore non-critical registry write error
+    }
 
     return {
       ok: true,
@@ -146,6 +212,8 @@ export async function pushSnapshotToFirebase(
       message:
         err instanceof Error ? err.message : 'Network error during Firebase sync',
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -159,23 +227,19 @@ export async function pullSnapshotFromFirebase(
 }> {
   const baseUrl = getFirebaseDatabaseUrl(config);
   const propCode = config.propertyCode || '4RENT-MAIN';
+  const url = appendFirebaseAuthParam(
+    `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`,
+    config
+  );
 
-  let url = `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`;
-  const apiKey = config.firebaseApiKey || DEFAULT_FIREBASE_CONFIG.apiKey;
-  if (apiKey && apiKey.trim()) {
-    url += `?auth=${encodeURIComponent(apiKey.trim())}`;
-  }
-
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-
     const response = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return {
@@ -204,6 +268,8 @@ export async function pullSnapshotFromFirebase(
       message:
         err instanceof Error ? err.message : 'Failed to connect to Firebase.',
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -215,11 +281,10 @@ export function subscribeToFirebaseRealtime(
 
   const baseUrl = getFirebaseDatabaseUrl(config);
   const propCode = config.propertyCode || '4RENT-MAIN';
-  let url = `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`;
-  const apiKey = config.firebaseApiKey || DEFAULT_FIREBASE_CONFIG.apiKey;
-  if (apiKey && apiKey.trim()) {
-    url += `?auth=${encodeURIComponent(apiKey.trim())}`;
-  }
+  const url = appendFirebaseAuthParam(
+    `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`,
+    config
+  );
 
   const handleEvent = (event: MessageEvent) => {
     try {

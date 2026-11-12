@@ -21,7 +21,6 @@ interface ArchiveCenterViewProps {
   onRequestPermanentDeleteRoom: (room: Room) => void;
   onRestoreBill: (billId: string) => void;
   onSelectBillForReceipt: (bill: BillRecord) => void;
-  onDeleteHistoryEntry: (id: string) => void;
 }
 
 export const ArchiveCenterView: React.FC<ArchiveCenterViewProps> = ({
@@ -33,7 +32,6 @@ export const ArchiveCenterView: React.FC<ArchiveCenterViewProps> = ({
   onRequestPermanentDeleteRoom,
   onRestoreBill,
   onSelectBillForReceipt,
-  onDeleteHistoryEntry,
 }) => {
   const [tab, setTab] = useState<'tenants' | 'receipts' | 'rooms'>('tenants');
 
@@ -172,14 +170,9 @@ export const ArchiveCenterView: React.FC<ArchiveCenterViewProps> = ({
                       </div>
                     </div>
                     <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        onClick={() => onDeleteHistoryEntry(h.id)}
-                        className="text-xs text-slate-400 hover:text-red-400 flex items-center gap-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Remove Log
-                      </button>
+                      <span className="text-[11px] font-semibold text-slate-400 px-2.5 py-1 rounded-lg bg-[#151D2B] border border-[#243149]">
+                        Permanent Audit Log (Protected)
+                      </span>
                     </div>
                   </div>
                 ))}

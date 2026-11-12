@@ -44,7 +44,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
         } else {
           setError(
             expectedPin
-              ? 'Incorrect 4-digit PIN. Room removal denied.'
+              ? 'Incorrect 4-digit PIN. Authorization denied.'
               : 'No security PIN configured. Set your PIN in Settings first.'
           );
           setPin('');
@@ -67,7 +67,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
       <div className="w-full max-w-sm rounded-3xl bg-[#151B26] border border-[#28334A] p-6 shadow-2xl select-none animate-modal-pop">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5">
@@ -103,6 +103,17 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
           <div className="mb-4 rounded-xl bg-red-500/15 border border-red-500/30 px-3 py-2 text-xs text-red-300 text-center">
             {error}
           </div>
+        )}
+
+        {isMobile && (
+          <button
+            type="button"
+            onClick={handleBiometricVerify}
+            className="w-full mb-4 py-2.5 px-4 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-extrabold flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <Fingerprint className="w-4 h-4" />
+            <span>Authenticate with Fingerprint</span>
+          </button>
         )}
 
         {/* 4-Dot PIN Indicator */}

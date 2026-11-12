@@ -17,6 +17,7 @@ import {
   formatPesoPrivacy,
   getCurrentCalendarPeriodLabel,
   getRoomMonthlyPaymentStatus,
+  isMobileDevice,
   normalizeMonthKey,
 } from '../../utils/billingCalculator';
 
@@ -32,6 +33,7 @@ interface AllPaymentsViewProps {
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
     referenceNo?: string
   ) => void;
+  onOpenAdvanceModal?: (room: Room) => void;
   onArchiveBill: (billId: string) => void;
   onOpenNewBillScanner: () => void;
   onOpenArchiveCenter: () => void;
@@ -44,10 +46,12 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   onBack,
   onSelectBillForReceipt,
   onRecordPayment,
+  onOpenAdvanceModal,
   onArchiveBill,
   onOpenNewBillScanner,
   onOpenArchiveCenter,
 }) => {
+  const isMobile = isMobileDevice();
   const [filter, setFilter] = useState<'all' | 'this_month' | 'paid' | 'unpaid'>('all');
   const [payingBill, setPayingBill] = useState<BillRecord | null>(null);
   const [payAmount, setPayAmount] = useState('');
@@ -431,9 +435,25 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         <span>
                           {bill.remainingBalance > 0
                             ? 'Record Payment / Overpayment'
-                            : 'Add Extra Advance Payment'}
+                            : 'Pay Advance for Next Month'}
                         </span>
                       </button>
+
+                      {onOpenAdvanceModal &&
+                        rooms.find((r) => r.id === bill.roomId && !r.isArchived) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetRoom = rooms.find(
+                                (r) => r.id === bill.roomId && !r.isArchived
+                              );
+                              if (targetRoom) onOpenAdvanceModal(targetRoom);
+                            }}
+                            className="px-3.5 py-2.5 rounded-2xl bg-[#1A2334] hover:bg-[#243046] border border-[#2C3A52] text-amber-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                          >
+                            <span>Advance / Refund</span>
+                          </button>
+                        )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -508,16 +528,32 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                   className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-base font-bold text-emerald-400 font-mono-num"
                 />
                 {excessOverpayment > 0 ? (
-                  <p className="text-xs font-bold text-emerald-400 mt-1.5">
-                    +{formatPeso(excessOverpayment)} excess payment will be
-                    credited to {payingBill.roomName}’s Withdrawable Advance
-                    Payment Balance!
-                  </p>
+                  <div className="mt-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 space-y-1 text-xs">
+                    <p className="font-extrabold text-emerald-300">
+                      Overpayment Breakdown (Requires {isMobile ? 'Fingerprint' : '4-Digit PIN'})
+                    </p>
+                    {payingBill.remainingBalance > 0 && (
+                      <p className="text-slate-300">
+                        • Applied to Current Remaining Balance:{' '}
+                        <strong className="text-white font-mono-num">
+                          {formatPeso(payingBill.remainingBalance)}
+                        </strong>{' '}
+                        (Bill Remaining → ₱0.00)
+                      </p>
+                    )}
+                    <p className="text-emerald-300">
+                      • Credited to Advance Balance (Applies Next Month):{' '}
+                      <strong className="font-mono-num">
+                        +{formatPeso(excessOverpayment)}
+                      </strong>
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Recorded as a tracked Advance Transaction — refundable anytime via Advance / Refund if tenant moves out.
+                    </p>
+                  </div>
                 ) : (
                   <p className="text-[11px] text-slate-400 mt-1.5">
-                    If tenant pays less than the due amount, the balance carries
-                    over. If tenant pays more, the excess goes to their
-                    withdrawable Advance Balance.
+                    Credits against the current Remaining Balance first. Any amount above current rent + kWh due is stored in Advance Balance for Next Month (refundable anytime).
                   </p>
                 )}
               </div>

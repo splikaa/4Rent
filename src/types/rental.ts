@@ -170,6 +170,8 @@ export interface CloudSyncConfig {
   firebaseDatabaseUrl?: string;
   propertyCode: string;
   lastSyncedAt?: string;
+  mobileCodeAppliedMonth?: string; // YYYY-MM when mobile last applied a Property Space Code
+  mobileCodeAppliedAt?: string;
 }
 
 export interface AppSettings {

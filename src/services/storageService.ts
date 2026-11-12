@@ -409,6 +409,98 @@ export function importDatabaseSnapshot(
   }
 }
 
+const MOBILE_LOCK_STORAGE_KEY = '4rent_mobile_code_applied_month';
+const PENDING_CLOUD_APPLY_KEY = '4rent_pending_cloud_apply';
+
+export function getStoredMobileAppliedMonth(): string {
+  try {
+    return localStorage.getItem(MOBILE_LOCK_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setStoredMobileAppliedMonth(monthKey: string): void {
+  try {
+    localStorage.setItem(MOBILE_LOCK_STORAGE_KEY, monthKey);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function setPendingCloudApply(
+  propertyCode: string,
+  appliedMonth: string
+): void {
+  try {
+    localStorage.setItem(
+      PENDING_CLOUD_APPLY_KEY,
+      JSON.stringify({ propertyCode, appliedMonth })
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function consumePendingCloudApply(): {
+  propertyCode: string;
+  appliedMonth: string;
+} | null {
+  try {
+    const raw = localStorage.getItem(PENDING_CLOUD_APPLY_KEY);
+    if (!raw) return null;
+    localStorage.removeItem(PENDING_CLOUD_APPLY_KEY);
+    const parsed = JSON.parse(raw);
+    if (parsed?.propertyCode) {
+      return {
+        propertyCode: String(parsed.propertyCode),
+        appliedMonth: String(parsed.appliedMonth || ''),
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function flushMasterIndexedDbNow(): Promise<void> {
+  if (_idbPersistTimer) {
+    clearTimeout(_idbPersistTimer);
+    _idbPersistTimer = null;
+  }
+  await saveSnapshotToIndexedDb(exportDatabaseSnapshot());
+}
+
+/**
+ * Replaces local workspace collections cleanly with a cloud snapshot while preserving
+ * local security PIN/biometric credentials and the active cloudSync lock metadata.
+ */
+export async function applyCloudSnapshotCleanly(
+  snapshot: AppDatabaseSnapshot,
+  cloudSyncOverride: AppSettings['cloudSync']
+): Promise<void> {
+  saveRooms(Array.isArray(snapshot.rooms) ? snapshot.rooms : []);
+  saveBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
+  saveInquiries(Array.isArray(snapshot.inquiries) ? snapshot.inquiries : []);
+  saveTenantHistory(
+    Array.isArray(snapshot.tenantHistory) ? snapshot.tenantHistory : []
+  );
+  saveReadingLogs(Array.isArray(snapshot.meterLogs) ? snapshot.meterLogs : []);
+
+  const localSettings = loadSettings();
+  const baseSettings = snapshot.settings || localSettings;
+  saveSettings({
+    ...baseSettings,
+    security: localSettings.security,
+    cloudSync: cloudSyncOverride,
+  });
+
+  if (cloudSyncOverride.mobileCodeAppliedMonth) {
+    setStoredMobileAppliedMonth(cloudSyncOverride.mobileCodeAppliedMonth);
+  }
+  await flushMasterIndexedDbNow();
+}
+
 const SYNC_CHANNEL_NAME = '4rent_realtime_sync_channel';
 const WINDOW_INSTANCE_ID = Math.random().toString(36).slice(2, 10);
 

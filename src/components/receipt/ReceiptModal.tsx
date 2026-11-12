@@ -108,7 +108,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
   const [quickRateMonthKey, setQuickRateMonthKey] = useState<string>(() =>
-    normalizeMonthKey(bill?.billingPeriod || new Date().toISOString())
+    normalizeMonthKey(bill?.billingPeriod)
   );
   const [quickRateValue, setQuickRateValue] = useState<string>(() =>
     String(bill?.electricRate ?? settings.defaultElectricRate ?? 15)
@@ -414,7 +414,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     new Set([
       billMonthKey,
       nextMonthKey,
-      ...getScheduledMonthKeys(new Date(`1 ${bill.billingPeriod}`), 3, settings.monthlyElectricRates),
+      ...getScheduledMonthKeys(billMonthKey, 3, settings.monthlyElectricRates),
     ])
   ).sort();
   const nextMonthRate = getElectricRateForPeriod(settings, nextMonthKey);

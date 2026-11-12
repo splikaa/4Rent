@@ -19,25 +19,28 @@ export async function requestAndVerifyNotifications(): Promise<{
   if (win.AndroidNative && typeof win.AndroidNative.requestAndVerifyNotification === 'function') {
     return new Promise((resolve) => {
       let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          const enabled = win.AndroidNative?.areNotificationsEnabled?.() ?? false;
-          resolve({
-            granted: enabled,
-            verified: enabled,
-            message: enabled
-              ? 'Notification permission verified on your phone!'
-              : 'Please allow 4Rent notifications in your phone Settings.',
-          });
-        }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (result: { granted: boolean; verified: boolean; message: string }) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        delete win.__onAndroidNotificationPermissionResult;
+        resolve(result);
+      };
+
+      timer = setTimeout(() => {
+        const enabled = win.AndroidNative?.areNotificationsEnabled?.() ?? false;
+        finish({
+          granted: enabled,
+          verified: enabled,
+          message: enabled
+            ? 'Notification permission verified on your phone!'
+            : 'Please allow 4Rent notifications in your phone Settings.',
+        });
       }, 6000);
 
       win.__onAndroidNotificationPermissionResult = (granted: boolean) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve({
+        finish({
           granted,
           verified: granted,
           message: granted
@@ -51,25 +54,19 @@ export async function requestAndVerifyNotifications(): Promise<{
           '4Rent Notifications Verified ✓',
           'Day 1–10 billing & due-date alerts are active on this device.'
         );
-        if (immediate && !settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve({
+        if (immediate) {
+          finish({
             granted: true,
             verified: true,
             message: 'Notification permission verified! Test alert sent to your phone.',
           });
         }
       } catch {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve({
-            granted: false,
-            verified: false,
-            message: 'Could not verify notification permission on Android.',
-          });
-        }
+        finish({
+          granted: false,
+          verified: false,
+          message: 'Could not verify notification permission on Android.',
+        });
       }
     });
   }
@@ -271,11 +268,28 @@ export async function openMessengerAppWithReceipt(options: {
   }
 
   if (isMobile) {
+    const openExternalTarget = (targetUrl: string) => {
+      const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      if (!opened) {
+        const a = document.createElement('a');
+        a.href = targetUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.click();
+      }
+    };
+
+    const mobileClipboardHint = copiedImageToClipboard
+      ? 'Receipt image copied! '
+      : pngDataUrl
+      ? ''
+      : 'Details copied! ';
+
     if (cleanHandle) {
-      window.location.href = `https://m.me/${encodeURIComponent(cleanHandle)}`;
+      openExternalTarget(`https://m.me/${encodeURIComponent(cleanHandle)}`);
       return {
         openedApp: true,
-        message: `Receipt image copied! Opening Messenger chat with @${cleanHandle}... (Paste to send)`,
+        message: `${mobileClipboardHint}Opening Messenger chat with @${cleanHandle}...`,
       };
     }
 
@@ -285,27 +299,23 @@ export async function openMessengerAppWithReceipt(options: {
     )}&app_id=${appId}`;
 
     if (isAndroid) {
+      const intentUri = `intent://share/?link=${encodeURIComponent(
+        finalShareUrl
+      )}&app_id=${appId}#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(
+        'https://m.me'
+      )};end`;
       try {
-        const intentUri = `intent://share/?link=${encodeURIComponent(
-          finalShareUrl
-        )}&app_id=${appId}#Intent;scheme=fb-messenger;package=com.facebook.orca;S.browser_fallback_url=${encodeURIComponent(
-          'https://m.me'
-        )};end`;
-        const a = document.createElement('a');
-        a.href = intentUri;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.click();
+        openExternalTarget(intentUri);
       } catch {
-        window.location.href = messengerMobileUri;
+        openExternalTarget(messengerMobileUri);
       }
     } else {
-      window.location.href = messengerMobileUri;
+      openExternalTarget(messengerMobileUri);
     }
 
     return {
       openedApp: true,
-      message: 'Receipt image copied! Opening Messenger app... (Paste to send)',
+      message: `${mobileClipboardHint}Opening Messenger app...`,
     };
   }
 

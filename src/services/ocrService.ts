@@ -1087,14 +1087,20 @@ function runTesseractPass(
 ): Promise<{ text: string; confidence: number } | null> {
   const execPass = async (): Promise<{ text: string; confidence: number } | null> => {
     activeProgressCallback = onProgress;
+    let timedOut = false;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    const workerPromise = getSharedTesseractWorker();
+
     const recognizePromise = (async () => {
-      const worker = await getSharedTesseractWorker();
+      const worker = await workerPromise;
+      if (timedOut) return null;
       await worker.setParameters({
         tessedit_char_whitelist: whitelist,
         tessedit_pageseg_mode: psmMode as any,
       });
+      if (timedOut) return null;
       const res = await worker.recognize(url);
-      if (!res?.data) return null;
+      if (timedOut || !res?.data) return null;
       return {
         text: res.data.text || '',
         confidence: Math.round(res.data.confidence || 0),
@@ -1102,14 +1108,37 @@ function runTesseractPass(
     })();
 
     try {
-      return await Promise.race([
-        recognizePromise,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-      ]);
+      const timeoutPromise = new Promise<'TIMEOUT'>((resolve) => {
+        timerId = setTimeout(() => {
+          timedOut = true;
+          resolve('TIMEOUT');
+        }, timeoutMs);
+      });
+      const raceResult = await Promise.race([recognizePromise, timeoutPromise]);
+      if (raceResult === 'TIMEOUT') {
+        // Terminate and reset any wedged/in-flight worker so the next queued pass never collides with it
+        if (sharedWorkerPromise === workerPromise) {
+          sharedWorkerPromise = null;
+        }
+        workerPromise
+          .then((w) => {
+            const candidate = w as unknown as { terminate?: () => Promise<unknown> };
+            if (candidate && typeof candidate.terminate === 'function') {
+              return candidate.terminate();
+            }
+            return undefined;
+          })
+          .catch(() => undefined);
+        return null;
+      }
+      return raceResult;
     } catch {
-      sharedWorkerPromise = null;
+      if (sharedWorkerPromise === workerPromise) {
+        sharedWorkerPromise = null;
+      }
       return null;
     } finally {
+      if (timerId !== undefined) clearTimeout(timerId);
       activeProgressCallback = undefined;
     }
   };

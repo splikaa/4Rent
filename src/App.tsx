@@ -11,6 +11,8 @@ import {
 } from './types/rental';
 import {
   appendAuditLog,
+  applyCloudSnapshotCleanly,
+  consumePendingCloudApply,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   isAppHydrated,
@@ -30,8 +32,10 @@ import {
 } from './services/storageService';
 import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
+  getMobileCodeMonthlyLock,
   isCloudConfigured,
   mergeDatabaseSnapshots,
+  normalizePropertyCode,
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
   subscribeToRealtimeSync,
@@ -41,6 +45,7 @@ import {
   clampDueDayOneToTen,
   formatMonthKeyLabel,
   getElectricRateForPeriod,
+  isMobileDevice,
   isRunningInDesktopApp,
   isRunningInMobileApp,
   isStandaloneApp,
@@ -60,6 +65,7 @@ import {
 import { EasyWalkthroughModal } from './components/common/EasyWalkthroughModal';
 import { EnableRemindersModal } from './components/modals/EnableRemindersModal';
 import { PinAuthModal } from './components/modals/PinAuthModal';
+import { ConfirmActionModal } from './components/modals/ConfirmActionModal';
 import { AdvanceBalanceModal } from './components/modals/AdvanceBalanceModal';
 import { OccupiedArchiveGuardModal } from './components/modals/OccupiedArchiveGuardModal';
 import { NavigationDrawer } from './components/layout/NavigationDrawer';
@@ -138,10 +144,18 @@ export function App() {
     null
   );
 
-  // PIN-Authenticated Room Deletion State
-  const [roomPendingPinDelete, setRoomPendingPinDelete] = useState<Room | null>(
-    null
-  );
+  // Unified Confirmation & Security Auth States (Room Deletion, Archive, Tenant Vacated, Advance Payment)
+  const [pendingAuthAction, setPendingAuthAction] = useState<{
+    title: string;
+    description: string;
+    onConfirm: () => void;
+  } | null>(null);
+  const [pendingConfirmAction, setPendingConfirmAction] = useState<
+    | { type: 'vacate'; room: Room; reason: string }
+    | { type: 'archive_vacant'; room: Room }
+    | { type: 'delete_room'; room: Room }
+    | null
+  >(null);
 
   // Occupied Room Archive Guard State (Prevents accidental direct archive of occupied rooms)
   const [roomPendingOccupiedArchive, setRoomPendingOccupiedArchive] =
@@ -293,29 +307,77 @@ export function App() {
   useEffect(() => {
     let mounted = true;
     const hydrate = async () => {
-      try {
-        const idbSnap = await loadSnapshotFromIndexedDb();
-        if (!mounted || !idbSnap) return;
-        const currentRooms = loadRooms();
-        const currentBills = loadBills();
-        const currentHistory = loadTenantHistory();
-        const needsIdbRestore =
-          (currentRooms.length === 0 && Boolean(idbSnap.rooms?.length)) ||
-          (currentBills.length === 0 && Boolean(idbSnap.bills?.length)) ||
-          (currentHistory.length === 0 && Boolean(idbSnap.tenantHistory?.length));
+      let appliedPendingCloud = false;
 
-        if (needsIdbRestore) {
-          const restored = mergeDatabaseSnapshots(exportDatabaseSnapshot(), idbSnap);
-          importDatabaseSnapshot(restored);
-          setRooms(loadRooms());
-          setBills(loadBills());
-          setInquiries(loadInquiries());
-          setTenantHistory(loadTenantHistory());
-          if (idbSnap.settings && !loadSettings().security?.isSetupComplete) {
-            setSettings(idbSnap.settings);
-            if (idbSnap.settings.security?.isSetupComplete) {
-              setShowSecuritySetup(false);
-              setIsLocked(idbSnap.settings.security.lockEnabled ?? true);
+      try {
+        const pendingApply = consumePendingCloudApply();
+        if (pendingApply) {
+          const currentSettings = loadSettings();
+          const appliedMonth = pendingApply.appliedMonth || normalizeMonthKey();
+          const pendingSync = {
+            ...currentSettings.cloudSync,
+            enabled: true,
+            provider: 'firebase' as const,
+            propertyCode: pendingApply.propertyCode,
+            mobileCodeAppliedMonth: appliedMonth,
+            mobileCodeAppliedAt:
+              currentSettings.cloudSync.mobileCodeAppliedAt ||
+              new Date().toISOString(),
+          };
+          const res = await pullSnapshotFromCloud(pendingSync);
+          if (!mounted) return;
+          if (res.ok && res.snapshot) {
+            await applyCloudSnapshotCleanly(res.snapshot, {
+              ...pendingSync,
+              lastSyncedAt: res.updatedAt || new Date().toISOString(),
+            });
+            setRooms(loadRooms());
+            setBills(loadBills());
+            setInquiries(loadInquiries());
+            setTenantHistory(loadTenantHistory());
+            setSettings(loadSettings());
+            appliedPendingCloud = true;
+
+            const lockInfo = getMobileCodeMonthlyLock(pendingSync);
+            triggerFeedback(
+              'Property Space Code Applied',
+              `Loaded all data for "${pendingApply.propertyCode}". Monthly mobile limit locked until ${lockInfo.nextEligibleMonthLabel}.`,
+              'success'
+            );
+          } else {
+            triggerFeedback(
+              'Cloud Data Pending Sync',
+              res.message ||
+                `Could not download data for "${pendingApply.propertyCode}" after refresh. Tap Sync Now in Settings.`,
+              'info'
+            );
+          }
+        }
+
+        if (!appliedPendingCloud) {
+          const idbSnap = await loadSnapshotFromIndexedDb();
+          if (!mounted || !idbSnap) return;
+          const currentRooms = loadRooms();
+          const currentBills = loadBills();
+          const currentHistory = loadTenantHistory();
+          const needsIdbRestore =
+            (currentRooms.length === 0 && Boolean(idbSnap.rooms?.length)) ||
+            (currentBills.length === 0 && Boolean(idbSnap.bills?.length)) ||
+            (currentHistory.length === 0 && Boolean(idbSnap.tenantHistory?.length));
+
+          if (needsIdbRestore) {
+            const restored = mergeDatabaseSnapshots(exportDatabaseSnapshot(), idbSnap);
+            importDatabaseSnapshot(restored);
+            setRooms(loadRooms());
+            setBills(loadBills());
+            setInquiries(loadInquiries());
+            setTenantHistory(loadTenantHistory());
+            if (idbSnap.settings && !loadSettings().security?.isSetupComplete) {
+              setSettings(idbSnap.settings);
+              if (idbSnap.settings.security?.isSetupComplete) {
+                setShowSecuritySetup(false);
+                setIsLocked(idbSnap.settings.security.lockEnabled ?? true);
+              }
             }
           }
         }
@@ -329,48 +391,87 @@ export function App() {
           // Check for 1-click Mobile/Desktop cloud pairing in URL query
           try {
             const urlParams = new URLSearchParams(window.location.search);
-            const syncProp = urlParams.get('prop') || urlParams.get('propertyCode');
+            const rawSyncProp = urlParams.get('prop') || urlParams.get('propertyCode');
+            const syncProp = rawSyncProp ? normalizePropertyCode(rawSyncProp) : '';
             const syncProj = urlParams.get('proj') || urlParams.get('projectId');
             const syncDbUrl = urlParams.get('dbUrl');
             if (syncProp) {
-              const currentSettings = loadSettings();
-              const nextSync = {
-                ...currentSettings.cloudSync,
-                enabled: true,
-                provider: 'firebase' as const,
-                propertyCode: syncProp,
-                ...(syncProj ? { firebaseProjectId: syncProj } : {}),
-                ...(syncDbUrl ? { firebaseDatabaseUrl: syncDbUrl } : {}),
-              };
-              const updatedSettings: AppSettings = {
-                ...currentSettings,
-                cloudSync: nextSync,
-              };
-              setSettings(updatedSettings);
-              saveSettings(updatedSettings);
-
-              // Clean query string from browser address bar
+              // Clean query string from browser address bar immediately
               const cleanUrl = window.location.origin + window.location.pathname;
               window.history.replaceState({}, document.title, cleanUrl);
 
-              pullSnapshotFromCloud(nextSync).then((res) => {
-                if (res.ok && res.snapshot) {
-                  const merged = mergeDatabaseSnapshots(
-                    exportDatabaseSnapshot(),
-                    res.snapshot
-                  );
-                  importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
-                  setRooms(loadRooms());
-                  setBills(loadBills());
-                  setInquiries(loadInquiries());
-                  setTenantHistory(loadTenantHistory());
-                  triggerFeedback(
-                    '📱 Mobile & Desktop Synced',
-                    `Connected to Property "${syncProp}". All data updated from cloud.`,
-                    'success'
-                  );
-                }
-              });
+              const currentSettings = loadSettings();
+              const mobileDevice = isMobileDevice();
+              const mobileLock = getMobileCodeMonthlyLock(currentSettings.cloudSync);
+
+              if (mobileDevice && mobileLock.isLockedThisMonth) {
+                triggerFeedback(
+                  'Monthly Code Limit Active',
+                  `Mobile Property Space Code can only be applied once per month. Next change opens ${mobileLock.nextEligibleMonthLabel}.`,
+                  'error'
+                );
+              } else {
+                const nextSync = {
+                  ...currentSettings.cloudSync,
+                  enabled: true,
+                  provider: 'firebase' as const,
+                  propertyCode: syncProp,
+                  ...(syncProj ? { firebaseProjectId: syncProj } : {}),
+                  ...(syncDbUrl ? { firebaseDatabaseUrl: syncDbUrl } : {}),
+                  ...(mobileDevice
+                    ? {
+                        mobileCodeAppliedMonth: mobileLock.currentMonthKey,
+                        mobileCodeAppliedAt: new Date().toISOString(),
+                      }
+                    : {}),
+                };
+
+                pullSnapshotFromCloud(nextSync).then(async (res) => {
+                  if (!mounted) return;
+                  if (res.ok && res.snapshot) {
+                    if (mobileDevice) {
+                      await applyCloudSnapshotCleanly(res.snapshot, {
+                        ...nextSync,
+                        lastSyncedAt: res.updatedAt || new Date().toISOString(),
+                      });
+                    } else {
+                      const updatedSettings: AppSettings = {
+                        ...currentSettings,
+                        cloudSync: nextSync,
+                      };
+                      saveSettings(updatedSettings);
+                      const merged = mergeDatabaseSnapshots(
+                        exportDatabaseSnapshot(),
+                        res.snapshot
+                      );
+                      importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
+                    }
+                    setSettings(loadSettings());
+                    setRooms(loadRooms());
+                    setBills(loadBills());
+                    setInquiries(loadInquiries());
+                    setTenantHistory(loadTenantHistory());
+                    triggerFeedback(
+                      'Mobile & Desktop Synced',
+                      `Connected to Property "${syncProp}". All data updated from cloud.`,
+                      'success'
+                    );
+                  } else if (!mobileDevice) {
+                    const updatedSettings: AppSettings = {
+                      ...currentSettings,
+                      cloudSync: nextSync,
+                    };
+                    setSettings(updatedSettings);
+                    saveSettings(updatedSettings);
+                  } else {
+                    triggerFeedback(
+                      'Property Code Not Found',
+                      res.message || `No cloud data found for "${syncProp}".`,
+                      'error'
+                    );
+                  }
+                });
+              }
             }
           } catch {}
         }
@@ -644,78 +745,101 @@ export function App() {
           setTenantHistory((prev) => [entry, ...prev]);
         }
 
-        // If room is occupied and has available paid Required Deposit credit with an active unpaid bill,
-        // auto-deduct deposit toward that bill and keep any remaining deposit credit on the room for further cycles.
+        // If room is occupied and has available paid Required Deposit credit with active unpaid bills,
+        // auto-deduct deposit synchronously before queuing state updates so room & bill balances stay aligned.
         const availablePaidDeposit =
           roomData.status === 'occupied'
             ? Math.max(0, roomData.securityDepositPaid || 0)
             : 0;
-        let depositUsedOnActiveBill = 0;
-        let finalRoomUnpaidBalance = roomData.unpaidBalance;
+        let remainingDepositCredit = availablePaidDeposit;
+        let depositUsedOnActiveBills = 0;
+        const billUpdatesById = new Map<string, BillRecord>();
 
-        if (availablePaidDeposit > 0) {
-          const activeUnpaidBill = bills.find(
-            (b) =>
-              !b.isArchived &&
-              b.roomId === existingId &&
-              (b.id === roomData.activeReceiptId || b.remainingBalance > 0) &&
-              b.remainingBalance > 0
-          );
-
-          if (activeUnpaidBill) {
-            depositUsedOnActiveBill = roundCurrency(
-              Math.min(availablePaidDeposit, activeUnpaidBill.remainingBalance)
+        if (remainingDepositCredit > 0) {
+          const activeUnpaidBills = bills
+            .filter(
+              (b) =>
+                !b.isArchived &&
+                b.roomId === existingId &&
+                b.remainingBalance > 0
+            )
+            .sort((a, b) =>
+              a.id === roomData.activeReceiptId
+                ? -1
+                : b.id === roomData.activeReceiptId
+                ? 1
+                : 0
             );
-            const remainingDepositAfter = Math.max(
+
+          for (const targetBill of activeUnpaidBills) {
+            if (remainingDepositCredit <= 0) break;
+            const deductAmount = roundCurrency(
+              Math.min(remainingDepositCredit, targetBill.remainingBalance)
+            );
+            if (deductAmount <= 0) continue;
+
+            remainingDepositCredit = Math.max(
               0,
-              roundCurrency(availablePaidDeposit - depositUsedOnActiveBill)
+              roundCurrency(remainingDepositCredit - deductAmount)
+            );
+            depositUsedOnActiveBills = roundCurrency(
+              depositUsedOnActiveBills + deductAmount
             );
 
-            setBills((prev) =>
-              prev.map((b) => {
-                if (b.id !== activeUnpaidBill.id) return b;
-                const nextSecDepApplied = roundCurrency(
-                  (b.securityDepositApplied || 0) + depositUsedOnActiveBill
-                );
-                const nextTotalApplied = roundCurrency(
-                  (b.depositApplied || 0) + depositUsedOnActiveBill
-                );
-                const nextTotalDue = Math.max(
-                  0,
-                  roundCurrency(b.totalAmountDue - depositUsedOnActiveBill)
-                );
-                const nextRemaining = Math.max(
-                  0,
-                  roundCurrency(b.remainingBalance - depositUsedOnActiveBill)
-                );
-                const nextStatus: BillRecord['status'] =
-                  nextRemaining <= 0.009
-                    ? 'paid'
-                    : b.amountPaid > 0 || nextTotalApplied > 0
-                    ? 'partial'
-                    : 'unpaid';
-                finalRoomUnpaidBalance = nextRemaining;
-
-                return {
-                  ...b,
-                  securityDepositApplied: nextSecDepApplied,
-                  securityDepositRemainingAfterBill: remainingDepositAfter,
-                  depositApplied: nextTotalApplied,
-                  totalAmountDue: nextTotalDue,
-                  remainingBalance: nextRemaining,
-                  status: nextStatus,
-                  paidAt: nextStatus === 'paid' ? b.paidAt || nowIso : b.paidAt,
-                  updatedAt: nowIso,
-                };
-              })
+            const nextSecDepApplied = roundCurrency(
+              (targetBill.securityDepositApplied || 0) + deductAmount
             );
+            const nextTotalApplied = roundCurrency(
+              (targetBill.depositApplied || 0) + deductAmount
+            );
+            const nextTotalDue = Math.max(
+              0,
+              roundCurrency(targetBill.totalAmountDue - deductAmount)
+            );
+            const nextRemaining = Math.max(
+              0,
+              roundCurrency(targetBill.remainingBalance - deductAmount)
+            );
+            const nextStatus: BillRecord['status'] =
+              nextRemaining <= 0.009
+                ? 'paid'
+                : targetBill.amountPaid > 0 || nextTotalApplied > 0
+                ? 'partial'
+                : 'unpaid';
+
+            billUpdatesById.set(targetBill.id, {
+              ...targetBill,
+              securityDepositApplied: nextSecDepApplied,
+              securityDepositRemainingAfterBill: remainingDepositCredit,
+              depositApplied: nextTotalApplied,
+              totalAmountDue: nextTotalDue,
+              remainingBalance: nextRemaining,
+              status: nextStatus,
+              paidAt: nextStatus === 'paid' ? targetBill.paidAt || nowIso : targetBill.paidAt,
+              updatedAt: nowIso,
+            });
           }
         }
 
         const remainingRoomPaidDeposit = Math.max(
           0,
-          roundCurrency(availablePaidDeposit - depositUsedOnActiveBill)
+          roundCurrency(availablePaidDeposit - depositUsedOnActiveBills)
         );
+        const finalRoomUnpaidBalance =
+          depositUsedOnActiveBills > 0
+            ? Math.max(
+                0,
+                roundCurrency(
+                  (roomData.unpaidBalance || 0) - depositUsedOnActiveBills
+                )
+              )
+            : roomData.unpaidBalance;
+
+        if (billUpdatesById.size > 0) {
+          setBills((prev) =>
+            prev.map((b) => billUpdatesById.get(b.id) ?? b)
+          );
+        }
 
         setRooms((prev) =>
           prev.map((r) =>
@@ -723,10 +847,7 @@ export function App() {
               ? {
                   ...roomData,
                   securityDepositPaid: remainingRoomPaidDeposit,
-                  unpaidBalance:
-                    depositUsedOnActiveBill > 0
-                      ? finalRoomUnpaidBalance
-                      : roomData.unpaidBalance,
+                  unpaidBalance: finalRoomUnpaidBalance,
                   id: existingId,
                   updatedAt: nowIso,
                 }
@@ -779,28 +900,27 @@ export function App() {
     }
   };
 
-  const handleConfirmDeleteRoomAfterPin = () => {
+  const executeDeleteRoomAfterPin = (targetRoom: Room) => {
     try {
-      if (!roomPendingPinDelete) return;
-      const targetId = roomPendingPinDelete.id;
-      const targetName = roomPendingPinDelete.name;
+      const targetId = targetRoom.id;
+      const targetName = targetRoom.name;
       const nowIso = new Date().toISOString();
 
       // Layer 2 Engine Archival Fail-Safe: Archive active tenant to TenantHistoryEntry
-      if (roomPendingPinDelete.tenant) {
+      if (targetRoom.tenant) {
         const entry: TenantHistoryEntry = {
           id: `hist-${Date.now()}`,
-          roomId: roomPendingPinDelete.id,
-          roomName: roomPendingPinDelete.name,
-          tenantName: roomPendingPinDelete.tenant.fullName,
-          phone: roomPendingPinDelete.tenant.phone,
-          messengerUsername: roomPendingPinDelete.tenant.messengerUsername,
-          moveInDate: roomPendingPinDelete.tenant.moveInDate,
+          roomId: targetRoom.id,
+          roomName: targetRoom.name,
+          tenantName: targetRoom.tenant.fullName,
+          phone: targetRoom.tenant.phone,
+          messengerUsername: targetRoom.tenant.messengerUsername,
+          moveInDate: targetRoom.tenant.moveInDate,
           moveOutDate: nowIso.slice(0, 10),
-          reason: 'Permanent Room Deletion with Master PIN (Archived on Deletion)',
-          finalMeterReading: roomPendingPinDelete.lastMeterReading,
-          depositHeld: roomPendingPinDelete.securityDeposit,
-          unpaidBalanceAtMoveOut: roomPendingPinDelete.unpaidBalance,
+          reason: 'Permanent Room Deletion with Security Auth (Archived on Deletion)',
+          finalMeterReading: targetRoom.lastMeterReading,
+          depositHeld: targetRoom.securityDeposit,
+          unpaidBalanceAtMoveOut: targetRoom.unpaidBalance,
         };
         setTenantHistory((prev) => [entry, ...prev]);
       }
@@ -815,15 +935,15 @@ export function App() {
       );
 
       setRooms((prev) => prev.filter((r) => r.id !== targetId));
-      setRoomPendingPinDelete(null);
+      setSelectedRoomDetailsId((curr) => (curr === targetId ? null : curr));
       appendAuditLog(
-        'Room Removed (PIN Verified)',
+        'Room Removed (Security Verified)',
         `${targetName} permanently removed.`,
         'security'
       );
       triggerFeedback(
         `${targetName} Removed`,
-        'Room was permanently deleted after Passcode PIN verification.',
+        'Room was permanently deleted after security verification.',
         'warning',
         'View All Rooms',
         () => setActiveTab('rooms')
@@ -838,27 +958,25 @@ export function App() {
     }
   };
 
-  const handleArchiveRoom = (roomId: string) => {
+  const requestDeleteRoomConfirmation = (room: Room) => {
+    if (!room.isArchived && (room.status === 'occupied' || Boolean(room.tenant))) {
+      triggerFeedback(
+        'Cannot Delete Occupied Room',
+        `${room.name} is occupied by ${room.tenant?.fullName || 'a tenant'}. Mark tenant vacated or archive the room first to protect records.`,
+        'warning',
+        'View Room Ledger',
+        () => setSelectedRoomDetailsId(room.id)
+      );
+      return;
+    }
+    setPendingConfirmAction({ type: 'delete_room', room });
+  };
+
+  const executeArchiveVacantRoom = (targetRoom: Room) => {
     try {
-      const targetRoom = rooms.find((r) => r.id === roomId);
-      if (!targetRoom) return;
-
-      // Guard: If the room is currently Occupied, block direct archive and open the notification/reason modal
-      if (targetRoom.status === 'occupied') {
-        setRoomPendingOccupiedArchive(targetRoom);
-        triggerFeedback(
-          'Occupied Room Guard Active',
-          `${targetRoom.name} is currently occupied by ${targetRoom.tenant?.fullName || 'a tenant'}. Provide an override reason to archive.`,
-          'warning',
-          'View Room Ledger',
-          () => setSelectedRoomDetailsId(targetRoom.id)
-        );
-        return;
-      }
-
       setRooms((prev) =>
         prev.map((r) =>
-          r.id === roomId
+          r.id === targetRoom.id
             ? {
                 ...r,
                 isArchived: true,
@@ -866,6 +984,9 @@ export function App() {
               }
             : r
         )
+      );
+      setSelectedRoomDetailsId((curr) =>
+        curr === targetRoom.id ? null : curr
       );
       appendAuditLog(
         'Vacant Room Archived',
@@ -887,6 +1008,26 @@ export function App() {
         'error'
       );
     }
+  };
+
+  const handleArchiveRoom = (roomId: string) => {
+    const targetRoom = rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+
+    // Guard: If the room is currently Occupied, block direct archive and open the notification/reason modal
+    if (targetRoom.status === 'occupied') {
+      setRoomPendingOccupiedArchive(targetRoom);
+      triggerFeedback(
+        'Occupied Room Guard Active',
+        `${targetRoom.name} is currently occupied by ${targetRoom.tenant?.fullName || 'a tenant'}. Provide an override reason to archive.`,
+        'warning',
+        'View Room Ledger',
+        () => setSelectedRoomDetailsId(targetRoom.id)
+      );
+      return;
+    }
+
+    setPendingConfirmAction({ type: 'archive_vacant', room: targetRoom });
   };
 
   const handleConfirmOccupiedArchiveWithReason = (
@@ -975,6 +1116,14 @@ export function App() {
     }
   };
 
+  const requestMoveOutConfirmation = (
+    room: Room,
+    defaultReason = 'Stopped Paying Rent / Vacated (Moved to History)'
+  ) => {
+    if (!room.tenant) return;
+    setPendingConfirmAction({ type: 'vacate', room, reason: defaultReason });
+  };
+
   // Move out tenant -> Goes to Previous Tenant History AND preserves continuous kWh meter reading
   const handleMoveOutTenant = (room: Room, reason: string) => {
     try {
@@ -1010,6 +1159,7 @@ export function App() {
             : r
         )
       );
+      setSelectedRoomDetailsId((curr) => (curr === room.id ? null : curr));
       appendAuditLog(
         'Tenant Vacated',
         `${tenantName} moved out of ${room.name}.`,
@@ -1155,28 +1305,23 @@ export function App() {
     referenceNo?: string
   ) => {
     try {
-      let targetRoomId = '';
-      let newRoomRemaining = 0;
-      let overpaymentCredited = 0;
-      let receiptNo = '';
-      let updatedReceiptObj: BillRecord | null = null;
+      const targetBill = bills.find((b) => b.id === billId);
+      if (!targetBill) return;
+
+      const outcome = applyPaymentWithOverpayment(
+        targetBill,
+        amount,
+        method,
+        referenceNo
+      );
+      const updatedReceiptObj = outcome.updatedBill;
+      const targetRoomId = updatedReceiptObj.roomId;
+      const newRoomRemaining = updatedReceiptObj.remainingBalance;
+      const overpaymentCredited = outcome.overpaymentCredited;
+      const receiptNo = updatedReceiptObj.receiptNo;
 
       setBills((prev) =>
-        prev.map((b) => {
-          if (b.id !== billId) return b;
-          const outcome = applyPaymentWithOverpayment(
-            b,
-            amount,
-            method,
-            referenceNo
-          );
-          targetRoomId = outcome.updatedBill.roomId;
-          newRoomRemaining = outcome.updatedBill.remainingBalance;
-          overpaymentCredited = outcome.overpaymentCredited;
-          receiptNo = outcome.updatedBill.receiptNo;
-          updatedReceiptObj = outcome.updatedBill;
-          return outcome.updatedBill;
-        })
+        prev.map((b) => (b.id === billId ? updatedReceiptObj : b))
       );
 
       if (targetRoomId) {
@@ -1194,7 +1339,7 @@ export function App() {
                       type: 'overpayment_credit' as const,
                       amount: overpaymentCredited,
                       createdAt: new Date().toISOString(),
-                      note: `Excess payment from Receipt #${receiptNo} credited to Advance Balance`,
+                      note: `Excess payment from Receipt #${receiptNo} credited to Advance Balance (Applies Next Month / Refundable)`,
                     },
                     ...(r.advanceHistory || []),
                   ]
@@ -1218,13 +1363,11 @@ export function App() {
       triggerFeedback(
         `Payment Recorded (₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
         overpaymentCredited > 0
-          ? `Paid via ${method}. Excess ₱${overpaymentCredited.toFixed(2)} auto-credited to Advance Balance!`
+          ? `Paid via ${method}. Excess ₱${overpaymentCredited.toFixed(2)} auto-credited to Advance Balance for next month!`
           : `Paid via ${method} for Receipt #${receiptNo}. Remaining: ₱${newRoomRemaining.toFixed(2)}.`,
         'success',
         'View Official Receipt',
-        () => {
-          if (updatedReceiptObj) setActiveReceiptBill(updatedReceiptObj);
-        }
+        () => setActiveReceiptBill(updatedReceiptObj)
       );
       triggerOptionalCloudSync();
     } catch (err) {
@@ -1234,6 +1377,74 @@ export function App() {
         'error'
       );
     }
+  };
+
+  const requestRecordPayment = (
+    billId: string,
+    amount: number,
+    method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
+    referenceNo?: string
+  ) => {
+    const targetBill = bills.find((b) => b.id === billId);
+    if (!targetBill) return;
+    const excess = Math.max(
+      0,
+      Math.round((amount - (targetBill.remainingBalance || 0)) * 100) / 100
+    );
+    if (excess > 0) {
+      const mobileAuth = isMobileDevice();
+      setPendingAuthAction({
+        title: `Authorize Overpayment & Advance Credit`,
+        description: `${targetBill.roomName}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} will credit to Next Month Advance Balance. ${
+          mobileAuth ? 'Scan Fingerprint or enter 4-Digit PIN.' : 'Enter your 4-Digit Security PIN.'
+        }`,
+        onConfirm: () => handleRecordPayment(billId, amount, method, referenceNo),
+      });
+      return;
+    }
+    handleRecordPayment(billId, amount, method, referenceNo);
+  };
+
+  const requestWithdrawAdvance = (
+    roomId: string,
+    amount: number,
+    note: string
+  ) => {
+    const targetRoom = rooms.find((r) => r.id === roomId);
+    const mobileAuth = isMobileDevice();
+    setPendingAuthAction({
+      title: `Authorize Advance Refund / Withdrawal`,
+      description: `Release ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} from ${
+        targetRoom?.name || 'Room'
+      } Advance Balance. ${
+        mobileAuth ? 'Verify with Fingerprint or 4-Digit PIN.' : 'Enter your 4-Digit Security PIN.'
+      }`,
+      onConfirm: () => {
+        handleWithdrawAdvance(roomId, amount, note);
+        setAdvanceModalRoomId(null);
+      },
+    });
+  };
+
+  const requestAddAdvanceDeposit = (
+    roomId: string,
+    amount: number,
+    note: string
+  ) => {
+    const targetRoom = rooms.find((r) => r.id === roomId);
+    const mobileAuth = isMobileDevice();
+    setPendingAuthAction({
+      title: `Authorize Advance Payment`,
+      description: `Record ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} advance credit for ${
+        targetRoom?.name || 'Room'
+      } (auto-applies to next month). ${
+        mobileAuth ? 'Verify with Fingerprint or 4-Digit PIN.' : 'Enter your 4-Digit Security PIN.'
+      }`,
+      onConfirm: () => {
+        handleAddAdvanceDeposit(roomId, amount, note);
+        setAdvanceModalRoomId(null);
+      },
+    });
   };
 
   // Advance Balance Withdraw / Add Handlers
@@ -1684,7 +1895,7 @@ export function App() {
   const handleApplyMonthlyElectricRate = (monthOrPeriod: string, rate: number) => {
     const monthKey = normalizeMonthKey(monthOrPeriod);
     const cleanRate = roundCurrency(Math.max(0, rate));
-    const currentKey = normalizeMonthKey(new Date().toISOString());
+    const currentKey = normalizeMonthKey();
     const nextSettings: AppSettings = {
       ...settings,
       defaultElectricRate:
@@ -1834,21 +2045,9 @@ export function App() {
               setEditingRoom(room);
               setIsRoomModalOpen(true);
             }}
-            onRequestDeleteRoomWithPin={(room) => {
-              if (room.status === 'occupied' || Boolean(room.tenant)) {
-                triggerFeedback(
-                  'Cannot Delete Occupied Room',
-                  `${room.name} is occupied by ${room.tenant?.fullName || 'a tenant'}. Move out the tenant or archive the room first to protect tenant and billing records.`,
-                  'warning',
-                  'View Room Ledger',
-                  () => setSelectedRoomDetailsId(room.id)
-                );
-                return;
-              }
-              setRoomPendingPinDelete(room);
-            }}
+            onRequestDeleteRoomWithPin={requestDeleteRoomConfirmation}
             onArchiveRoom={handleArchiveRoom}
-            onMoveOutTenant={handleMoveOutTenant}
+            onMoveOutTenant={requestMoveOutConfirmation}
             onOpenScanMeter={(room) => handleOpenScanForRoom(room)}
             onOpenRoomReceipt={(bill) => setActiveReceiptBill(bill)}
             onOpenAdvanceBalanceModal={(room) =>
@@ -1895,7 +2094,8 @@ export function App() {
             privacyMaskEnabled={settings.privacyMaskEnabled}
             onBack={() => setActiveTab('dashboard')}
             onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
-            onRecordPayment={handleRecordPayment}
+            onRecordPayment={requestRecordPayment}
+            onOpenAdvanceModal={(room) => setAdvanceModalRoomId(room.id)}
             onArchiveBill={handleArchiveBill}
             onOpenNewBillScanner={() => handleOpenScanForRoom()}
             onOpenArchiveCenter={() => setActiveTab('archive')}
@@ -1909,14 +2109,9 @@ export function App() {
             tenantHistory={tenantHistory}
             onBack={() => setActiveTab('dashboard')}
             onRestoreRoom={handleRestoreRoom}
-            onRequestPermanentDeleteRoom={(room) =>
-              setRoomPendingPinDelete(room)
-            }
+            onRequestPermanentDeleteRoom={requestDeleteRoomConfirmation}
             onRestoreBill={handleRestoreBill}
             onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
-            onDeleteHistoryEntry={(id) =>
-              setTenantHistory((prev) => prev.filter((h) => h.id !== id))
-            }
           />
         )}
 
@@ -2009,6 +2204,9 @@ export function App() {
         onOpenScannerForRoom={(room) => handleOpenScanForRoom(room)}
         onOpenReceipt={(bill) => setActiveReceiptBill(bill)}
         onOpenAdvanceModal={(room) => setAdvanceModalRoomId(room.id)}
+        onRequestMoveOutTenant={(room) => requestMoveOutConfirmation(room)}
+        onRequestArchiveRoom={handleArchiveRoom}
+        onRequestDeleteRoom={requestDeleteRoomConfirmation}
       />
 
       {/* Dual Sub-Meter OCR Scanner & Bill Generator Modal */}
@@ -2043,8 +2241,8 @@ export function App() {
       <AdvanceBalanceModal
         room={activeAdvanceModalRoom}
         onClose={() => setAdvanceModalRoomId(null)}
-        onWithdrawAdvance={handleWithdrawAdvance}
-        onAddAdvanceDeposit={handleAddAdvanceDeposit}
+        onWithdrawAdvance={requestWithdrawAdvance}
+        onAddAdvanceDeposit={requestAddAdvanceDeposit}
       />
 
       {/* Occupied Room Archive Guard & Notification Modal */}
@@ -2054,14 +2252,132 @@ export function App() {
         onConfirmArchiveWithReason={handleConfirmOccupiedArchiveWithReason}
       />
 
-      {/* PIN Authentication Modal for Removing a Room */}
+      {/* Explicit Action Confirmation Modal (Tenant Vacated, Archive Vacant Room, Remove Room) */}
+      <ConfirmActionModal
+        isOpen={Boolean(pendingConfirmAction)}
+        title={
+          pendingConfirmAction?.type === 'vacate'
+            ? `Mark Tenant Vacated in ${pendingConfirmAction.room.name}?`
+            : pendingConfirmAction?.type === 'archive_vacant'
+            ? `Archive ${pendingConfirmAction.room.name}?`
+            : pendingConfirmAction?.type === 'delete_room'
+            ? `Remove ${pendingConfirmAction.room.name} Permanently?`
+            : ''
+        }
+        description={
+          pendingConfirmAction?.type === 'vacate'
+            ? `This moves ${
+                pendingConfirmAction.room.tenant?.fullName || 'the current tenant'
+              } to Previous Tenants History and sets the room to Vacant.`
+            : pendingConfirmAction?.type === 'archive_vacant'
+            ? 'Moves this room into the Archive Center. Receipts and tenant history stay safely stored and restorable anytime.'
+            : pendingConfirmAction?.type === 'delete_room'
+            ? 'Permanent removal deletes the room card after security verification. Historical tenant & bill records stay archived.'
+            : ''
+        }
+        details={
+          pendingConfirmAction?.type === 'vacate'
+            ? [
+                `Sub-meter reading preserved at ${pendingConfirmAction.room.lastMeterReading.toFixed(1)} kWh`,
+                `Held Security Deposit: ₱${(pendingConfirmAction.room.securityDeposit || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+                ...(pendingConfirmAction.room.advanceRent > 0
+                  ? [
+                      `Advance Balance remaining: ₱${pendingConfirmAction.room.advanceRent.toFixed(2)} — refund via Advance / Refund if returning to tenant.`,
+                    ]
+                  : []),
+                ...(pendingConfirmAction.room.unpaidBalance > 0
+                  ? [
+                      `Unpaid balance at move-out: ₱${pendingConfirmAction.room.unpaidBalance.toFixed(2)}`,
+                    ]
+                  : []),
+              ]
+            : pendingConfirmAction?.type === 'delete_room'
+            ? [
+                `Final meter reading: ${pendingConfirmAction.room.lastMeterReading.toFixed(1)} kWh`,
+                `Next step requires ${isMobileDevice() ? 'Fingerprint (or 4-Digit PIN)' : '4-Digit Security PIN'} verification.`,
+              ]
+            : []
+        }
+        variant={
+          pendingConfirmAction?.type === 'delete_room'
+            ? 'danger'
+            : pendingConfirmAction?.type === 'archive_vacant'
+            ? 'info'
+            : 'warning'
+        }
+        iconType={
+          pendingConfirmAction?.type === 'delete_room'
+            ? 'delete'
+            : pendingConfirmAction?.type === 'archive_vacant'
+            ? 'archive'
+            : 'vacate'
+        }
+        confirmLabel={
+          pendingConfirmAction?.type === 'vacate'
+            ? 'Confirm Tenant Vacated'
+            : pendingConfirmAction?.type === 'archive_vacant'
+            ? 'Confirm Archive Room'
+            : 'Continue to Security Check'
+        }
+        reasonLabel={
+          pendingConfirmAction?.type === 'vacate'
+            ? 'Reason for Moving Out / Vacating'
+            : undefined
+        }
+        reasonOptions={
+          pendingConfirmAction?.type === 'vacate'
+            ? [
+                'Stopped Paying Rent / Vacated (Moved to History)',
+                'Completed Lease (Moved Out)',
+                'Transferred to Another Room',
+              ]
+            : undefined
+        }
+        selectedReason={
+          pendingConfirmAction?.type === 'vacate'
+            ? pendingConfirmAction.reason
+            : undefined
+        }
+        onChangeReason={(reason) => {
+          setPendingConfirmAction((curr) =>
+            curr && curr.type === 'vacate' ? { ...curr, reason } : curr
+          );
+        }}
+        onCancel={() => setPendingConfirmAction(null)}
+        onConfirm={() => {
+          if (!pendingConfirmAction) return;
+          const action = pendingConfirmAction;
+          setPendingConfirmAction(null);
+
+          if (action.type === 'vacate') {
+            handleMoveOutTenant(action.room, action.reason);
+          } else if (action.type === 'archive_vacant') {
+            executeArchiveVacantRoom(action.room);
+          } else if (action.type === 'delete_room') {
+            const mobileAuth = isMobileDevice();
+            setPendingAuthAction({
+              title: `Remove ${action.room.name}?`,
+              description: mobileAuth
+                ? 'Verify with Fingerprint (or 4-Digit PIN) to permanently remove this room.'
+                : 'Enter your 4-Digit Security PIN to permanently remove this room.',
+              onConfirm: () => executeDeleteRoomAfterPin(action.room),
+            });
+          }
+        }}
+      />
+
+      {/* Security Auth Modal (Mobile Fingerprint / Desktop 4-Digit PIN) for Room Removal, Advance Payments & Refunds */}
       <PinAuthModal
-        isOpen={Boolean(roomPendingPinDelete)}
-        title={`Remove ${roomPendingPinDelete?.name || 'Room'}?`}
-        description="Removing a room requires your 4-digit security PIN."
+        isOpen={Boolean(pendingAuthAction)}
+        title={pendingAuthAction?.title}
+        description={pendingAuthAction?.description}
         security={settings.security}
-        onClose={() => setRoomPendingPinDelete(null)}
-        onAuthorized={handleConfirmDeleteRoomAfterPin}
+        onClose={() => setPendingAuthAction(null)}
+        onAuthorized={() => {
+          const action = pendingAuthAction;
+          setPendingAuthAction(null);
+          if (action) action.onConfirm();
+        }}
       />
 
       {/* Interactive Easy Go-Through Guide Modal */}

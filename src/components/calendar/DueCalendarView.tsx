@@ -10,6 +10,7 @@ import {
   Clock,
   DoorOpen,
   ListFilter,
+  Lock,
   MessageCircle,
   ReceiptText,
   Sparkles,
@@ -21,7 +22,9 @@ import { BillRecord, NavigationTab, Room } from '../../types/rental';
 import {
   formatMessengerBillSummary,
   formatPesoPrivacy,
+  getCalendarMeterScanEligibility,
   maskPhoneNumber,
+  normalizeMonthKey,
 } from '../../utils/billingCalculator';
 import { openMessengerAppWithReceipt } from '../../services/notificationService';
 
@@ -109,10 +112,7 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
 
   // Map each room to its due status for the selected month
   const roomDueMap = useMemo(() => {
-    const monthShort = new Date(currentYear, currentMonth, 1).toLocaleDateString('en-US', {
-      month: 'short',
-      year: 'numeric',
-    });
+    const targetMonthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
 
     return occupiedRooms.map((room) => {
       // Due day is usually 1 - 10, defaults to 5 if unset
@@ -120,15 +120,12 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
         ? Math.min(Math.max(room.tenant.dueDayOfMonth, 1), daysInMonth)
         : 5;
 
-      // Find matching bill for this month & room
+      // Find matching bill for this month & room using normalized billingPeriod
       const bill = bills.find(
         (b) =>
           b.roomId === room.id &&
           !b.isArchived &&
-          (b.billingPeriod === monthShort ||
-            (b.createdAt &&
-              new Date(b.createdAt).getMonth() === currentMonth &&
-              new Date(b.createdAt).getFullYear() === currentYear))
+          normalizeMonthKey(b.billingPeriod) === targetMonthKey
       );
 
       const status = bill ? bill.status : 'unpaid';
@@ -679,6 +676,12 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
               {filteredDueList.map((item) => {
                 const { room, dueDay, bill, status, totalDue, balanceDue } = item;
                 const tenant = room.tenant;
+                const scanEligibility = getCalendarMeterScanEligibility(
+                  currentYear,
+                  currentMonth,
+                  status === 'paid',
+                  today
+                );
 
                 return (
                   <div
@@ -773,58 +776,81 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
                     </div>
 
                     {/* 1-Tap Action Row */}
-                    <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-[#1C2536]">
-                      <button
-                        type="button"
-                        onClick={() => onOpenScanMeter(room)}
-                        className="flex-1 min-w-[110px] py-2.5 px-3 rounded-xl bg-[#172233] hover:bg-[#202E45] border border-[#2B3C56] text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Camera className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Scan Meter</span>
-                      </button>
-
-                      {bill ? (
-                        <button
-                          type="button"
-                          onClick={() => onSelectBillForReceipt(bill)}
-                          className="flex-1 min-w-[110px] py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/20"
-                        >
-                          <ReceiptText className="w-3.5 h-3.5" />
-                          <span>Receipt</span>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => onSelectRoomDetails(room)}
-                          className="flex-1 min-w-[110px] py-2.5 px-3 rounded-xl bg-[#172233] hover:bg-[#202E45] border border-[#2B3C56] text-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                        >
-                          <span>Room Details</span>
-                        </button>
+                    <div className="space-y-2 pt-2.5 border-t border-[#1C2536]">
+                      {!scanEligibility.canScan && (
+                        <p className="text-[11px] text-slate-400 flex items-center gap-1.5 px-0.5">
+                          <Lock className="w-3 h-3 text-slate-500 shrink-0" />
+                          <span>{scanEligibility.helperText}</span>
+                        </p>
                       )}
-
-                      {bill && (
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => {
-                            openMessengerAppWithReceipt({
-                              textSummary: formatMessengerBillSummary(
-                                bill,
-                                '4Rent Management System'
-                              ),
-                              receiptNo: bill.receiptNo,
-                              tenantName: bill.tenantName,
-                              roomName: bill.roomName,
-                              messengerHandle: bill.tenantMessenger,
-                              shareUrl: window.location.href,
-                            });
+                            if (scanEligibility.canScan) {
+                              onOpenScanMeter(room);
+                            }
                           }}
-                          className="py-2.5 px-3 rounded-xl bg-[#172233] hover:bg-[#202E45] border border-blue-500/35 text-blue-400 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                          title="Forward Receipt to Messenger"
+                          disabled={!scanEligibility.canScan}
+                          title={scanEligibility.helperText}
+                          className={`flex-1 min-w-[125px] py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                            scanEligibility.canScan
+                              ? 'bg-[#172233] hover:bg-[#202E45] border-[#2B3C56] text-amber-300 cursor-pointer'
+                              : 'bg-[#111722] border-[#1F293B] text-slate-500 cursor-not-allowed'
+                          }`}
                         >
-                          <MessageCircle className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Messenger</span>
+                          {scanEligibility.canScan ? (
+                            <Camera className="w-3.5 h-3.5 text-amber-400" />
+                          ) : (
+                            <Lock className="w-3.5 h-3.5 text-slate-500" />
+                          )}
+                          <span>{scanEligibility.buttonLabel}</span>
                         </button>
-                      )}
+
+                        <button
+                          type="button"
+                          onClick={() => onSelectRoomDetails(room)}
+                          className="flex-1 min-w-[115px] py-2.5 px-3 rounded-xl bg-[#172233] hover:bg-[#202E45] border border-[#2B3C56] text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        >
+                          <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Room Details</span>
+                        </button>
+
+                        {bill && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectBillForReceipt(bill)}
+                            className="flex-1 min-w-[100px] py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/20"
+                          >
+                            <ReceiptText className="w-3.5 h-3.5" />
+                            <span>Receipt</span>
+                          </button>
+                        )}
+
+                        {bill && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openMessengerAppWithReceipt({
+                                textSummary: formatMessengerBillSummary(
+                                  bill,
+                                  '4Rent Management System'
+                                ),
+                                receiptNo: bill.receiptNo,
+                                tenantName: bill.tenantName,
+                                roomName: bill.roomName,
+                                messengerHandle: bill.tenantMessenger,
+                                shareUrl: window.location.href,
+                              });
+                            }}
+                            className="py-2.5 px-3 rounded-xl bg-[#172233] hover:bg-[#202E45] border border-blue-500/35 text-blue-400 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                            title="Forward Receipt to Messenger"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Messenger</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
