@@ -442,14 +442,13 @@ export function setPendingCloudApply(
   }
 }
 
-export function consumePendingCloudApply(): {
+export function peekPendingCloudApply(): {
   propertyCode: string;
   appliedMonth: string;
 } | null {
   try {
     const raw = localStorage.getItem(PENDING_CLOUD_APPLY_KEY);
     if (!raw) return null;
-    localStorage.removeItem(PENDING_CLOUD_APPLY_KEY);
     const parsed = JSON.parse(raw);
     if (parsed?.propertyCode) {
       return {
@@ -461,6 +460,25 @@ export function consumePendingCloudApply(): {
   } catch {
     return null;
   }
+}
+
+export function clearPendingCloudApply(): void {
+  try {
+    localStorage.removeItem(PENDING_CLOUD_APPLY_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function consumePendingCloudApply(): {
+  propertyCode: string;
+  appliedMonth: string;
+} | null {
+  const pending = peekPendingCloudApply();
+  if (pending) {
+    clearPendingCloudApply();
+  }
+  return pending;
 }
 
 export async function flushMasterIndexedDbNow(): Promise<void> {

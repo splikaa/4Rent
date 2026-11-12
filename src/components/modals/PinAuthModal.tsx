@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Delete, Fingerprint, Lock, ShieldAlert, X } from 'lucide-react';
 import { SecurityConfig } from '../../types/rental';
 import { verifyDeviceBiometrics } from '../../services/authService';
@@ -24,6 +24,13 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
   const isMobile = isMobileDevice();
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setPin('');
+      setError(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

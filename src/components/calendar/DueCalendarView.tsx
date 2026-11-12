@@ -120,11 +120,12 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
         ? Math.min(Math.max(room.tenant.dueDayOfMonth, 1), daysInMonth)
         : 5;
 
-      // Find matching bill for this month & room using normalized billingPeriod
+      // Find matching bill for this month, room & active tenant using normalized billingPeriod
       const bill = bills.find(
         (b) =>
           b.roomId === room.id &&
           !b.isArchived &&
+          (!room.tenant?.fullName || b.tenantName === room.tenant.fullName) &&
           normalizeMonthKey(b.billingPeriod) === targetMonthKey
       );
 

@@ -12,7 +12,7 @@ import {
 import {
   appendAuditLog,
   applyCloudSnapshotCleanly,
-  consumePendingCloudApply,
+  clearPendingCloudApply,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   isAppHydrated,
@@ -21,6 +21,7 @@ import {
   loadRooms,
   loadSettings,
   loadTenantHistory,
+  peekPendingCloudApply,
   saveBills,
   saveInquiries,
   saveRooms,
@@ -310,7 +311,7 @@ export function App() {
       let appliedPendingCloud = false;
 
       try {
-        const pendingApply = consumePendingCloudApply();
+        const pendingApply = peekPendingCloudApply();
         if (pendingApply) {
           const currentSettings = loadSettings();
           const appliedMonth = pendingApply.appliedMonth || normalizeMonthKey();
@@ -331,6 +332,7 @@ export function App() {
               ...pendingSync,
               lastSyncedAt: res.updatedAt || new Date().toISOString(),
             });
+            clearPendingCloudApply();
             setRooms(loadRooms());
             setBills(loadBills());
             setInquiries(loadInquiries());
@@ -1383,7 +1385,8 @@ export function App() {
     billId: string,
     amount: number,
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
-    referenceNo?: string
+    referenceNo?: string,
+    onCommitted?: () => void
   ) => {
     const targetBill = bills.find((b) => b.id === billId);
     if (!targetBill) return;
@@ -1398,11 +1401,15 @@ export function App() {
         description: `${targetBill.roomName}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} will credit to Next Month Advance Balance. ${
           mobileAuth ? 'Scan Fingerprint or enter 4-Digit PIN.' : 'Enter your 4-Digit Security PIN.'
         }`,
-        onConfirm: () => handleRecordPayment(billId, amount, method, referenceNo),
+        onConfirm: () => {
+          handleRecordPayment(billId, amount, method, referenceNo);
+          onCommitted?.();
+        },
       });
       return;
     }
     handleRecordPayment(billId, amount, method, referenceNo);
+    onCommitted?.();
   };
 
   const requestWithdrawAdvance = (
@@ -1981,6 +1988,82 @@ export function App() {
     );
   }
 
+  const getConfirmModalConfig = () => {
+    if (!pendingConfirmAction) {
+      return {
+        title: '',
+        description: '',
+        details: [] as string[],
+        variant: 'warning' as const,
+        iconType: 'warning' as const,
+        confirmLabel: 'Confirm',
+      };
+    }
+
+    if (pendingConfirmAction.type === 'vacate') {
+      const room = pendingConfirmAction.room;
+      const details = [
+        `Sub-meter reading preserved at ${room.lastMeterReading.toFixed(1)} kWh`,
+        `Held Security Deposit: ₱${(room.securityDeposit || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+      ];
+      if (room.advanceRent > 0) {
+        details.push(
+          `Advance Balance remaining: ₱${room.advanceRent.toFixed(2)} — refund via Advance / Refund if returning to tenant.`
+        );
+      }
+      if (room.unpaidBalance > 0) {
+        details.push(
+          `Unpaid balance at move-out: ₱${room.unpaidBalance.toFixed(2)}`
+        );
+      }
+      return {
+        title: `Mark Tenant Vacated in ${room.name}?`,
+        description: `This moves ${room.tenant?.fullName || 'the current tenant'} to Previous Tenants History and sets the room to Vacant.`,
+        details,
+        variant: 'warning' as const,
+        iconType: 'vacate' as const,
+        confirmLabel: 'Confirm Tenant Vacated',
+        reasonLabel: 'Reason for Moving Out / Vacating',
+        reasonOptions: [
+          'Stopped Paying Rent / Vacated (Moved to History)',
+          'Completed Lease (Moved Out)',
+          'Transferred to Another Room',
+        ],
+        selectedReason: pendingConfirmAction.reason,
+      };
+    }
+
+    if (pendingConfirmAction.type === 'archive_vacant') {
+      return {
+        title: `Archive ${pendingConfirmAction.room.name}?`,
+        description:
+          'Moves this room into the Archive Center. Receipts and tenant history stay safely stored and restorable anytime.',
+        details: [] as string[],
+        variant: 'info' as const,
+        iconType: 'archive' as const,
+        confirmLabel: 'Confirm Archive Room',
+      };
+    }
+
+    const authMethod = isMobileDevice()
+      ? 'Fingerprint (or 4-Digit PIN)'
+      : '4-Digit Security PIN';
+    return {
+      title: `Remove ${pendingConfirmAction.room.name} Permanently?`,
+      description:
+        'Permanent removal deletes the room card after security verification. Historical tenant & bill records stay archived.',
+      details: [
+        `Final meter reading: ${pendingConfirmAction.room.lastMeterReading.toFixed(1)} kWh`,
+        `Next step requires ${authMethod} verification.`,
+      ],
+      variant: 'danger' as const,
+      iconType: 'delete' as const,
+      confirmLabel: 'Continue to Security Check',
+    };
+  };
+
+  const confirmModalConfig = getConfirmModalConfig();
+
   // 3. Main Adaptive Application Shell (Desktop + Mobile App)
   return (
     <div className="min-h-screen w-full bg-transparent text-slate-100 flex">
@@ -2255,89 +2338,15 @@ export function App() {
       {/* Explicit Action Confirmation Modal (Tenant Vacated, Archive Vacant Room, Remove Room) */}
       <ConfirmActionModal
         isOpen={Boolean(pendingConfirmAction)}
-        title={
-          pendingConfirmAction?.type === 'vacate'
-            ? `Mark Tenant Vacated in ${pendingConfirmAction.room.name}?`
-            : pendingConfirmAction?.type === 'archive_vacant'
-            ? `Archive ${pendingConfirmAction.room.name}?`
-            : pendingConfirmAction?.type === 'delete_room'
-            ? `Remove ${pendingConfirmAction.room.name} Permanently?`
-            : ''
-        }
-        description={
-          pendingConfirmAction?.type === 'vacate'
-            ? `This moves ${
-                pendingConfirmAction.room.tenant?.fullName || 'the current tenant'
-              } to Previous Tenants History and sets the room to Vacant.`
-            : pendingConfirmAction?.type === 'archive_vacant'
-            ? 'Moves this room into the Archive Center. Receipts and tenant history stay safely stored and restorable anytime.'
-            : pendingConfirmAction?.type === 'delete_room'
-            ? 'Permanent removal deletes the room card after security verification. Historical tenant & bill records stay archived.'
-            : ''
-        }
-        details={
-          pendingConfirmAction?.type === 'vacate'
-            ? [
-                `Sub-meter reading preserved at ${pendingConfirmAction.room.lastMeterReading.toFixed(1)} kWh`,
-                `Held Security Deposit: ₱${(pendingConfirmAction.room.securityDeposit || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
-                ...(pendingConfirmAction.room.advanceRent > 0
-                  ? [
-                      `Advance Balance remaining: ₱${pendingConfirmAction.room.advanceRent.toFixed(2)} — refund via Advance / Refund if returning to tenant.`,
-                    ]
-                  : []),
-                ...(pendingConfirmAction.room.unpaidBalance > 0
-                  ? [
-                      `Unpaid balance at move-out: ₱${pendingConfirmAction.room.unpaidBalance.toFixed(2)}`,
-                    ]
-                  : []),
-              ]
-            : pendingConfirmAction?.type === 'delete_room'
-            ? [
-                `Final meter reading: ${pendingConfirmAction.room.lastMeterReading.toFixed(1)} kWh`,
-                `Next step requires ${isMobileDevice() ? 'Fingerprint (or 4-Digit PIN)' : '4-Digit Security PIN'} verification.`,
-              ]
-            : []
-        }
-        variant={
-          pendingConfirmAction?.type === 'delete_room'
-            ? 'danger'
-            : pendingConfirmAction?.type === 'archive_vacant'
-            ? 'info'
-            : 'warning'
-        }
-        iconType={
-          pendingConfirmAction?.type === 'delete_room'
-            ? 'delete'
-            : pendingConfirmAction?.type === 'archive_vacant'
-            ? 'archive'
-            : 'vacate'
-        }
-        confirmLabel={
-          pendingConfirmAction?.type === 'vacate'
-            ? 'Confirm Tenant Vacated'
-            : pendingConfirmAction?.type === 'archive_vacant'
-            ? 'Confirm Archive Room'
-            : 'Continue to Security Check'
-        }
-        reasonLabel={
-          pendingConfirmAction?.type === 'vacate'
-            ? 'Reason for Moving Out / Vacating'
-            : undefined
-        }
-        reasonOptions={
-          pendingConfirmAction?.type === 'vacate'
-            ? [
-                'Stopped Paying Rent / Vacated (Moved to History)',
-                'Completed Lease (Moved Out)',
-                'Transferred to Another Room',
-              ]
-            : undefined
-        }
-        selectedReason={
-          pendingConfirmAction?.type === 'vacate'
-            ? pendingConfirmAction.reason
-            : undefined
-        }
+        title={confirmModalConfig.title}
+        description={confirmModalConfig.description}
+        details={confirmModalConfig.details}
+        variant={confirmModalConfig.variant}
+        iconType={confirmModalConfig.iconType}
+        confirmLabel={confirmModalConfig.confirmLabel}
+        reasonLabel={confirmModalConfig.reasonLabel}
+        reasonOptions={confirmModalConfig.reasonOptions}
+        selectedReason={confirmModalConfig.selectedReason}
         onChangeReason={(reason) => {
           setPendingConfirmAction((curr) =>
             curr && curr.type === 'vacate' ? { ...curr, reason } : curr

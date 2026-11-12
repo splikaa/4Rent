@@ -17,6 +17,34 @@ interface ConfirmActionModalProps {
   onConfirm: () => void;
 }
 
+const VARIANT_STYLES: Record<
+  NonNullable<ConfirmActionModalProps['variant']>,
+  { badge: string; button: string }
+> = {
+  danger: {
+    badge: 'bg-red-500/15 border-red-500/35 text-red-400',
+    button: 'bg-red-500 hover:bg-red-400 text-white shadow-red-500/20',
+  },
+  info: {
+    badge: 'bg-blue-500/15 border-blue-500/35 text-blue-400',
+    button: 'bg-blue-500 hover:bg-blue-400 text-slate-950 shadow-blue-500/20',
+  },
+  warning: {
+    badge: 'bg-amber-500/15 border-amber-500/35 text-amber-400',
+    button: 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20',
+  },
+};
+
+const ICON_MAP: Record<
+  NonNullable<ConfirmActionModalProps['iconType']>,
+  React.ComponentType<{ className?: string }>
+> = {
+  archive: Archive,
+  delete: Trash2,
+  vacate: UserMinus,
+  warning: AlertTriangle,
+};
+
 export const ConfirmActionModal: React.FC<ConfirmActionModalProps> = ({
   isOpen,
   title,
@@ -34,28 +62,8 @@ export const ConfirmActionModal: React.FC<ConfirmActionModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const badgeStyle =
-    variant === 'danger'
-      ? 'bg-red-500/15 border-red-500/35 text-red-400'
-      : variant === 'info'
-      ? 'bg-blue-500/15 border-blue-500/35 text-blue-400'
-      : 'bg-amber-500/15 border-amber-500/35 text-amber-400';
-
-  const buttonStyle =
-    variant === 'danger'
-      ? 'bg-red-500 hover:bg-red-400 text-white shadow-red-500/20'
-      : variant === 'info'
-      ? 'bg-blue-500 hover:bg-blue-400 text-slate-950 shadow-blue-500/20'
-      : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20';
-
-  const Icon =
-    iconType === 'archive'
-      ? Archive
-      : iconType === 'delete'
-      ? Trash2
-      : iconType === 'vacate'
-      ? UserMinus
-      : AlertTriangle;
+  const { badge: badgeStyle, button: buttonStyle } = VARIANT_STYLES[variant];
+  const Icon = ICON_MAP[iconType];
 
   return (
     <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">

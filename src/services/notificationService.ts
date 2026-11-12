@@ -279,11 +279,12 @@ export async function openMessengerAppWithReceipt(options: {
       }
     };
 
-    const mobileClipboardHint = copiedImageToClipboard
-      ? 'Receipt image copied! '
-      : pngDataUrl
-      ? ''
-      : 'Details copied! ';
+    let mobileClipboardHint = 'Details copied! ';
+    if (copiedImageToClipboard) {
+      mobileClipboardHint = 'Receipt image copied! ';
+    } else if (pngDataUrl) {
+      mobileClipboardHint = '';
+    }
 
     if (cleanHandle) {
       openExternalTarget(`https://m.me/${encodeURIComponent(cleanHandle)}`);

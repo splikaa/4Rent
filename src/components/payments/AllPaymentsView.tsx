@@ -31,7 +31,8 @@ interface AllPaymentsViewProps {
     billId: string,
     amount: number,
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
-    referenceNo?: string
+    referenceNo?: string,
+    onCommitted?: () => void
   ) => void;
   onOpenAdvanceModal?: (room: Room) => void;
   onArchiveBill: (billId: string) => void;
@@ -105,8 +106,13 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     if (!payingBill) return;
     const amt = parseFloat(payAmount) || 0;
     if (amt <= 0) return;
-    onRecordPayment(payingBill.id, amt, payMethod, payRef.trim() || undefined);
-    setPayingBill(null);
+    onRecordPayment(
+      payingBill.id,
+      amt,
+      payMethod,
+      payRef.trim() || undefined,
+      () => setPayingBill(null)
+    );
   };
 
   const enteredPayNum = parseFloat(payAmount) || 0;

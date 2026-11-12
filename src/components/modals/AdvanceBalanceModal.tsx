@@ -16,6 +16,7 @@ import {
   getAdjacentMonthKey,
   isMobileDevice,
   normalizeMonthKey,
+  roundCurrency,
 } from '../../utils/billingCalculator';
 
 interface AdvanceBalanceModalProps {
@@ -86,12 +87,12 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
       );
       setAmount('');
     } else {
-      const targetLabel =
-        targetCycleNote === 'following_month'
-          ? secondNextMonthLabel
-          : targetCycleNote === 'prepaid_credit'
-          ? 'Next / Succeeding Months'
-          : nextMonthLabel;
+      const targetLabels: Record<string, string> = {
+        following_month: secondNextMonthLabel,
+        prepaid_credit: 'Next / Succeeding Months',
+        next_month: nextMonthLabel,
+      };
+      const targetLabel = targetLabels[targetCycleNote] || nextMonthLabel;
       const depositNote =
         previewAppliedUnpaid > 0
           ? `Settled ${formatPeso(previewAppliedUnpaid)} unpaid bill; +${formatPeso(previewAddedAdvance)} Advance for ${targetLabel}`
@@ -251,20 +252,20 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAmount(String(room.monthlyRent * 2))}
+                      onClick={() => setAmount(String(roundCurrency(room.monthlyRent * 2)))}
                       className="px-2.5 py-1.5 rounded-lg bg-[#0E131C] hover:bg-[#192334] border border-[#252F42] text-[11px] font-bold text-slate-300 cursor-pointer"
                     >
-                      +2 Months ({formatPeso(room.monthlyRent * 2)})
+                      +2 Months ({formatPeso(roundCurrency(room.monthlyRent * 2))})
                     </button>
                     {currentUnpaid > 0 && (
                       <button
                         type="button"
                         onClick={() =>
-                          setAmount(String(currentUnpaid + room.monthlyRent))
+                          setAmount(String(roundCurrency(currentUnpaid + room.monthlyRent)))
                         }
                         className="px-2.5 py-1.5 rounded-lg bg-[#0E131C] hover:bg-[#192334] border border-amber-500/35 text-[11px] font-bold text-amber-300 cursor-pointer"
                       >
-                        Pay Due + Next Month ({formatPeso(currentUnpaid + room.monthlyRent)})
+                        Pay Due + Next Month ({formatPeso(roundCurrency(currentUnpaid + room.monthlyRent))})
                       </button>
                     )}
                   </div>
