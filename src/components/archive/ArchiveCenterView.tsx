@@ -47,10 +47,10 @@ export const ArchiveCenterView: React.FC<ArchiveCenterViewProps> = ({
         </button>
         <div className="text-center">
           <h1 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
-            Archive & Previous Tenants
+            Archive
           </h1>
           <p className="text-[11px] text-slate-400 hidden sm:block">
-            Historical Tenant Records, Receipts & Archived Units
+            Past tenants, receipts &amp; archived units
           </p>
         </div>
         <div className="w-11" />

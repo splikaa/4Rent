@@ -11,7 +11,9 @@ import {
   Eye,
   EyeOff,
   FileCheck2,
+  Fingerprint,
   Laptop,
+  Loader2,
   Lock,
   Plus,
   RefreshCw,
@@ -50,6 +52,10 @@ import {
   FIREBASE_RULES_JSON,
 } from '../../services/firebaseSync';
 import { requestAndVerifyNotifications } from '../../services/notificationService';
+import {
+  isDeviceBiometricsAvailable,
+  registerDeviceBiometrics,
+} from '../../services/authService';
 import {
   formatMonthKeyLabel,
   formatPhoneNumber,
@@ -101,6 +107,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const mobileLock = getMobileCodeMonthlyLock(form.cloudSync);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isVerifyingNotification, setIsVerifyingNotification] = useState(false);
+  const [isEnrollingBiometrics, setIsEnrollingBiometrics] = useState(false);
+  const [bioSupportReason, setBioSupportReason] = useState<string | null>(null);
+
+  useEffect(() => {
+    isDeviceBiometricsAvailable().then((info) => {
+      if (!info.supported && info.reason) setBioSupportReason(info.reason);
+    });
+  }, []);
   const [showDevCloudConfig, setShowDevCloudConfig] = useState(false);
   const [showAuditLogs, setShowAuditLogs] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
@@ -458,14 +472,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <span>Monthly Electric Rate Schedule (₱ / kWh)</span>
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                  Set rates per month (e.g. Nov: ₱11.84, Dec: ₱11.63). Saving reflects instantly on active receipts — previous applied receipts remain unchanged.
+                  Rates from January through the current month. Changes update active receipts right away.
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {getScheduledMonthKeys(new Date(), 3, form.monthlyElectricRates).map(
-                (monthKey, idx) => {
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-3">
+              {getScheduledMonthKeys(new Date(), 0, form.monthlyElectricRates).map(
+                (monthKey) => {
                   const val =
                     form.monthlyElectricRates?.[monthKey] ??
                     form.defaultElectricRate;
@@ -479,18 +493,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                        <label className="text-xs font-bold text-white flex items-center gap-1">
+                        <label className="text-xs font-bold text-white flex items-center gap-1 min-w-0 truncate">
                           <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                          <span>{formatMonthKeyLabel(monthKey, 'long')}</span>
+                          <span className="truncate">{formatMonthKeyLabel(monthKey, 'short')}</span>
                         </label>
                         {isCurrent && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
-                            This Month
-                          </span>
-                        )}
-                        {!isCurrent && idx === 1 && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                            Next Month
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 shrink-0">
+                            Current
                           </span>
                         )}
                       </div>
@@ -536,6 +545,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </label>
                 <input
                   type="month"
+                  max={normalizeMonthKey()}
                   value={customMonthInput}
                   onChange={(e) => setCustomMonthInput(e.target.value)}
                   className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs text-white focus:border-amber-500 focus:outline-none"
@@ -559,13 +569,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="button"
                 onClick={() => {
                   const key = normalizeMonthKey(customMonthInput);
+                  const currentKey = normalizeMonthKey();
+                  if (key > currentKey) {
+                    setStatusBanner(
+                      `Future months (${formatMonthKeyLabel(key, 'long')}) are not available yet until that month arrives.`
+                    );
+                    return;
+                  }
                   const rate = parseFloat(customRateInput);
                   if (!key || !Number.isFinite(rate) || rate < 0) return;
                   const nextRates = {
                     ...(form.monthlyElectricRates || {}),
                     [key]: Math.round(rate * 100) / 100,
                   };
-                  const currentKey = normalizeMonthKey();
                   const nextSettings: AppSettings = {
                     ...form,
                     defaultElectricRate:
@@ -600,27 +616,129 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         {/* 2. Security & Notifications */}
         <div className="surface-card rounded-3xl p-5 sm:p-7 space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-[#232F44]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#232F44]">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
                 <Lock className="w-5 h-5" />
               </div>
               <div>
                 <h2 className="text-base font-extrabold text-white">
-                  Security & Notifications
+                  Security &amp; Notifications
                 </h2>
                 <p className="text-xs text-slate-400">
-                  PIN authentication & verified due reminders
+                  Biometrics / PIN authentication &amp; verified due reminders
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={onOpenSecuritySetup}
-              className="px-3.5 py-1.5 rounded-xl bg-[#1B2436] hover:bg-[#25324A] border border-[#2B3B59] text-xs font-bold text-amber-400 cursor-pointer"
-            >
-              Configure PIN
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={isEnrollingBiometrics}
+                onClick={async () => {
+                  setIsEnrollingBiometrics(true);
+                  setStatusBanner(null);
+                  const res = await registerDeviceBiometrics();
+                  setIsEnrollingBiometrics(false);
+                  if (res.ok && res.credentialId) {
+                    const nextSettings: AppSettings = {
+                      ...form,
+                      security: {
+                        ...form.security,
+                        isSetupComplete: true,
+                        lockEnabled: true,
+                        authMethod: form.security.pinCode ? 'both' : 'fingerprint',
+                        webAuthnCredentialId: res.credentialId,
+                      },
+                    };
+                    setForm(nextSettings);
+                    onUpdateSettings(nextSettings);
+                    setStatusBanner('Biometrics enrolled! Every PIN screen now supports Biometrics / PIN.');
+                  } else {
+                    setStatusBanner(res.message);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-xs font-extrabold text-emerald-300 flex items-center gap-1.5 cursor-pointer transition disabled:opacity-60"
+              >
+                {isEnrollingBiometrics ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Fingerprint className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {form.security.webAuthnCredentialId
+                    ? 'Re-register Biometrics'
+                    : 'Set Up Biometrics'}
+                </span>
+              </button>
+
+              {form.security.webAuthnCredentialId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextSettings: AppSettings = {
+                      ...form,
+                      security: {
+                        ...form.security,
+                        authMethod: 'pin',
+                        webAuthnCredentialId: undefined,
+                      },
+                    };
+                    setForm(nextSettings);
+                    onUpdateSettings(nextSettings);
+                    setStatusBanner('Biometrics removed from this device. 4-Digit PIN stays active.');
+                  }}
+                  className="px-3 py-2 rounded-xl bg-[#1B2436] hover:bg-red-500/15 border border-[#2B3B59] hover:border-red-500/30 text-xs font-bold text-slate-300 hover:text-red-300 cursor-pointer transition"
+                >
+                  Disable Biometrics
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={onOpenSecuritySetup}
+                className="px-3.5 py-2 rounded-xl bg-[#1B2436] hover:bg-[#25324A] border border-[#2B3B59] text-xs font-bold text-amber-400 cursor-pointer transition"
+              >
+                Configure PIN
+              </button>
+            </div>
+          </div>
+
+          {/* Biometrics & PIN Enrollment Status Strip */}
+          <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <Fingerprint
+                className={`w-5 h-5 shrink-0 mt-0.5 ${
+                  form.security.webAuthnCredentialId
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                }`}
+              />
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-white flex flex-wrap items-center gap-2">
+                  <span>Device Biometrics &amp; PIN Status</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                      form.security.webAuthnCredentialId
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                    }`}
+                  >
+                    {form.security.webAuthnCredentialId
+                      ? 'Biometrics Active'
+                      : 'Biometrics Not Set Up'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                  {form.security.webAuthnCredentialId
+                    ? 'Fingerprint / Windows Hello and 4-Digit PIN are both ready at every PIN prompt.'
+                    : bioSupportReason ||
+                      'Tap "Set Up Biometrics" above to enroll Fingerprint / Windows Hello for quick verification alongside your PIN.'}
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] font-mono-num font-bold text-slate-300 shrink-0">
+              PIN: {form.security.pinCode ? 'Configured' : 'Not Set'}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -734,10 +852,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <div>
                 <h2 className="text-base font-extrabold text-white">
-                  Data Synchronization (Offline / Mobile Data / Wi-Fi)
+                  Data Sync
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Works 100% offline. Automatically synchronizes when connected.
+                  Works offline and syncs automatically when connected.
                 </p>
               </div>
             </div>
@@ -1073,17 +1191,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div>
                 <h2 className="text-base font-extrabold text-white">
                   {isInstalledStandalone
-                    ? 'Installed System Environment & App Status'
+                    ? 'App Status'
                     : isMobile
-                    ? 'Android Mobile Application (Direct APK)'
-                    : 'Desktop & Mobile Applications (Direct Downloads)'}
+                    ? 'Mobile App (Direct APK)'
+                    : 'Desktop & Mobile Apps'}
                 </h2>
                 <p className="text-xs text-slate-400">
                   {isInstalledStandalone
-                    ? 'Running in standalone client mode. Local IndexedDB storage active.'
+                    ? 'Standalone app active with local offline storage.'
                     : isMobile
-                    ? 'Offline Android package with real-time Sub-Meter OCR live camera.'
-                    : 'Zero-setup portable Windows executable & offline Android package.'}
+                    ? 'Offline Mobile App with live Sub-Meter camera.'
+                    : 'Portable Desktop Launcher & offline Mobile App.'}
                 </p>
               </div>
             </div>
@@ -1119,7 +1237,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <Smartphone className="w-4 h-4 text-emerald-400" />
                     )}
                     <span className="font-extrabold text-sm text-white">
-                      {isDesktop ? 'Windows Desktop Host' : 'Android Mobile Client'}
+                      {isDesktop ? 'Desktop App' : 'Mobile App'}
                     </span>
                   </div>
                   <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
@@ -1128,8 +1246,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
                   {isDesktop
-                    ? 'Dedicated standalone window powered by Edge/Chrome host. Maximized fullscreen window mode and Windows desktop/taskbar shortcut indexing enabled.'
-                    : 'Installed mobile APK with live Sub-Meter OCR camera, emerald reticle lock, and direct Facebook Messenger receipt forwarding.'}
+                    ? 'Standalone Desktop App with dedicated window and shortcut support.'
+                    : 'Offline Mobile App with live Sub-Meter camera and direct Messenger sharing.'}
                 </p>
                 <div className="pt-2 border-t border-[#1C2536] flex items-center justify-between text-xs text-slate-400">
                   <span>Storage Engine:</span>
@@ -1252,14 +1370,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               )}
 
-              {/* Android APK Box */}
+              {/* Mobile App APK Box */}
               <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4.5 flex flex-col justify-between gap-4">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Smartphone className="w-4 h-4 text-emerald-400" />
                       <span className="font-extrabold text-sm text-white">
-                        Android Mobile App
+                        Mobile App
                       </span>
                     </div>
                     <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
@@ -1267,7 +1385,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    Real-time Sub-Meter OCR live camera with emerald green lock reticle and 1-tap direct Facebook Messenger receipt image forwarding.
+                    Live Sub-Meter camera scanner with 1-tap Messenger receipt sharing.
                   </p>
                   <div className="text-[11px] font-mono text-slate-400 truncate">
                     File: <span className="text-emerald-400">4Rent-v1.0.0-release.apk</span>

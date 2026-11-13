@@ -18,5 +18,9 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    watch: {
+      // Exclude cloned skill/tool repos so Vite does not watch external workspace trees
+      ignored: ['**/_repos/**', '**/.agents/**'],
+    },
   },
 });

@@ -227,7 +227,7 @@ export const GUIDE_FLOWS: GuideFlowDefinition[] = [
         title: 'Pay Over Due or Prepay Next Month',
         badge: 'Step 1 • Credit',
         instruction:
-          'Record a payment larger than Remaining Balance—or use Advance / Refund quick-fills (+1 Month, +2 Months, Due + Next Month).',
+          'Record a payment larger than Remaining Balance—or use Advance / Refund quick-fills (1-Month Max Advance or Due + Next Month).',
       },
       {
         stepNo: 2,
@@ -288,9 +288,9 @@ export const GUIDE_FLOWS: GuideFlowDefinition[] = [
     order: 7,
     category: 'Safety & Sync',
     shortTitle: 'Sync & Offline',
-    title: 'Offline IndexedDB & Space Code Sync',
+    title: 'Offline Storage & Space Code Sync',
     subtitle:
-      'Run 100% offline in the Android APK or Browser, then pair Mobile from your Desktop Property Space Code.',
+      'Run offline in the Mobile App or browser, then sync via Space Code.',
     mascotMood: 'sync',
     mascotTip: 'Keep your Property Space Code private—anyone with it sees synced data!',
     ruleWarning:

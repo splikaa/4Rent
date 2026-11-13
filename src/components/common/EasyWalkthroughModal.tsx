@@ -153,14 +153,14 @@ export const EasyWalkthroughModal: React.FC<EasyWalkthroughModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm sm:text-base font-extrabold text-white">
-                  4Rent Visual Sprite Guide
+                  4Rent Quick Guide
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-extrabold text-emerald-300 font-mono-num">
-                  {exploredIds.length}/{GUIDE_FLOWS.length} Flows Viewed
+                  {exploredIds.length}/{GUIDE_FLOWS.length} Viewed
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 truncate">
-                Flow-by-flow animated sprites with exact steps &amp; safeguards
+                Step-by-step workflows &amp; built-in safeguards
               </p>
             </div>
           </div>

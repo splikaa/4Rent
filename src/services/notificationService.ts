@@ -65,7 +65,7 @@ export async function requestAndVerifyNotifications(): Promise<{
         finish({
           granted: false,
           verified: false,
-          message: 'Could not verify notification permission on Android.',
+          message: 'Could not verify notification permission on mobile.',
         });
       }
     });

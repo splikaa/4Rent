@@ -89,8 +89,8 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
                 {isMobile
-                  ? 'Official Android Package (.apk) with live Sub-Meter OCR camera'
-                  : 'Zero-install Windows Desktop Launcher & Offline Android Package'}
+                  ? 'Offline Mobile App (.apk) with live Sub-Meter camera'
+                  : 'Portable Desktop Launcher & Offline Mobile App'}
               </p>
             </div>
           </div>
@@ -147,14 +147,14 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                     <div>
                       <div className="flex items-center gap-2">
                         <h3 className="font-extrabold text-white text-base">
-                          1-Click Desktop App (Instant Install)
+                          1-Click Desktop App
                         </h3>
                         <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold border border-emerald-500/40">
                           Recommended
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-1">
-                        Directly installs 4Rent to your Windows Desktop &amp; Start Menu. No files to download, zero security warnings, and opens in a dedicated window!
+                        Installs 4Rent directly to your Desktop &amp; Start Menu in a dedicated window.
                       </p>
                     </div>
                   </div>
@@ -266,7 +266,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                 </div>
               )}
 
-              {/* Android Mobile App Card */}
+              {/* Mobile App Card */}
               <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition duration-300">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
 
@@ -278,7 +278,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-extrabold text-white text-base">
-                          4Rent Android Mobile App
+                          4Rent Mobile App
                         </h3>
                         <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-mono text-[10px] font-bold">
                           .APK
@@ -288,25 +288,25 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-1">
-                        High-speed mobile client with real-time green Sub-Meter viewfinder and 1-tap Messenger forwarding.
+                        Fast offline Mobile App with live Sub-Meter camera and 1-tap Messenger receipt sharing.
                       </p>
 
                       <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-400">
                         <li className="flex items-center gap-1.5">
                           <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Live camera viewfinder with green lock</span>
+                          <span>Live camera viewfinder</span>
                         </li>
                         <li className="flex items-center gap-1.5">
                           <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Direct Messenger image receipt sharing</span>
+                          <span>Direct Messenger sharing</span>
                         </li>
                         <li className="flex items-center gap-1.5">
                           <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Offline-first database (IndexedDB)</span>
+                          <span>Offline-first storage (IndexedDB)</span>
                         </li>
                         <li className="flex items-center gap-1.5">
                           <Check className="w-3 h-3 text-emerald-400 shrink-0" />
-                          <span>Requires Android 7.0+ (ARM64/x86)</span>
+                          <span>Mobile App package (.apk)</span>
                         </li>
                       </ul>
                     </div>
@@ -417,11 +417,11 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
               <div className="rounded-2xl bg-[#131B29] border border-[#243147] p-4">
                 <div className="font-bold text-emerald-400 text-sm flex items-center gap-2 mb-2">
                   <Smartphone className="w-4 h-4" />
-                  <span>How to Install the Android Mobile App</span>
+                  <span>How to Install the Mobile App</span>
                 </div>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs leading-relaxed">
                   <li>
-                    Download <code className="text-emerald-300">4Rent-v1.0.0-release.apk</code> directly on your Android phone.
+                    Download <code className="text-emerald-300">4Rent-v1.0.0-release.apk</code> directly on your mobile device.
                   </li>
                   <li>
                     When download finishes, tap the notification or open your device <strong className="text-white">Files / Downloads</strong> app and tap the APK file.

@@ -187,7 +187,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 type="button"
                 onClick={onOpenDownloadModal}
                 className="inline-flex items-center gap-1.5 h-11 px-4 rounded-2xl bg-[#141C2B] hover:bg-[#1C273C] border border-amber-500/35 text-amber-300 text-xs font-bold transition cursor-pointer btn-fluid shadow-sm"
-                title="Download Windows (.exe) & Android (.apk) apps"
+                title="Download Desktop (.exe) & Mobile App (.apk)"
               >
                 <Download className="w-4 h-4 text-amber-400" />
                 <span>Get Apps</span>
@@ -363,7 +363,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm sm:text-base font-extrabold text-white">
-                  {isMobile ? 'Get Official 4Rent Android App' : 'Get Official 4Rent Windows & Android Apps'}
+                  {isMobile ? 'Get 4Rent Mobile App' : 'Get 4Rent Desktop & Mobile Apps'}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold">
                   {isMobile ? '.APK' : 'v1.1.0'}
@@ -371,8 +371,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1">
                 {isMobile
-                  ? 'Offline Android App with Sub-Meter OCR camera scanner.'
-                  : 'Standalone Windows Launcher (.exe) & offline Android App (.apk).'}
+                  ? 'Offline Mobile App with live Sub-Meter camera.'
+                  : 'Desktop Launcher (.exe) & offline Mobile App (.apk).'}
               </p>
             </div>
           </div>
@@ -384,7 +384,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/25 transition cursor-pointer active:scale-95"
             >
               <Download className="w-4 h-4" />
-              <span>{isMobile ? 'Download Android APK' : 'Download EXE / APK'}</span>
+              <span>{isMobile ? 'Download Mobile App' : 'Download Desktop / Mobile'}</span>
             </button>
           </div>
         </section>
@@ -397,7 +397,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             Your Rooms
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Select a room to view details, billing &amp; meter proof.
+            Select a room for details, billing, and meter logs.
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5">

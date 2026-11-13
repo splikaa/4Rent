@@ -219,13 +219,13 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                Windows Launcher &amp; Offline Android App
+                Desktop Launcher &amp; Offline Mobile App
               </p>
             </button>
           </div>
         )}
 
-        {/* Standalone Installed Badge (Shown when inside Desktop Launcher / Android APK) */}
+        {/* Standalone Installed Badge (Shown when inside Desktop Launcher / Mobile App) */}
         {isInstalledStandalone && (
           <div className="pt-2 px-1">
             <div className="py-2.5 px-3 rounded-2xl bg-[#141C2B] border border-[#233148] flex items-center justify-between text-[11px] text-slate-300">

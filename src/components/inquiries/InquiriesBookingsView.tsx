@@ -132,10 +132,10 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
         <div className="surface-card rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h2 className="text-sm sm:text-base font-extrabold text-white">
-              Room Reservations &amp; Inquiries
+              Bookings &amp; Inquiries
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 mt-1">
-              {vacantRooms.length} vacant {vacantRooms.length === 1 ? 'room' : 'rooms'} available. Convert bookings into move-ins anytime.
+              {vacantRooms.length} vacant {vacantRooms.length === 1 ? 'room' : 'rooms'} available. Convert anytime.
             </p>
           </div>
           <span className="text-xs font-mono-num text-amber-400 font-bold shrink-0 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30">
