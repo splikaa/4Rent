@@ -1,4 +1,4 @@
-const CACHE_NAME = '4rent-management-system-v1.0.2-firebase-ocr';
+const CACHE_NAME = '4rent-management-system-v1.0.3-ocr-security-ui';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
