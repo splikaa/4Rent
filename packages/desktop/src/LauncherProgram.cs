@@ -156,7 +156,7 @@ namespace FourRent.Launcher
                 "Multi-Landlord Data Partitioning",
                 "[ CLOUD SYNC ]",
                 Color.FromArgb(96, 165, 250),
-                "Tenant and billing records are isolated by Property Code. Seamlessly syncs between Windows PC and Android Mobile App."
+                "Tenant and billing records are isolated by Property Code. Syncs seamlessly between Desktop and Mobile App."
             );
             this.Controls.Add(card3);
 
@@ -188,8 +188,8 @@ namespace FourRent.Launcher
             txtPropertyCode.Size = new Size(185, 26);
             pnlPropBox.Controls.Add(txtPropertyCode);
 
-            Label lblPropSyncTag = new Label();
-            lblPropSyncTag.Text = "● Synced with Android Mobile APK";
+                        Label lblPropSyncTag = new Label();
+            lblPropSyncTag.Text = "● Synced with Mobile App";
             lblPropSyncTag.UseMnemonic = false;
             lblPropSyncTag.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             lblPropSyncTag.ForeColor = Color.FromArgb(52, 211, 153);
@@ -245,7 +245,7 @@ namespace FourRent.Launcher
             int halfBtnW = 304;
 
             btnOpenApk = new Button();
-            btnOpenApk.Text = "📱   Android Release APK (Install / Share)";
+            btnOpenApk.Text = "📱   Mobile App (.APK) (Install / Share)";
             btnOpenApk.UseMnemonic = false;
             btnOpenApk.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             btnOpenApk.BackColor = Color.FromArgb(16, 24, 38);
@@ -297,7 +297,7 @@ namespace FourRent.Launcher
             this.Controls.Add(pnlSpecs);
 
             Label lblSpecs = new Label();
-            lblSpecs.Text = "● Desktop Host: ~39 KB  •  Android APK: ~323 KB  •  Zero Installation Required";
+            lblSpecs.Text = "● Desktop Host: Portable (.EXE)  •  Mobile App: Offline (.APK)  •  Zero Installation Required";
             lblSpecs.UseMnemonic = false;
             lblSpecs.Font = new Font("Segoe UI", 8f, FontStyle.Bold);
             lblSpecs.ForeColor = Color.FromArgb(148, 163, 184);
@@ -587,13 +587,13 @@ namespace FourRent.Launcher
                 if (File.Exists(target))
                 {
                     Process.Start("explorer.exe", "/select,\"" + Path.GetFullPath(target) + "\"");
-                    lblStatus.Text = "Status: Selected 4Rent Android APK in folder!";
+                    lblStatus.Text = "Status: Selected 4Rent Mobile App (.APK) in folder!";
                     lblStatus.ForeColor = Color.FromArgb(52, 211, 153);
                 }
                 else
                 {
                     Process.Start("https://splikaa.github.io/4Rent/4Rent-v1.0.0-release.apk");
-                    lblStatus.Text = "Status: Opened online Android APK direct download link.";
+                    lblStatus.Text = "Status: Opened online Mobile App (.APK) direct download link.";
                     lblStatus.ForeColor = Color.FromArgb(52, 211, 153);
                 }
             }

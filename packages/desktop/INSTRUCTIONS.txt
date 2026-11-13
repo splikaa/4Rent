@@ -23,7 +23,7 @@ MULTI-USER DATA PARTITIONING:
   (defaults to `4RENT-MAIN`, or enter your custom code like `4R-PROPERTY1`).
 - All rooms, sub-meter readings, tenant profiles, and receipts are isolated to 
   that Property Code.
-- To sync between your Windows PC and your Android Mobile APK, use the same 
+- To sync between your Windows PC and your Mobile App, use the same 
   Property Code on both devices!
 
 COMMAND-LINE SHORTCUTS:

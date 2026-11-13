@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Offline-First Desktop, Web PWA & Standalone Android Room, Tenant, Advance Balance, and Electric Sub-Meter OCR Billing System.</strong><br/>
+  <strong>Offline-First Desktop, Web PWA & Mobile App for Room, Tenant, Advance Balance, and Electric Sub-Meter OCR Billing.</strong><br/>
   <strong>Version: <code>v1.0.0</code> • Developed by <a href="https://github.com/splikaa">splikaa</a></strong>
 </p>
 
@@ -13,17 +13,17 @@
 
 ## ⚡ Quick Start: Zero Installation for Landlords
 
-Landlords do **not** need Node.js, Python, or developer tools to run **4Rent** on Windows, Android, or modern web browsers:
+Landlords do **not** need Node.js, Python, or developer tools to run **4Rent** on Desktop, Mobile App, or modern web browsers:
 
-### 🖥️ Windows Desktop Launcher (Portable `.EXE`)
+### 🖥️ Desktop Launcher (Portable `.EXE`)
 1. Download **`4Rent-Launcher.exe`** (or **`4Rent-Desktop-Windows.zip`**) from the live web app or [`packages/desktop/`](./packages/desktop/).
 2. Double-click **`4Rent-Launcher.exe`** — no installer or administrator rights needed (`asInvoker`).
 3. Enter your **Property Space Code** once to create an official Desktop shortcut and launch 4Rent in an isolated standalone window.
 
-### 📱 Android Mobile App (Offline-First Signed `.APK`)
-1. Download **`4Rent-v1.0.0-release.apk`** (`~399 KB`) from the live web app or [`packages/mobile/`](./packages/mobile/).
-2. Install on Android (`Android 7.0+`).
-3. Includes Live Camera & Photo Sub-Meter OCR, `HD Crop` register verification, Fingerprint/Biometric unlock, native Facebook Messenger receipt sharing, and offline IndexedDB persistence.
+### 📱 Mobile App (Offline-First Signed `.APK`)
+1. Download **`4Rent-v1.0.0-release.apk`** from the live web app or [`packages/mobile/`](./packages/mobile/).
+2. Install on a mobile device (`Android 7.0+`).
+3. Includes Live Camera & Photo Sub-Meter OCR, `HD Crop` register verification, Biometrics / 4-Digit PIN unlock, Messenger receipt sharing, and offline IndexedDB persistence.
 
 ---
 
@@ -39,7 +39,7 @@ Every flow pairs the animated **4Rent Guide Buddy** mascot with a **Play / Pause
 2. **Flow 2 — Sub-Meter OCR Scan & Auto-Rollover**: Capture `#1 Previous` / `#2 Current` slots via mobile camera or desktop image upload, inspect the zoomed `HD Crop`, and automatically roll `#2` into `#1` next cycle.
 3. **Flow 3 — Calendar Schedule & Pay Window Guard**: Track Day `1–10` due dates, inspect locked future months safely, and prevent duplicate scans once the current month is paid.
 4. **Flow 4 — Official Statement & Receipt Sharing**: Inspect white-paper statements with dual meter photo crops, export clean **single-page A4 PDF** or high-res **PNG**, and share directly via Messenger.
-5. **Flow 5 — Overpayment, Advance Balance & Refund**: Credit excess payments above `Remaining Balance` (or prepaid multi-month deposits) into next-month **Advance Balance**, guarded by **Fingerprint** (Mobile) or **4-Digit PIN** (Desktop/Web), with move-out refunds.
+5. **Flow 5 — Overpayment, Advance Balance & Refund**: Credit excess payments above `Remaining Balance` (up to 1 month advance) into next-month **Advance Balance**, guarded by **Biometrics or 4-Digit PIN**, with move-out refunds.
 6. **Flow 6 — Bookings, Archive Center & Immutable Logs**: Convert reservations into move-ins in 1 tap, restore archived rooms/receipts, and retain **immutable sub-meter reading logs** that cannot be deleted.
 7. **Flow 7 — Offline IndexedDB & Space Code Sync**: Work 100% offline in IndexedDB and pair Mobile safely from Desktop via your private **Property Space Code**.
 
@@ -110,7 +110,7 @@ npm run dev
 # 3. Type-check and build production web assets (outputs to dist/)
 npm run build
 
-# 4. Build and cryptographically sign the offline Android APK
+# 4. Build and cryptographically sign the offline Mobile App APK
 npm run build:apk
 
 # 5. Launch native Electron Desktop host (optional)
@@ -122,11 +122,11 @@ npm run electron
 ```text
 packages/
 ├── desktop/
-│   ├── 4Rent-Launcher.exe          # Portable Windows launcher (~39 KB)
+│   ├── 4Rent-Launcher.exe          # Portable Desktop launcher (~44 KB)
 │   ├── 4rent-icon.ico              # Multi-resolution Windows icon
 │   └── src/LauncherProgram.cs      # C# WinForms launcher source
 └── mobile/
-    └── 4Rent-v1.0.0-release.apk    # Signed offline Android APK (~399 KB)
+    └── 4Rent-v1.0.0-release.apk    # Signed offline Mobile App APK
 ```
 
 ---
