@@ -11,12 +11,8 @@ interface AndroidBiometricWindow {
   __onAndroidBiometricResult?: (ok: boolean, msg: string) => void;
 }
 
-function runAndroidBiometricPrompt(
-  title: string,
-  subtitle: string,
-  messages: { timeout: string; cancel: string; error: string },
-  vibratePattern: number | number[]
-): Promise<{ ok: boolean; message: string } | null> {
+function getNativeAndroidBridge(): AndroidBiometricWindow['AndroidBiometrics'] | null {
+  if (typeof window === 'undefined') return null;
   const win = window as unknown as AndroidBiometricWindow;
   const androidBio = win.AndroidBiometrics;
   if (
@@ -24,6 +20,27 @@ function runAndroidBiometricPrompt(
     typeof androidBio.authenticate !== 'function' ||
     (typeof androidBio.isSupported === 'function' && !androidBio.isSupported())
   ) {
+    return null;
+  }
+  return androidBio;
+}
+
+/**
+ * Returns true if the current environment has native Android biometrics or a registered passkey.
+ */
+export function hasBiometricEnrollment(credentialId?: string): boolean {
+  return Boolean(getNativeAndroidBridge()) || Boolean(credentialId);
+}
+
+function runAndroidBiometricPrompt(
+  title: string,
+  subtitle: string,
+  messages: { timeout: string; cancel: string; error: string },
+  vibratePattern: number | number[]
+): Promise<{ ok: boolean; message: string } | null> {
+  const win = window as unknown as AndroidBiometricWindow;
+  const androidBio = getNativeAndroidBridge();
+  if (!androidBio) {
     return Promise.resolve(null);
   }
 
@@ -149,9 +166,46 @@ export async function registerDeviceBiometrics(): Promise<{
   };
 }
 
+export async function isDeviceBiometricsAvailable(): Promise<{
+  supported: boolean;
+  nativeAndroid: boolean;
+  reason?: string;
+}> {
+  if (typeof window === 'undefined') {
+    return { supported: false, nativeAndroid: false, reason: 'Unavailable in this runtime.' };
+  }
+  if (getNativeAndroidBridge()) {
+    return { supported: true, nativeAndroid: true };
+  }
+  if (window.location.protocol === 'file:') {
+    return {
+      supported: false,
+      nativeAndroid: false,
+      reason: 'Desktop file:// mode does not expose WebAuthn Biometrics; use localhost/web or your 4-digit PIN.',
+    };
+  }
+  try {
+    if (window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable) {
+      const ok = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      return {
+        supported: ok,
+        nativeAndroid: false,
+        reason: ok ? undefined : 'No built-in platform biometric authenticator detected on this device.',
+      };
+    }
+  } catch {
+    // ignore probe errors
+  }
+  return {
+    supported: false,
+    nativeAndroid: false,
+    reason: 'WebAuthn biometrics is not supported in this browser.',
+  };
+}
+
 export async function verifyDeviceBiometrics(
   credentialIdBase64?: string
-): Promise<{ ok: boolean; message: string }> {
+): Promise<{ ok: boolean; notConfigured?: boolean; message: string }> {
   const androidRes = await runAndroidBiometricPrompt(
     'Unlock 4Rent',
     'Scan fingerprint to unlock',
@@ -176,7 +230,8 @@ export async function verifyDeviceBiometrics(
   ) {
     return {
       ok: false,
-      message: 'Biometric sensor unavailable in this environment. Please enter your 4-digit PIN.',
+      notConfigured: true,
+      message: 'Biometrics is not set up on this device yet. Set up Biometrics in Settings or enter your 4-digit PIN.',
     };
   }
 

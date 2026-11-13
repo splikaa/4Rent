@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { Delete, Fingerprint, Lock, ShieldAlert, X } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Fingerprint, Lock, Settings, ShieldAlert, X } from 'lucide-react';
 import { SecurityConfig } from '../../types/rental';
-import { verifyDeviceBiometrics } from '../../services/authService';
-import { isMobileDevice } from '../../utils/billingCalculator';
+import {
+  hasBiometricEnrollment,
+  isDeviceBiometricsAvailable,
+  verifyDeviceBiometrics,
+} from '../../services/authService';
+import { PinKeypad } from '../security/PinKeypad';
 
 interface PinAuthModalProps {
   isOpen: boolean;
@@ -11,26 +15,70 @@ interface PinAuthModalProps {
   security: SecurityConfig;
   onClose: () => void;
   onAuthorized: () => void;
+  onGoToSettings?: () => void;
 }
 
 export const PinAuthModal: React.FC<PinAuthModalProps> = ({
   isOpen,
-  title = 'Authentication PIN Required',
-  description = 'Enter your 4-digit security PIN to confirm removing this room.',
+  title = 'Biometrics / PIN Verification',
+  description = 'Authenticate with Biometrics or your 4-digit security PIN to confirm this action.',
   security,
   onClose,
   onAuthorized,
+  onGoToSettings,
 }) => {
-  const isMobile = isMobileDevice();
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isScanningBio, setIsScanningBio] = useState(false);
+  const [bioUnavailableNote, setBioUnavailableNote] = useState<string | null>(null);
+
+  const hasBioEnrolled = hasBiometricEnrollment(security.webAuthnCredentialId);
+
+  const handleBiometricVerify = useCallback(async () => {
+    if (isScanningBio) return;
+    setError(null);
+    if (!hasBioEnrolled) {
+      setError(
+        'Biometrics is not set up yet. Set up Biometrics in Settings or enter your 4-digit PIN below.'
+      );
+      return;
+    }
+    setIsScanningBio(true);
+    const res = await verifyDeviceBiometrics(security.webAuthnCredentialId);
+    setIsScanningBio(false);
+    if (res.ok) {
+      setPin('');
+      onAuthorized();
+      onClose();
+    } else {
+      setError(res.message || 'Biometric check failed. Please enter your 4-digit PIN.');
+    }
+  }, [hasBioEnrolled, isScanningBio, onAuthorized, onClose, security.webAuthnCredentialId]);
 
   useEffect(() => {
-    if (isOpen) {
-      setPin('');
-      setError(null);
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    setPin('');
+    setError(null);
+    setBioUnavailableNote(null);
+
+    let active = true;
+    isDeviceBiometricsAvailable().then((info) => {
+      if (!active) return;
+      if (!info.supported && info.reason) {
+        setBioUnavailableNote(info.reason);
+      }
+    });
+
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+
+    return () => {
+      active = false;
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -60,30 +108,22 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
     }
   };
 
-  const handleBiometricVerify = async () => {
-    if (!isMobile) return;
-    setError(null);
-    const res = await verifyDeviceBiometrics(security.webAuthnCredentialId);
-    if (res.ok) {
-      setPin('');
-      onAuthorized();
-      onClose();
-    } else {
-      setError('Biometric check failed. Please enter your 4-digit PIN.');
-    }
-  };
-
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
-      <div className="w-full max-w-sm rounded-3xl bg-[#151B26] border border-[#28334A] p-6 shadow-2xl select-none animate-modal-pop">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div className="w-full max-w-sm rounded-2xl sm:rounded-3xl bg-[#151B26] border border-[#28334A] p-5 sm:p-6 shadow-2xl select-none animate-modal-pop my-auto">
         <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
               <ShieldAlert className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="text-base font-extrabold text-white">{title}</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+            <div className="min-w-0">
+              <h3 className="text-base font-extrabold text-white leading-snug">{title}</h3>
+              <p className="text-xs text-slate-400 mt-0.5 leading-snug">{description}</p>
             </div>
           </div>
           <button
@@ -93,95 +133,76 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
               setError(null);
               onClose();
             }}
-            className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+            aria-label="Close security modal"
+            className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {!security.pinCode && (
-          <div className="mb-4 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-[11px] text-amber-300 flex items-center gap-2">
+          <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-[11px] text-amber-300 flex items-center gap-2">
             <Lock className="w-3.5 h-3.5 shrink-0" />
             <span>No Landlord PIN configured. Set a custom PIN in Settings.</span>
           </div>
         )}
 
         {error && (
-          <div className="mb-4 rounded-xl bg-red-500/15 border border-red-500/30 px-3 py-2 text-xs text-red-300 text-center">
+          <div className="mb-3 rounded-xl bg-red-500/15 border border-red-500/30 px-3 py-2 text-xs text-red-300 text-center">
             {error}
           </div>
         )}
 
-        {isMobile && (
+        {hasBioEnrolled ? (
           <button
             type="button"
             onClick={handleBiometricVerify}
-            className="w-full mb-4 py-2.5 px-4 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-extrabold flex items-center justify-center gap-2 transition cursor-pointer"
+            disabled={isScanningBio}
+            className="w-full mb-2 py-2.5 px-4 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-extrabold flex items-center justify-center gap-2 transition cursor-pointer"
           >
-            <Fingerprint className="w-4 h-4" />
-            <span>Authenticate with Fingerprint</span>
+            <Fingerprint className={`w-4 h-4 ${isScanningBio ? 'animate-pulse' : ''}`} />
+            <span>
+              {isScanningBio ? 'Verifying Biometrics...' : 'Authenticate with Biometrics'}
+            </span>
           </button>
+        ) : (
+          <div className="mb-2 rounded-2xl bg-[#0E131C] border border-[#243047] p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-300 min-w-0">
+              <Fingerprint className="w-4 h-4 text-amber-400 shrink-0" />
+              <div className="min-w-0">
+                <p className="font-bold text-white leading-tight">Biometrics Not Set Up</p>
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  {bioUnavailableNote || 'Set up Biometrics in Settings or enter PIN below.'}
+                </p>
+              </div>
+            </div>
+            {onGoToSettings && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPin('');
+                  setError(null);
+                  onClose();
+                  onGoToSettings();
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-[11px] font-bold text-amber-300 flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <Settings className="w-3 h-3" />
+                <span>Setup in Settings</span>
+              </button>
+            )}
+          </div>
         )}
 
-        {/* 4-Dot PIN Indicator */}
-        <div className="flex items-center justify-center gap-4 my-5">
-          {[0, 1, 2, 3].map((idx) => (
-            <div
-              key={idx}
-              className={`w-4 h-4 rounded-full transition-all ${
-                pin.length > idx
-                  ? 'bg-amber-500 scale-110 shadow-[0_0_12px_rgba(245,158,11,0.7)]'
-                  : 'bg-[#0D1119] border border-slate-600'
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Numeric Keypad */}
-        <div className="grid grid-cols-3 gap-2.5">
-          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => handleDigit(d)}
-              className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] active:bg-amber-500 active:text-slate-950 border border-[#242E42] text-lg font-bold text-white transition flex items-center justify-center cursor-pointer"
-            >
-              {d}
-            </button>
-          ))}
-          {isMobile ? (
-            <button
-              type="button"
-              onClick={handleBiometricVerify}
-              title="Verify with Fingerprint"
-              className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] border border-[#242E42] text-amber-400 flex items-center justify-center transition cursor-pointer"
-            >
-              <Fingerprint className="w-5 h-5" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setPin('')}
-              className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] border border-[#242E42] text-xs font-semibold text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-            >
-              Clear
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => handleDigit('0')}
-            className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] active:bg-amber-500 active:text-slate-950 border border-[#242E42] text-lg font-bold text-white transition flex items-center justify-center cursor-pointer"
-          >
-            0
-          </button>
-          <button
-            type="button"
-            onClick={() => setPin((p) => p.slice(0, -1))}
-            className="h-13 rounded-2xl bg-[#0E131C] hover:bg-[#1C2434] border border-[#242E42] text-slate-300 flex items-center justify-center transition cursor-pointer"
-          >
-            <Delete className="w-5 h-5" />
-          </button>
-        </div>
+        <PinKeypad
+          compact
+          pinLength={pin.length}
+          onDigit={handleDigit}
+          onBackspace={() => setPin((p) => p.slice(0, -1))}
+          onBiometricPress={handleBiometricVerify}
+          biometricActive={hasBioEnrolled}
+          enableKeyboard={isOpen}
+        />
       </div>
     </div>
   );
