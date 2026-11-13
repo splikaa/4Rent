@@ -124,6 +124,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setQuickRateValue(String(liveRate));
   }, [bill?.id, bill?.electricRate, bill?.billingPeriod]);
 
+  useEffect(() => {
+    if (!bill) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [bill, onClose]);
+
   // 1:1 Pixel Inspection Lightbox State
   const [lightboxState, setLightboxState] = useState<{
     isOpen: boolean;
@@ -322,7 +331,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         const win = window as any;
         if (win.AndroidNative?.shareToMessenger) {
           setShareFeedback(
-            `PDF generated (${filename}). Use "Download PNG" or "Messenger" on Android App if WebView skips Downloads.`
+            `PDF ready (${filename}). Use PNG or Messenger in Mobile App if downloads are skipped.`
           );
           setTimeout(() => {
             URL.revokeObjectURL(blobUrl);
@@ -409,19 +418,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const isRateLockedReceipt = Boolean(bill.isArchived || bill.status === 'paid');
   const billMonthKey = normalizeMonthKey(bill.billingPeriod);
+  const currentCalendarKey = normalizeMonthKey(new Date());
   const nextMonthKey = getAdjacentMonthKey(billMonthKey, 1);
-  const scheduledRateMonthKeys = Array.from(
-    new Set([
-      billMonthKey,
-      nextMonthKey,
-      ...getScheduledMonthKeys(billMonthKey, 3, settings.monthlyElectricRates),
-    ])
-  ).sort();
+  const hasReachedNextMonth = nextMonthKey <= currentCalendarKey;
+  const scheduledRateMonthKeys = getScheduledMonthKeys(
+    billMonthKey,
+    0,
+    settings.monthlyElectricRates
+  );
   const nextMonthRate = getElectricRateForPeriod(settings, nextMonthKey);
 
   return (
-    <div className="receipt-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 md:p-6 overflow-y-auto">
-      <div className="receipt-print-shell w-full max-w-3xl rounded-3xl bg-[#111724] border border-[#243148] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[94vh] animate-modal-pop relative">
+    <div
+      className="receipt-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 md:p-6 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Official Statement and Receipt"
+    >
+      <div className="receipt-print-shell w-full max-w-3xl rounded-2xl sm:rounded-3xl bg-[#111724] border border-[#243148] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[95vh] animate-modal-pop relative">
         {/* Modal Top Control Header (Hidden when printed) */}
         <div className="no-print flex items-center justify-between gap-2.5 px-4 sm:px-6 py-3 bg-[#162030] border-b border-[#243148] shrink-0">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -639,50 +653,52 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             {/* 3. Monthly Electric Rate Breakdown & Billing Schedule */}
             <div className="border border-slate-300 rounded-xl p-3.5 sm:p-4 bg-slate-50/70 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <CalendarClock className="w-4 h-4 text-amber-600 shrink-0" />
                   <span className="text-xs font-black uppercase tracking-wider text-slate-900">
-                    Monthly Electric Rate Breakdown
+                    Monthly Electric Rate Breakdown ({billMonthKey.split('-')[0]} YTD)
                   </span>
                 </div>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white border border-slate-300 text-slate-700">
-                  {isRateLockedReceipt ? 'Locked (Applied Receipt)' : 'Live Rate Schedule'}
+                  {isRateLockedReceipt ? 'Locked (Applied Receipt)' : 'Jan – Current Month'}
                 </span>
               </div>
 
-              {/* Clean Aligned Per-Month Electric Rate Table */}
-              <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-                <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
-                  {scheduledRateMonthKeys.slice(0, 4).map((mk) => {
+              {/* Clean Aligned Year-to-Date Monthly Electric Rate Table (Jan -> Current Month) */}
+              <div className="rounded-lg border border-slate-200 bg-white overflow-hidden p-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
+                  {scheduledRateMonthKeys.map((mk) => {
                     const isBillMonth = mk === billMonthKey;
-                    const isNextMonth = mk === nextMonthKey;
+                    const hasCustomOverride =
+                      settings.monthlyElectricRates?.[mk] !== undefined;
                     const displayRate = isBillMonth
                       ? bill.electricRate
                       : getElectricRateForPeriod(settings, mk);
                     return (
                       <div
                         key={mk}
-                        className={`px-3 py-2 flex items-center justify-between gap-2 text-xs border-b border-slate-100 last:border-b-0 ${
-                          isBillMonth ? 'bg-amber-50/60' : ''
+                        className={`rounded-md border px-2.5 py-1.5 flex flex-col justify-between gap-0.5 text-xs ${
+                          isBillMonth
+                            ? 'bg-amber-50 border-amber-300'
+                            : 'bg-slate-50/70 border-slate-200'
                         }`}
                       >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="font-bold text-slate-900">
-                            {formatMonthKeyLabel(mk, 'long')}
+                        <div className="flex items-center justify-between gap-1 min-w-0">
+                          <span className="font-bold text-slate-900 truncate">
+                            {formatMonthKeyLabel(mk, 'short')}
                           </span>
-                          {isBillMonth && (
-                            <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">
+                          {isBillMonth ? (
+                            <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200/80 text-amber-950 shrink-0">
                               Applied
                             </span>
-                          )}
-                          {isNextMonth && !isBillMonth && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
-                              Next
+                          ) : hasCustomOverride ? (
+                            <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 text-blue-800 shrink-0">
+                              Custom
                             </span>
-                          )}
+                          ) : null}
                         </div>
-                        <span className="font-mono-num font-black text-slate-950 shrink-0">
-                          {formatPeso(displayRate)} / kWh
+                        <span className="font-mono-num font-black text-slate-950 text-[11px] sm:text-xs">
+                          {formatPeso(displayRate)}/kWh
                         </span>
                       </div>
                     );
@@ -729,42 +745,79 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
-                      Next Cycle ({cycleSchedule.nextLabel})
-                    </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                      Upcoming
-                    </span>
+                {hasReachedNextMonth ? (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
+                        Next Cycle ({cycleSchedule.nextLabel})
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                        Follow-on
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Coverage</span>
+                      <span className="font-mono-num font-semibold text-slate-900">
+                        {cycleSchedule.nextRange}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Rent Rate</span>
+                      <span className="font-mono-num font-bold text-slate-950">
+                        {formatPeso(bill.baseRent)} / mo
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-slate-600">Start Meter &amp; Rate</span>
+                      <span className="font-mono-num font-bold text-slate-950 text-right">
+                        {bill.currReading.toFixed(1)} kWh (@{formatPeso(nextMonthRate)})
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">
+                        Next Due (Day {cycleSchedule.dueDayNumber})
+                      </span>
+                      <span className="font-mono-num font-bold text-slate-900">
+                        {cycleSchedule.nextDueLabel}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-slate-600">Coverage</span>
-                    <span className="font-mono-num font-semibold text-slate-900">
-                      {cycleSchedule.nextRange}
-                    </span>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
+                        Payment Window &amp; Meter Basis
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        Verified
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Payment Window</span>
+                      <span className="font-mono-num font-semibold text-slate-900">
+                        1st–10th Monthly (Day {cycleSchedule.dueDayNumber})
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Rate Basis</span>
+                      <span className="font-mono-num font-bold text-slate-950">
+                        Jan – {formatMonthKeyLabel(currentCalendarKey, 'short')} YTD
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-slate-600">Closing Meter Carry</span>
+                      <span className="font-mono-num font-bold text-slate-950 text-right">
+                        {bill.currReading.toFixed(1)} kWh
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600">Max Advance Policy</span>
+                      <span className="font-mono-num font-bold text-slate-900">
+                        1 Month ({formatPeso(bill.baseRent)})
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-slate-600">Rent Rate</span>
-                    <span className="font-mono-num font-bold text-slate-950">
-                      {formatPeso(bill.baseRent)} / mo
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-slate-600">Start Meter &amp; Rate</span>
-                    <span className="font-mono-num font-bold text-slate-950 text-right">
-                      {bill.currReading.toFixed(1)} kWh (@{formatPeso(nextMonthRate)})
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-slate-600">
-                      Next Due (Day {cycleSchedule.dueDayNumber})
-                    </span>
-                    <span className="font-mono-num font-bold text-slate-900">
-                      {cycleSchedule.nextDueLabel}
-                    </span>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
 
@@ -964,19 +1017,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     </div>
                   )}
 
-                {bill.securityDepositRequired > 0 && (
-                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-xs text-slate-600 bg-slate-50/60">
-                    <span className="inline-flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>
-                        Required Security Deposit (Deductible When Paid)
-                      </span>
-                    </span>
-                    <span className="font-mono-num font-semibold shrink-0 text-right">
-                      {formatPeso(bill.securityDepositRequired)}
-                    </span>
-                  </div>
-                )}
+                {/* Security Deposit note intentionally omitted from recurring statement */}
               </div>
 
               {/* Settlement Summary Box */}
@@ -1012,7 +1053,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {bill.overpaymentToAdvance > 0 && (
                   <div className="flex justify-between gap-2 text-xs font-bold text-emerald-700 pt-0.5">
                     <span>
-                      Advance Credit ({cycleSchedule.nextLabel})
+                      Advance Credit (1-Month Advance Reserve)
                     </span>
                     <span className="font-mono-num">
                       +{formatPeso(bill.overpaymentToAdvance)}

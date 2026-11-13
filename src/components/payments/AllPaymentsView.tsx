@@ -16,9 +16,10 @@ import {
   formatPeso,
   formatPesoPrivacy,
   getCurrentCalendarPeriodLabel,
+  getRemainingAdvanceAllowance,
   getRoomMonthlyPaymentStatus,
-  isMobileDevice,
   normalizeMonthKey,
+  roundCurrency,
 } from '../../utils/billingCalculator';
 
 interface AllPaymentsViewProps {
@@ -52,10 +53,10 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   onOpenNewBillScanner,
   onOpenArchiveCenter,
 }) => {
-  const isMobile = isMobileDevice();
   const [filter, setFilter] = useState<'all' | 'this_month' | 'paid' | 'unpaid'>('all');
   const [payingBill, setPayingBill] = useState<BillRecord | null>(null);
   const [payAmount, setPayAmount] = useState('');
+  const [payError, setPayError] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<
     'Cash' | 'GCash' | 'Maya' | 'Bank Transfer'
   >('GCash');
@@ -97,15 +98,43 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   const openPaymentDialog = (bill: BillRecord) => {
     setPayingBill(bill);
     setPayAmount(String(bill.remainingBalance));
+    setPayError(null);
     setPayMethod('GCash');
     setPayRef('');
   };
 
+  const payingRoom = payingBill
+    ? rooms.find((r) => r.id === payingBill.roomId)
+    : undefined;
+  const remainingAdvanceAllowance = payingRoom
+    ? getRemainingAdvanceAllowance(
+        payingRoom.monthlyRent,
+        payingRoom.advanceRent || 0
+      )
+    : payingBill
+    ? Math.max(0, roundCurrency(payingBill.baseRent || 0))
+    : 0;
+  const maxPayableWithAdvanceCap = payingBill
+    ? roundCurrency((payingBill.remainingBalance || 0) + remainingAdvanceAllowance)
+    : 0;
+
   const handleConfirmPayment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!payingBill) return;
+    setPayError(null);
     const amt = parseFloat(payAmount) || 0;
     if (amt <= 0) return;
+    const excess = roundCurrency(
+      Math.max(0, amt - (payingBill.remainingBalance || 0))
+    );
+    if (excess > remainingAdvanceAllowance + 0.01) {
+      setPayError(
+        `Advance credit is limited to 1 month of rent. Maximum payable now: ${formatPeso(
+          maxPayableWithAdvanceCap
+        )}.`
+      );
+      return;
+    }
     onRecordPayment(
       payingBill.id,
       amt,
@@ -139,7 +168,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
             Payment History
           </h1>
           <p className="text-[11px] text-slate-400 hidden sm:block">
-            1 Room = 1 Active Official Receipt
+            1 room = 1 active receipt
           </p>
         </div>
 
@@ -205,10 +234,10 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-sm sm:text-base font-extrabold text-white">
-                  {currentPeriodLabel} Tenant Payment Status
+                  {currentPeriodLabel} Payment Status
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  At-a-glance status showing which tenants paid for {currentPeriodLabel}
+                  Rooms paid for {currentPeriodLabel}
                 </p>
               </div>
               <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-xs font-extrabold text-emerald-300 font-mono-num">
@@ -530,13 +559,21 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                   step="0.01"
                   required
                   value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
+                  onChange={(e) => {
+                    setPayError(null);
+                    setPayAmount(e.target.value);
+                  }}
                   className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-base font-bold text-emerald-400 font-mono-num"
                 />
+                {payError && (
+                  <p className="mt-2 rounded-xl bg-red-500/15 border border-red-500/30 p-2.5 text-xs text-red-300">
+                    {payError}
+                  </p>
+                )}
                 {excessOverpayment > 0 ? (
                   <div className="mt-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 space-y-1 text-xs">
                     <p className="font-extrabold text-emerald-300">
-                      Overpayment Breakdown (Requires {isMobile ? 'Fingerprint' : '4-Digit PIN'})
+                      Overpayment Breakdown (Requires Biometrics / 4-Digit PIN)
                     </p>
                     {payingBill.remainingBalance > 0 && (
                       <p className="text-slate-300">
@@ -548,7 +585,8 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                       </p>
                     )}
                     <p className="text-emerald-300">
-                      • Credited to Advance Balance (Applies Next Month):{' '}
+                      • Credited to Advance Balance (1-Month Max Allowance:{' '}
+                      {formatPeso(remainingAdvanceAllowance)}):{' '}
                       <strong className="font-mono-num">
                         +{formatPeso(excessOverpayment)}
                       </strong>
@@ -559,7 +597,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                   </div>
                 ) : (
                   <p className="text-[11px] text-slate-400 mt-1.5">
-                    Credits against the current Remaining Balance first. Any amount above current rent + kWh due is stored in Advance Balance for Next Month (refundable anytime).
+                    Credits against Remaining Balance first. Excess up to 1 month&apos;s rent advance ({formatPeso(remainingAdvanceAllowance)} remaining allowance) stores in Advance Balance.
                   </p>
                 )}
               </div>

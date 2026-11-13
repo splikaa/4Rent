@@ -211,6 +211,18 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       status === 'occupied'
         ? Math.round((baseAdvance + excessDepositToAdvance) * 100) / 100
         : 0;
+    const maxAllowedAdvance = Math.max(
+      initialRoom?.advanceRent || 0,
+      Math.round(rentNum * 100) / 100
+    );
+    if (status === 'occupied' && totalAdvance > maxAllowedAdvance + 0.01) {
+      setFormError(
+        `Advance Balance cannot exceed 1 month of rent (${formatPeso(
+          rentNum
+        )} max advance limit).`
+      );
+      return;
+    }
 
     const nowIso = new Date().toISOString();
     const prevAdvanceHistory = initialRoom?.advanceHistory || [];
@@ -307,7 +319,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 {initialRoom ? `Edit ${initialRoom.name}` : 'Create New Room'}
               </h2>
               <p className="text-xs text-slate-400">
-                Deposit, sub-meter reading & tenant details
+                Room rate, sub-meter &amp; tenant details
               </p>
             </div>
           </div>
@@ -330,11 +342,11 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             </div>
           )}
 
-          {/* Section 1: Room & Continuous Sub-Meter Configuration */}
+          {/* Section 1: Room & Sub-Meter */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5 mb-3.5">
               <Zap className="w-3.5 h-3.5" />
-              Room & Continuous Sub-Meter Configuration
+              Room &amp; Sub-Meter
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
               <div className="flex flex-col">
@@ -538,7 +550,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
 
                   <div className="flex flex-col">
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Advance Balance (₱)
+                      Advance Balance (₱ • Max 1-Month Rent)
                     </label>
                     <input
                       type="number"

@@ -46,6 +46,7 @@ import {
   clampDueDayOneToTen,
   formatMonthKeyLabel,
   getElectricRateForPeriod,
+  getRemainingAdvanceAllowance,
   isMobileDevice,
   isRunningInDesktopApp,
   isRunningInMobileApp,
@@ -1391,17 +1392,31 @@ export function App() {
   ) => {
     const targetBill = bills.find((b) => b.id === billId);
     if (!targetBill) return;
+    const targetRoom = rooms.find((r) => r.id === targetBill.roomId);
     const excess = Math.max(
       0,
       Math.round((amount - (targetBill.remainingBalance || 0)) * 100) / 100
     );
     if (excess > 0) {
-      const mobileAuth = isMobileDevice();
+      if (targetRoom) {
+        const remainingAllowance = getRemainingAdvanceAllowance(
+          targetRoom.monthlyRent,
+          targetRoom.advanceRent || 0
+        );
+        if (excess > remainingAllowance + 0.01) {
+          triggerFeedback(
+            '1-Month Advance Limit Reached',
+            remainingAllowance <= 0
+              ? `${targetRoom.name} already holds ₱${(targetRoom.advanceRent || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} in Advance Balance (1-month limit: ₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Max payment allowed right now: ₱${(targetBill.remainingBalance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`
+              : `Tenants can only pay up to 1 month advance (remaining allowance: ₱${remainingAllowance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Maximum payable now: ₱${roundCurrency((targetBill.remainingBalance || 0) + remainingAllowance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+            'error'
+          );
+          return;
+        }
+      }
       setPendingAuthAction({
         title: `Authorize Overpayment & Advance Credit`,
-        description: `${targetBill.roomName}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} will credit to Next Month Advance Balance. ${
-          mobileAuth ? 'Scan Fingerprint or enter 4-Digit PIN.' : 'Enter your 4-Digit Security PIN.'
-        }`,
+        description: `${targetBill.roomName}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} will credit to Next Month Advance Balance (1-month limit). Verify with Biometrics or your 4-Digit PIN.`,
         onConfirm: () => {
           handleRecordPayment(billId, amount, method, referenceNo);
           onCommitted?.();
@@ -1419,14 +1434,11 @@ export function App() {
     note: string
   ) => {
     const targetRoom = rooms.find((r) => r.id === roomId);
-    const mobileAuth = isMobileDevice();
     setPendingAuthAction({
       title: `Authorize Advance Refund / Withdrawal`,
       description: `Release ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} from ${
         targetRoom?.name || 'Room'
-      } Advance Balance. ${
-        mobileAuth ? 'Verify with Fingerprint or 4-Digit PIN.' : 'Enter your 4-Digit Security PIN.'
-      }`,
+      } Advance Balance. Verify with Biometrics or your 4-Digit Security PIN.`,
       onConfirm: () => {
         handleWithdrawAdvance(roomId, amount, note);
         setAdvanceModalRoomId(null);
@@ -1440,14 +1452,29 @@ export function App() {
     note: string
   ) => {
     const targetRoom = rooms.find((r) => r.id === roomId);
-    const mobileAuth = isMobileDevice();
+    if (targetRoom) {
+      const currentUnpaid = targetRoom.unpaidBalance || 0;
+      const addedAdvance = roundCurrency(Math.max(0, amount - currentUnpaid));
+      const remainingAllowance = getRemainingAdvanceAllowance(
+        targetRoom.monthlyRent,
+        targetRoom.advanceRent || 0
+      );
+      if (addedAdvance > remainingAllowance + 0.01) {
+        triggerFeedback(
+          '1-Month Advance Limit Reached',
+          remainingAllowance <= 0
+            ? `${targetRoom.name} already holds ₱${(targetRoom.advanceRent || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} in Advance Balance (1-month limit: ₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}).`
+            : `Tenants can only pay an advance for 1 month (max ₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Max payable right now: ₱${roundCurrency(currentUnpaid + remainingAllowance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+          'error'
+        );
+        return;
+      }
+    }
     setPendingAuthAction({
       title: `Authorize Advance Payment`,
       description: `Record ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} advance credit for ${
         targetRoom?.name || 'Room'
-      } (auto-applies to next month). ${
-        mobileAuth ? 'Verify with Fingerprint or 4-Digit PIN.' : 'Enter your 4-Digit Security PIN.'
-      }`,
+      } (1-month max cap • auto-applies to next month). Verify with Biometrics or your 4-Digit Security PIN.`,
       onConfirm: () => {
         handleAddAdvanceDeposit(roomId, amount, note);
         setAdvanceModalRoomId(null);
@@ -1525,6 +1552,20 @@ export function App() {
           : 0;
       const remainingToAdvance =
         Math.round(Math.max(0, amount - autoAppliedToBill) * 100) / 100;
+      if (targetRoom && remainingToAdvance > 0) {
+        const remainingAllowance = getRemainingAdvanceAllowance(
+          targetRoom.monthlyRent,
+          targetRoom.advanceRent || 0
+        );
+        if (remainingToAdvance > remainingAllowance + 0.01) {
+          triggerFeedback(
+            '1-Month Advance Limit Reached',
+            `Tenants can only pay up to 1 month advance (₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })} limit).`,
+            'error'
+          );
+          return;
+        }
+      }
 
       if (autoAppliedToBill > 0) {
         setBills((prev) =>
@@ -2046,16 +2087,13 @@ export function App() {
       };
     }
 
-    const authMethod = isMobileDevice()
-      ? 'Fingerprint (or 4-Digit PIN)'
-      : '4-Digit Security PIN';
     return {
       title: `Remove ${pendingConfirmAction.room.name} Permanently?`,
       description:
         'Permanent removal deletes the room card after security verification. Historical tenant & bill records stay archived.',
       details: [
         `Final meter reading: ${pendingConfirmAction.room.lastMeterReading.toFixed(1)} kWh`,
-        `Next step requires ${authMethod} verification.`,
+        'Next step requires Biometrics or 4-Digit PIN verification.',
       ],
       variant: 'danger' as const,
       iconType: 'delete' as const,
@@ -2365,25 +2403,27 @@ export function App() {
           } else if (action.type === 'archive_vacant') {
             executeArchiveVacantRoom(action.room);
           } else if (action.type === 'delete_room') {
-            const mobileAuth = isMobileDevice();
             setPendingAuthAction({
               title: `Remove ${action.room.name}?`,
-              description: mobileAuth
-                ? 'Verify with Fingerprint (or 4-Digit PIN) to permanently remove this room.'
-                : 'Enter your 4-Digit Security PIN to permanently remove this room.',
+              description:
+                'Verify with Biometrics or your 4-Digit Security PIN to permanently remove this room.',
               onConfirm: () => executeDeleteRoomAfterPin(action.room),
             });
           }
         }}
       />
 
-      {/* Security Auth Modal (Mobile Fingerprint / Desktop 4-Digit PIN) for Room Removal, Advance Payments & Refunds */}
+      {/* Security Auth Modal (Biometrics / 4-Digit PIN) for Room Removal, Advance Payments & Refunds */}
       <PinAuthModal
         isOpen={Boolean(pendingAuthAction)}
         title={pendingAuthAction?.title}
         description={pendingAuthAction?.description}
         security={settings.security}
         onClose={() => setPendingAuthAction(null)}
+        onGoToSettings={() => {
+          setPendingAuthAction(null);
+          setActiveTab('settings');
+        }}
         onAuthorized={() => {
           const action = pendingAuthAction;
           setPendingAuthAction(null);

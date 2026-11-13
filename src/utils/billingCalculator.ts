@@ -379,25 +379,66 @@ export function getCurrentCalendarPeriodLabel(date = new Date()): string {
 }
 
 /**
- * Returns chronological "YYYY-MM" keys starting from `baseDate` (default: current month + upcoming months)
- * merged with any custom monthly rate keys configured by the landlord.
+ * Returns chronological "YYYY-MM" keys starting from January of the target period's year
+ * up to the current calendar month (never exposing future months like December before December),
+ * omitting any configured future-month overrides beyond the active calendar month.
+ */
+export function getYearToDateMonthKeys(
+  baseDateOrPeriod: Date | string = new Date(),
+  configuredRates?: Record<string, number>,
+  referenceToday: Date = new Date()
+): string[] {
+  const baseKey = normalizeMonthKey(baseDateOrPeriod);
+  const [baseYearStr] = baseKey.split('-');
+  const targetYear = Number(baseYearStr) || referenceToday.getFullYear();
+  const currentYear = referenceToday.getFullYear();
+  const currentMonthNum = referenceToday.getMonth() + 1;
+  const maxAllowedKey = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
+
+  const endMonth =
+    targetYear < currentYear ? 12 : targetYear === currentYear ? currentMonthNum : 0;
+
+  const set = new Set<string>();
+  for (let m = 1; m <= endMonth; m++) {
+    set.add(`${targetYear}-${String(m).padStart(2, '0')}`);
+  }
+
+  if (configuredRates) {
+    Object.keys(configuredRates).forEach((k) => {
+      if (
+        /^\d{4}-\d{2}$/.test(k) &&
+        k.startsWith(`${targetYear}-`) &&
+        k <= maxAllowedKey
+      ) {
+        set.add(k);
+      }
+    });
+  }
+
+  return Array.from(set).sort();
+}
+
+/**
+ * Returns valid year-to-date "YYYY-MM" keys (no future months ahead of today's month).
  */
 export function getScheduledMonthKeys(
   baseDateOrPeriod: Date | string = new Date(),
-  upcomingCount = 3,
+  _upcomingCount = 3,
   configuredRates?: Record<string, number>
 ): string[] {
-  const set = new Set<string>();
-  const baseKey = normalizeMonthKey(baseDateOrPeriod);
-  for (let i = 0; i < Math.max(2, upcomingCount); i++) {
-    set.add(getAdjacentMonthKey(baseKey, i));
-  }
-  if (configuredRates) {
-    Object.keys(configuredRates).forEach((k) => {
-      if (/^\d{4}-\d{2}$/.test(k)) set.add(k);
-    });
-  }
-  return Array.from(set).sort();
+  return getYearToDateMonthKeys(baseDateOrPeriod, configuredRates);
+}
+
+/**
+ * Returns the maximum additional advance rent credit allowed under the 1-month cap.
+ */
+export function getRemainingAdvanceAllowance(
+  monthlyRent: number,
+  currentAdvance: number
+): number {
+  const cap = Math.max(0, roundCurrency(monthlyRent || 0));
+  const used = Math.max(0, roundCurrency(currentAdvance || 0));
+  return Math.max(0, roundCurrency(cap - used));
 }
 
 /**
@@ -1107,22 +1148,48 @@ export function formatMessengerBillSummary(
     year: 'numeric',
   });
 
-  const nextRate = settings
-    ? getElectricRateForPeriod(settings, nextCycleLabel)
-    : bill.electricRate;
+  const currentCalendarKey = normalizeMonthKey(new Date());
+  const ytdMonthKeys = getYearToDateMonthKeys(
+    bill.billingPeriod,
+    settings?.monthlyElectricRates
+  );
+  const billMonthKey = normalizeMonthKey(bill.billingPeriod);
+  const nextCycleKey = normalizeMonthKey(nextCycleLabel);
+  const hasReachedNextMonth = nextCycleKey <= currentCalendarKey;
+
+  const rateLines = ytdMonthKeys.map((mk) => {
+    const rate =
+      mk === billMonthKey
+        ? bill.electricRate
+        : settings
+        ? getElectricRateForPeriod(settings, mk)
+        : bill.electricRate;
+    const tag = mk === billMonthKey ? ' (Applied)' : '';
+    return `• ${formatMonthKeyLabel(mk, 'long')}: ${formatPeso(rate)}/kWh${tag}`;
+  });
+
+  const cycleScheduleLines = [
+    `• This Month (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}/mo + ${formatPeso(bill.electricRate)}/kWh • Due ${formattedDue}`,
+  ];
+  if (hasReachedNextMonth) {
+    const nextRate = settings
+      ? getElectricRateForPeriod(settings, nextCycleLabel)
+      : bill.electricRate;
+    cycleScheduleLines.push(
+      `• Next Month (${nextCycleLabel}): ${formatPeso(bill.baseRent)}/mo + metered kWh (Start: ${bill.currReading.toFixed(1)} kWh @ ${formatPeso(nextRate)}/kWh) • Due ${nextDueDate}`
+    );
+  }
 
   const lines = [
     `🏠 *${apartmentName || 'Rental Management'} • Statement & Receipt*`,
     `Receipt #: ${bill.receiptNo} (${seal})`,
     `Unit: *${bill.roomName}* • Tenant: ${bill.tenantName}`,
     `────────────────────`,
-    `⚡ *MONTHLY ELECTRIC RATE BREAKDOWN*`,
-    `• ${formatMonthKeyLabel(normalizeMonthKey(bill.billingPeriod), 'long')}: ${formatPeso(bill.electricRate)}/kWh (Applied)`,
-    `• ${formatMonthKeyLabel(normalizeMonthKey(nextCycleLabel), 'long')}: ${formatPeso(nextRate)}/kWh (Next Cycle)`,
+    `⚡ *MONTHLY ELECTRIC RATE BREAKDOWN (${billMonthKey.split('-')[0]} YTD)*`,
+    ...rateLines,
     `────────────────────`,
     `📅 *CYCLE SCHEDULE*`,
-    `• This Month (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}/mo + ${formatPeso(bill.electricRate)}/kWh • Due ${formattedDue}`,
-    `• Next Month (${nextCycleLabel}): ${formatPeso(bill.baseRent)}/mo + metered kWh (Start: ${bill.currReading.toFixed(1)} kWh @ ${formatPeso(nextRate)}/kWh) • Due ${nextDueDate}`,
+    ...cycleScheduleLines,
     `────────────────────`,
     `⚡ *ELECTRIC SUB-METER PROOF*`,
     `• Previous: ${bill.prevReading.toFixed(1)} kWh → Current: ${bill.currReading.toFixed(1)} kWh`,
