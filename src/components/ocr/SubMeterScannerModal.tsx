@@ -27,6 +27,7 @@ import {
   getBillingPeriodOptions,
   getElectricRateForPeriod,
   getNextDueDateInOneToTenWindow,
+  getRemainingAdvanceAllowance,
   isRunningInMobileApp,
   roundCurrency,
 } from '../../utils/billingCalculator';
@@ -664,18 +665,24 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       setOcrConfidence(result.confidence);
       setMeterInspection(result.inspection || null);
-      // Auto-lock only when an authentic reading was recognized; keep unlocked if ambiguous to allow manual typing
-      setIsReadingsLocked(isRecognized && detectedVal > 0);
+      // Lock input only when authentic reading succeeded cleanly without ambiguity flags
+      setIsReadingsLocked(isRecognized && detectedVal > 0 && !result.needsVerification);
 
-      if (isRecognized) {
+      if (isRecognized && result.needsVerification) {
         setOcrStatusMsg(
-          `✓ Collected & read ${detectedVal.toFixed(1)} kWh into ${
-            slot === 'prev' ? 'Slot #1 (Previous)' : 'Slot #2 (Current)'
-          }!`
+          `⚠️ Read ${detectedVal.toFixed(1)} kWh (${slot === 'prev' ? 'Previous' : 'Current'}) — ${result.unclearReason || 'verify ambiguous digit before saving'}.`
+        );
+      } else if (isRecognized) {
+        setOcrStatusMsg(
+          `✓ Read ${detectedVal.toFixed(1)} kWh into ${
+            slot === 'prev' ? 'Previous Slot' : 'Current Slot'
+          }.`
         );
       } else {
         setOcrStatusMsg(
-          '✓ Sub-meter snapshot collected. Digits are unclear—please verify kWh manually.'
+          result.unclearReason
+            ? `⚠️ ${result.unclearReason}`
+            : '⚠️ Sub-meter captured, but digits are unclear. Enter kWh manually.'
         );
       }
     } catch {
@@ -901,17 +908,29 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     const nowIso = new Date().toISOString();
     const totalDue = billBreakdown.totalAmountDue;
 
+    const remainingAdvAfterDeduction = getRemainingAdvanceAllowance(
+      selectedRoom.monthlyRent,
+      Math.max(0, availableAdvance - advUsedNum)
+    );
+    const maxPayableWithAdvanceCap = roundCurrency(
+      totalDue + remainingAdvAfterDeduction
+    );
+
     let paidAmount = 0;
     if (initialPayStatus === 'paid') {
       const customEntered = parseFloat(initialAmountPaid) || 0;
-      paidAmount = customEntered >= totalDue ? customEntered : totalDue;
+      const requestedPaid = customEntered >= totalDue ? customEntered : totalDue;
+      paidAmount = Math.min(requestedPaid, maxPayableWithAdvanceCap);
     } else if (initialPayStatus === 'partial') {
       paidAmount = Math.max(0, parseFloat(initialAmountPaid) || 0);
     }
 
     const overpaymentAddedToAdvance =
       paidAmount > totalDue
-        ? Math.round((paidAmount - totalDue) * 100) / 100
+        ? Math.min(
+            remainingAdvAfterDeduction,
+            Math.round((paidAmount - totalDue) * 100) / 100
+          )
         : 0;
 
     const remainingBalance = Math.max(
@@ -1037,10 +1056,10 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-white">
-                Sub-Meter OCR & Bill Generator
+                Sub-Meter Scanner &amp; Bill
               </h2>
               <p className="text-xs text-slate-400">
-                Reads cyclometer & digital kWh sub-meters • Rate: {formatPeso(rateNum)}/kWh
+                Cyclometer &amp; digital kWh reader • Rate: {formatPeso(rateNum)}/kWh
               </p>
             </div>
           </div>
@@ -1294,7 +1313,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <span className="font-bold">Desktop / Web Mode • Image Upload Only</span>
                   </div>
                   <span className="text-[10px] bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/20 font-semibold hidden sm:inline">
-                    Live camera in Android Mobile App
+                    Live camera in Mobile App
                   </span>
                 </div>
               ) : (
@@ -1567,7 +1586,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                                 }
                               }}
                               className="col-span-2 sm:col-span-1 py-2 px-2 rounded-lg bg-[#182132] hover:bg-[#202C42] border border-[#28364F] text-slate-300 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition"
-                              title="Open Android Settings > Permissions to allow Camera"
+                              title="Open App Settings > Permissions to allow Camera"
                             >
                               <Settings className="w-3.5 h-3.5 text-amber-400" />
                               <span>Settings</span>
@@ -2182,7 +2201,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   <div className="grid grid-cols-2 gap-2 mt-2.5">
                     <div>
                       <label className="block text-[10px] text-slate-400 mb-1">
-                        Amount Paid (₱)
+                        Amount Paid (₱ • Max 1-Mo Adv)
                       </label>
                       <input
                         type="number"
@@ -2274,10 +2293,10 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-white">
-                    Mechanical Cyclometer Register
+                    Mechanical Cyclometer Guide
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    How sub-meter readings are specifically extracted
+                    How sub-meter dials are read
                   </p>
                 </div>
               </div>

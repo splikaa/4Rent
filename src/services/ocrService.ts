@@ -1,5 +1,6 @@
 import Tesseract from 'tesseract.js';
 import { extractMeterDigitsFromOcrText } from '../utils/billingCalculator';
+import { analyzeSubMeterVision, type VisionReadResult } from './meterVisionEngine';
 
 export interface SubMeterHardwareInspection {
   brandModel: string;
@@ -26,6 +27,8 @@ export interface OcrScanResult {
   registerCropDataUrl: string;
   roiCropUrl: string;
   isAuthentic: boolean;
+  needsVerification?: boolean;
+  unclearReason?: string;
   inspection?: SubMeterHardwareInspection;
 }
 
@@ -37,218 +40,6 @@ interface CropBox {
   w: number;
   h: number;
 }
-
-interface CalibratedSubMeterProfile {
-  id: string;
-  reading: number;
-  confidence: number;
-  sig: number[];
-  cropBox: CropBox;
-  inspection: SubMeterHardwareInspection;
-}
-
-/**
- * Calibrated visual & hardware profiles for the Landlord's Sub-Meter models:
- * - Safari SY-168 (Cyclometer 5 Black + 1 Red Tenths [0.1 kWh])
- * - Static Watthour Meter TYPE-SP1 (Cyclometer 5 Black + 1 Red Tenths [1/10 kWh])
- * - GE kV2c Multifunction Digital LCD Meter
- * - Cirtech MT-60i (CL-60) ERC-Approved Digital LCD Sub-Meter
- */
-const CALIBRATED_SUBMETER_PROFILES: CalibratedSubMeterProfile[] = [
-  {
-    id: 'safari_sy168_0_1',
-    reading: 0.1,
-    confidence: 99,
-    cropBox: { x: 0.33, y: 0.29, w: 0.25, h: 0.08 },
-    sig: [
-      211, 209, 210, 208, 206, 207, 204, 202, 203, 202, 200, 201, 203, 201, 202,
-      209, 207, 208, 212, 211, 211, 212, 212, 212, 215, 213, 214, 209, 208, 209,
-      177, 175, 176, 188, 186, 185, 187, 185, 185, 189, 188, 188, 212, 212, 212,
-      213, 212, 213, 222, 222, 224, 208, 205, 205, 108, 119, 148, 117, 125, 147,
-      201, 131, 126, 186, 152, 150, 217, 217, 217, 218, 217, 219, 226, 226, 228,
-      201, 201, 202, 172, 169, 168, 205, 165, 161, 213, 201, 197, 180, 178, 177,
-      222, 222, 223, 222, 222, 224, 228, 228, 230, 216, 216, 218, 160, 157, 158,
-      155, 151, 151, 168, 164, 164, 169, 167, 168, 224, 224, 226, 224, 224, 226,
-      236, 236, 238, 226, 226, 229, 158, 158, 159, 133, 133, 132, 139, 140, 140,
-      188, 188, 190, 231, 231, 233, 233, 233, 235, 240, 239, 242, 232, 232, 235,
-      166, 166, 167, 147, 147, 148, 146, 146, 147, 195, 195, 196, 237, 237, 240,
-      239, 239, 241, 238, 238, 240, 237, 237, 239, 222, 222, 224, 213, 212, 215,
-      216, 216, 218, 233, 233, 235, 239, 239, 241, 239, 238, 240,
-    ],
-    inspection: {
-      brandModel: 'Safari SY-168 Electronic kWh Meter',
-      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)',
-      registerBreakdown: 'Register (Counter): Black Drums: 00000 • Red Tenths Drum: .1 → 0.1 kWh',
-      serialOrBarcode: 'No. 2018-18120672 (Excluded)',
-      electricalSpecs: '220/240V • 10(60)A • 60Hz • 1600 imp/kWh',
-    },
-  },
-  {
-    id: 'static_sp1_3_4',
-    reading: 3.4,
-    confidence: 99,
-    cropBox: { x: 0.21, y: 0.16, w: 0.58, h: 0.19 },
-    sig: [
-      255, 255, 255, 254, 254, 254, 216, 215, 212, 214, 212, 210, 211, 210, 208,
-      208, 207, 204, 245, 245, 244, 255, 255, 255, 255, 255, 255, 237, 237, 235,
-      194, 189, 172, 166, 163, 147, 178, 167, 153, 213, 210, 194, 207, 207, 202,
-      255, 255, 255, 255, 255, 255, 206, 206, 200, 184, 180, 166, 177, 174, 162,
-      186, 180, 168, 198, 195, 182, 183, 185, 180, 255, 255, 255, 255, 255, 255,
-      202, 201, 195, 184, 181, 168, 201, 199, 186, 201, 198, 186, 214, 212, 200,
-      203, 205, 201, 255, 255, 255, 255, 255, 255, 214, 214, 211, 153, 151, 140,
-      168, 165, 154, 176, 173, 162, 172, 170, 160, 209, 212, 210, 255, 255, 255,
-      255, 255, 255, 241, 241, 240, 127, 127, 120, 78, 76, 67, 94, 93, 83, 103,
-      102, 97, 232, 233, 232, 255, 255, 255, 255, 255, 255, 255, 255, 255, 190,
-      190, 189, 142, 141, 137, 142, 141, 137, 178, 178, 177, 255, 255, 255, 255,
-      255, 255, 255, 255, 255, 255, 255, 255, 250, 249, 248, 247, 247, 246, 248,
-      248, 247, 248, 248, 247, 255, 255, 255, 255, 255, 255,
-    ],
-    inspection: {
-      brandModel: 'Static Watthour Meter TYPE-SP1',
-      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red 1/10)',
-      registerBreakdown: 'Register (Counter): Black Drums: 00003 • Red Tenths Drum: .4 → 3.4 kWh',
-      serialOrBarcode: 'S.No. 470946 (Excluded)',
-      electricalSpecs: '240V • 5-30A • 50Hz • 3200 imp/kWh',
-    },
-  },
-  {
-    id: 'ge_kv2c_blank',
-    reading: 0.0,
-    confidence: 99,
-    cropBox: { x: 0.24, y: 0.22, w: 0.52, h: 0.19 },
-    sig: [
-      255, 255, 255, 244, 244, 244, 185, 182, 182, 161, 158, 157, 160, 158, 157,
-      201, 199, 198, 255, 255, 255, 255, 255, 255, 245, 245, 245, 158, 156, 157,
-      137, 136, 139, 121, 120, 122, 141, 140, 142, 146, 144, 146, 175, 173, 171,
-      255, 255, 255, 186, 183, 184, 189, 187, 191, 197, 197, 202, 144, 145, 147,
-      153, 153, 155, 157, 157, 160, 137, 134, 135, 223, 223, 222, 155, 151, 154,
-      180, 178, 181, 148, 151, 152, 108, 113, 111, 97, 101, 99, 112, 114, 113,
-      145, 143, 146, 193, 192, 193, 152, 147, 151, 156, 154, 158, 132, 134, 136,
-      110, 115, 115, 102, 106, 106, 124, 125, 126, 141, 140, 143, 197, 197, 198,
-      187, 186, 188, 137, 136, 140, 116, 116, 120, 127, 129, 133, 136, 139, 144,
-      134, 136, 140, 135, 134, 137, 222, 222, 222, 241, 241, 241, 134, 132, 134,
-      63, 62, 62, 113, 113, 116, 126, 126, 130, 114, 114, 116, 162, 162, 162,
-      255, 255, 255, 248, 248, 248, 235, 235, 235, 155, 154, 154, 128, 126, 127,
-      131, 130, 130, 157, 157, 156, 251, 251, 251, 255, 255, 255,
-    ],
-    inspection: {
-      brandModel: 'GE kV2c Digital Meter',
-      registerType: 'Digital LCD (Unpowered / Blank)',
-      registerBreakdown: 'LCD Blank/Off → 0.0 kWh',
-      serialOrBarcode: 'Barcode 18853562 (Excluded)',
-      electricalSpecs: 'CL 20 • 120-480V • 60Hz',
-      isBlankUnpoweredLcd: true,
-    },
-  },
-  {
-    id: 'safari_sy168_0_3',
-    reading: 0.3,
-    confidence: 99,
-    cropBox: { x: 0.20, y: 0.14, w: 0.60, h: 0.19 },
-    sig: [
-      255, 255, 255, 248, 248, 248, 148, 144, 142, 163, 159, 154, 172, 168, 164,
-      173, 170, 167, 217, 216, 216, 255, 255, 255, 255, 255, 255, 233, 232, 231,
-      90, 92, 121, 130, 130, 144, 155, 124, 125, 186, 129, 124, 195, 185, 185,
-      255, 255, 255, 255, 255, 255, 209, 207, 205, 134, 133, 148, 151, 117, 129,
-      180, 123, 123, 198, 154, 144, 184, 174, 170, 255, 255, 255, 255, 255, 255,
-      229, 227, 227, 128, 118, 107, 143, 135, 124, 145, 139, 130, 153, 147, 139,
-      184, 164, 162, 255, 255, 255, 255, 255, 255, 253, 252, 252, 91, 82, 74,
-      86, 80, 72, 97, 91, 84, 109, 107, 105, 196, 195, 195, 255, 255, 255, 255,
-      255, 255, 254, 254, 254, 162, 154, 143, 135, 125, 110, 129, 122, 112, 150,
-      146, 140, 245, 244, 243, 255, 255, 255, 255, 255, 255, 254, 254, 254, 167,
-      156, 144, 167, 155, 139, 167, 156, 140, 168, 158, 145, 244, 243, 241, 255,
-      255, 255, 255, 255, 255, 244, 235, 232, 217, 212, 207, 200, 192, 185, 202,
-      195, 188, 204, 197, 192, 250, 249, 249, 255, 255, 255,
-    ],
-    inspection: {
-      brandModel: 'Safari SY-168 Electronic kWh Meter',
-      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)',
-      registerBreakdown: 'Register (Counter): Black Drums: 00000 • Red Tenths Drum: .3 → 0.3 kWh',
-      serialOrBarcode: 'No. KW2151075721 (Excluded)',
-      electricalSpecs: '240V • 10(60)A • 60Hz • 1600 imp/kWh',
-    },
-  },
-  {
-    id: 'cirtech_mt60i_blank',
-    reading: 0.0,
-    confidence: 99,
-    cropBox: { x: 0.24, y: 0.27, w: 0.52, h: 0.18 },
-    sig: [
-      255, 255, 255, 196, 196, 195, 177, 177, 173, 180, 180, 176, 184, 184, 181,
-      173, 173, 171, 245, 245, 245, 255, 255, 255, 255, 255, 255, 147, 147, 144,
-      183, 183, 172, 143, 143, 134, 184, 183, 172, 163, 155, 143, 228, 228, 228,
-      255, 255, 255, 255, 255, 255, 92, 91, 87, 157, 146, 128, 145, 130, 111,
-      146, 126, 107, 120, 120, 114, 153, 124, 120, 255, 255, 255, 255, 255, 255,
-      123, 124, 122, 175, 175, 167, 167, 167, 160, 185, 185, 177, 167, 168, 157,
-      209, 207, 206, 255, 255, 255, 255, 255, 255, 128, 129, 128, 125, 124, 115,
-      119, 119, 109, 119, 118, 109, 116, 116, 108, 225, 225, 225, 255, 255, 255,
-      255, 255, 255, 173, 174, 174, 2, 3, 4, 13, 14, 13, 3, 4, 4, 24, 25, 25,
-      255, 255, 255, 255, 255, 255, 255, 255, 255, 236, 236, 236, 5, 6, 8, 2, 3,
-      4, 4, 5, 7, 89, 90, 91, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-      255, 255, 127, 127, 128, 97, 97, 99, 97, 98, 99, 188, 188, 189, 255, 255,
-      255, 255, 255, 255,
-    ],
-    inspection: {
-      brandModel: 'Cirtech MT-60i Digital Sub-Meter',
-      registerType: 'Digital LCD (Unpowered / Blank)',
-      registerBreakdown: 'LCD Blank/Off → 0.0 kWh',
-      serialOrBarcode: 'No: 22501329 (Excluded)',
-      electricalSpecs: '240V • 10(60)A • 60Hz • 1600 imp/kWh',
-      isBlankUnpoweredLcd: true,
-    },
-  },
-  {
-    id: 'user_round_cyclometer_sample',
-    reading: 3.4,
-    confidence: 99,
-    cropBox: { x: 0.2, y: 0.18, w: 0.6, h: 0.2 },
-    sig: [
-      203, 140, 196, 141, 172, 175, 178, 213, 220, 193, 222, 232, 213, 243, 251,
-      216, 245, 254, 176, 203, 211, 209, 166, 218, 209, 127, 182, 81, 78, 74,
-      116, 125, 121, 111, 120, 116, 154, 157, 159, 139, 150, 149, 139, 142, 140,
-      240, 153, 209, 207, 137, 183, 81, 75, 69, 85, 94, 90, 102, 109, 103, 138,
-      141, 137, 127, 135, 133, 122, 124, 120, 198, 122, 124, 196, 130, 168, 108,
-      109, 96, 139, 155, 140, 189, 196, 185, 210, 210, 205, 246, 245, 244, 191,
-      186, 181, 175, 102, 107, 216, 129, 180, 106, 101, 90, 130, 150, 133, 148,
-      157, 148, 185, 186, 182, 247, 242, 243, 173, 162, 157, 160, 67, 56, 221,
-      130, 184, 117, 106, 101, 108, 123, 109, 134, 146, 134, 166, 172, 164, 184,
-      185, 183, 142, 130, 127, 187, 86, 117, 232, 139, 198, 84, 24, 32, 24, 25,
-      22, 28, 33, 26, 30, 35, 29, 30, 33, 30, 139, 86, 108, 191, 74, 124, 226,
-      196, 216, 185, 154, 161, 44, 42, 40, 29, 31, 27, 31, 31, 30, 62, 59, 57,
-      213, 192, 202, 220, 198, 210,
-    ],
-    inspection: {
-      brandModel: 'Round Electromechanical Sub-Meter',
-      registerType: 'Mechanical Cyclometer Register (5 Black + 1 Red Tenths)',
-      registerBreakdown: 'Register (Counter): Black Drums: 00003 • Red Tenths Drum: .4 → 3.4 kWh',
-      serialOrBarcode: 'Faceplate Serial Excluded',
-      electricalSpecs: '240V • 5-30A • 50/60Hz',
-    },
-  },
-  {
-    id: 'safari_sy168_3020_7',
-    reading: 3020.7,
-    confidence: 99,
-    cropBox: { x: 0.32, y: 0.30, w: 0.38, h: 0.08 },
-    sig: [
-      225, 216, 208, 212, 170, 164, 195, 117, 115, 192, 106, 104, 187, 100, 99, 186, 96, 95, 183, 92, 90, 176, 85, 85,
-      181, 82, 79, 135, 63, 62, 157, 134, 129, 140, 116, 109, 142, 120, 111, 141, 121, 112, 146, 122, 112, 173, 125, 115,
-      152, 70, 66, 128, 122, 120, 117, 143, 178, 115, 117, 124, 98, 92, 93, 129, 69, 66, 104, 72, 69, 163, 56, 56,
-      177, 131, 123, 126, 122, 117, 193, 196, 194, 162, 157, 154, 180, 131, 132, 145, 113, 103, 91, 69, 65, 157, 101, 98,
-      167, 126, 117, 131, 123, 117, 154, 153, 148, 130, 122, 117, 130, 94, 90, 116, 97, 87, 81, 58, 54, 132, 48, 47,
-      171, 136, 126, 170, 165, 158, 93, 90, 85, 75, 69, 65, 73, 64, 59, 79, 71, 66, 100, 76, 66, 139, 35, 33,
-      167, 82, 70, 180, 161, 149, 164, 165, 160, 161, 162, 157, 158, 159, 154, 159, 160, 155, 149, 122, 110, 172, 76, 64,
-      170, 138, 125, 163, 144, 133, 148, 147, 139, 145, 143, 136, 145, 144, 136, 143, 141, 133, 121, 100, 86, 158, 128, 113
-    ],
-    inspection: {
-      brandModel: 'Safari SY-168 Digital Kilowatt Hour Meter',
-      registerType: 'Digital Register Display (kW·h)',
-      registerBreakdown: 'Register: 003020.7 → 3020.7 kWh',
-      serialOrBarcode: 'No. LGT2023921126001 (Excluded)',
-      electricalSpecs: '240V • 10(60)A • 1Phase • 60Hz',
-    },
-  },
-];
 
 interface MediaDimensions {
   width: number;
@@ -302,124 +93,6 @@ function createBoundedWorkingCanvas(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(src, 0, 0, outW, outH);
   return canvas;
-}
-
-function computeBoxRgbSignature(
-  imgOrCanvas: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement
-): number[] | null {
-  // Sample signature on a lightweight 320px-bounded canvas so mobile & desktop compute identically fast
-  const canvas = createBoundedWorkingCanvas(imgOrCanvas, 320);
-  if (!canvas) return null;
-  const width = canvas.width;
-  const height = canvas.height;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return null;
-
-  const { data } = ctx.getImageData(0, 0, width, height);
-
-  // Auto-trim uniform outer margins (e.g. phone screenshots with black/white bars)
-  let top = 0;
-  let bottom = height - 1;
-  let left = 0;
-  let right = width - 1;
-
-  const isBorderRow = (y: number) => {
-    const firstIdx = (y * width + Math.floor(width / 2)) * 4;
-    const r0 = data[firstIdx];
-    const g0 = data[firstIdx + 1];
-    const b0 = data[firstIdx + 2];
-    const isDarkOrLight =
-      (r0 < 28 && g0 < 36 && b0 < 48) || (r0 > 240 && g0 > 240 && b0 > 240);
-    if (!isDarkOrLight) return false;
-    let uniform = 0;
-    const samples = 16;
-    for (let s = 0; s < samples; s++) {
-      const x = Math.floor(((s + 0.5) / samples) * width);
-      const idx = (y * width + x) * 4;
-      if (
-        Math.abs(data[idx] - r0) < 18 &&
-        Math.abs(data[idx + 1] - g0) < 18 &&
-        Math.abs(data[idx + 2] - b0) < 18
-      ) {
-        uniform++;
-      }
-    }
-    return uniform >= 14;
-  };
-
-  while (top < height * 0.25 && isBorderRow(top)) top++;
-  while (bottom > height * 0.75 && isBorderRow(bottom)) bottom--;
-
-  const effW = Math.max(32, right - left + 1);
-  const effH = Math.max(32, bottom - top + 1);
-
-  const vec: number[] = [];
-  for (let gy = 0; gy < 8; gy++) {
-    for (let gx = 0; gx < 8; gx++) {
-      let rSum = 0;
-      let gSum = 0;
-      let bSum = 0;
-      let cnt = 0;
-      for (let sy = 0; sy < 8; sy++) {
-        for (let sx = 0; sx < 8; sx++) {
-          const px = Math.min(
-            width - 1,
-            left + Math.floor(((gx * 8 + sx + 0.5) / 64.0) * effW)
-          );
-          const py = Math.min(
-            height - 1,
-            top + Math.floor(((gy * 8 + sy + 0.5) / 64.0) * effH)
-          );
-          const idx = (py * width + px) * 4;
-          rSum += data[idx];
-          gSum += data[idx + 1];
-          bSum += data[idx + 2];
-          cnt++;
-        }
-      }
-      vec.push(
-        Math.round(rSum / cnt),
-        Math.round(gSum / cnt),
-        Math.round(bSum / cnt)
-      );
-    }
-  }
-  return vec;
-}
-
-function matchCalibratedSubMeterProfile(
-  sig: number[] | null
-): CalibratedSubMeterProfile | null {
-  if (!sig || sig.length !== 192) return null;
-
-  let bestProfile: CalibratedSubMeterProfile | null = null;
-  let bestScore = Infinity;
-
-  const sigMean = sig.reduce((acc, v) => acc + v, 0) / 192;
-
-  for (const profile of CALIBRATED_SUBMETER_PROFILES) {
-    let rawDiffSum = 0;
-    let normDiffSum = 0;
-    const profMean = profile.sig.reduce((acc, v) => acc + v, 0) / 192;
-
-    for (let i = 0; i < 192; i++) {
-      rawDiffSum += Math.abs(sig[i] - profile.sig[i]);
-      normDiffSum += Math.abs(sig[i] - sigMean - (profile.sig[i] - profMean));
-    }
-    const rawMean = rawDiffSum / 192;
-    const normMean = normDiffSum / 192;
-    const score = Math.min(rawMean, normMean * 1.08);
-
-    if (score < bestScore) {
-      bestScore = score;
-      bestProfile = profile;
-    }
-  }
-
-  if (bestProfile && bestScore <= 38.0) {
-    return bestProfile;
-  }
-  return null;
 }
 
 /**
@@ -1149,7 +822,7 @@ function runTesseractPass(
 }
 
 const SUBMETER_KEYWORD_REGEX =
-  /(?:kwh|kw[\.·\-]?h|watthour|watt[\s-]hour|meter|imp[\s/]*kwh|\b220\s*v\b|\b240\s*v\b|\b120\s*v\b|\b60\s*hz\b|\b50\s*hz\b|single[\s-]phase|1[\s-]phase|1phase|\b10\(60\)a\b|\b5\(30\)a\b|safari|cirtech|type[\s-]sp1|sub[\s-]?meter|ge\s*kv2c)/i;
+  /(?:kwh|kw[\.·\-]?h|watthour|watt[\s-]hour|meter|imp[\s/]*kwh|\b220\s*v\b|\b240\s*v\b|\b120\s*v\b|\b60\s*hz\b|\b50\s*hz\b|single[\s-]phase|1[\s-]phase|1phase|\b10\(60\)a\b|\b5\(30\)a\b|safari|voschtech|dds1288|q&y|qy-?169|cirtech|type[\s-]sp1|sub[\s-]?meter|ge\s*kv2c)/i;
 
 function detectBrandMetadata(
   rawText: string,
@@ -1157,12 +830,20 @@ function detectBrandMetadata(
 ): { brandModel: string; electricalSpecs: string; serialOrBarcode: string } {
   let brandModel = isCyclometer
     ? 'Mechanical Cyclometer kWh Sub-Meter'
-    : 'Electric kWh Sub-Meter';
+    : 'Digital LCD kWh Sub-Meter';
   let electricalSpecs = '220–240V • 60Hz Sub-Meter';
   let serialOrBarcode = 'Faceplate Serial Excluded';
 
-  if (/safari|sy-?168/i.test(rawText)) {
-    brandModel = 'Safari SY-168 Digital Kilowatt Hour Meter';
+  if (/voschtech|dds1288/i.test(rawText)) {
+    brandModel = 'Voschtech DDS1288 Static kWh Meter';
+    electricalSpecs = '240V • 10(60)A • 1Phase • 60Hz';
+  } else if (/q&y|qy-?169|anti-?theft/i.test(rawText)) {
+    brandModel = 'Q&Y i-Series QY-169 LCD Meter';
+    electricalSpecs = '240V • 10(60)A • 1Phase • 60Hz';
+  } else if (/safari|sy-?168/i.test(rawText)) {
+    brandModel = isCyclometer
+      ? 'Safari SY-168 Electronic kWh Meter'
+      : 'Safari SY-168 Digital Kilowatt Hour Meter';
     electricalSpecs = '240V • 10(60)A • 1Phase • 60Hz';
   } else if (/static|sp1|type-?sp1/i.test(rawText)) {
     brandModel = 'Static Watthour Meter TYPE-SP1';
@@ -1182,13 +863,67 @@ function detectBrandMetadata(
   return { brandModel, electricalSpecs, serialOrBarcode };
 }
 
+function parseSpacedRegisterText(
+  rawText: string,
+  expectedDigits?: number
+): { value: number | null; digitCount: number } {
+  const cleaned = rawText
+    .replace(/[OoQq]/g, '0')
+    .replace(/[Il|!]/g, '1')
+    .replace(/[Ss]/g, '5')
+    .replace(/[Bb]/g, '8')
+    .replace(/,/g, '.')
+    .replace(/\s+/g, '');
+
+  const dotMatch = cleaned.match(/(\d{4,6})\.(\d)/);
+  if (dotMatch) {
+    const val = parseFloat(`${dotMatch[1]}.${dotMatch[2]}`);
+    if (!Number.isNaN(val) && val >= 0 && val < 999999) {
+      return {
+        value: Math.round(val * 10) / 10,
+        digitCount: dotMatch[1].length + 1,
+      };
+    }
+  }
+
+  const digitsOnly = cleaned.replace(/[^\d]/g, '');
+  if (
+    expectedDigits &&
+    digitsOnly.length === expectedDigits &&
+    digitsOnly.length >= 5
+  ) {
+    const intPart = parseInt(digitsOnly.slice(0, -1), 10);
+    const decPart = parseInt(digitsOnly.slice(-1), 10);
+    return {
+      value: Math.round((intPart + decPart / 10) * 10) / 10,
+      digitCount: digitsOnly.length,
+    };
+  }
+
+  // Never let a dropped or extra glyph (e.g. 7-digit hallucination when 6 drums expected) slip through!
+  if (expectedDigits && digitsOnly.length !== expectedDigits) {
+    return { value: null, digitCount: digitsOnly.length };
+  }
+
+  if (digitsOnly.length === 7 || digitsOnly.length === 6) {
+    const intPart = parseInt(digitsOnly.slice(0, -1), 10);
+    const decPart = parseInt(digitsOnly.slice(-1), 10);
+    return {
+      value: Math.round((intPart + decPart / 10) * 10) / 10,
+      digitCount: digitsOnly.length,
+    };
+  }
+
+  return { value: extractMeterDigitsFromOcrText(rawText), digitCount: digitsOnly.length };
+}
+
 /**
  * Multi-Stage Sub-Meter Visual Inspector, Value Cropper & Auto-Reader:
  * 1. Normalizes oversized mobile camera uploads to prevent WebView OOM/hangs.
- * 2. Matches calibrated landlord sub-meter profiles when applicable.
- * 3. Runs persistent-worker Tesseract across smooth red-safe grayscale, inverted Otsu,
- *    expanded context band, and unwhitelisted full-faceplate passes.
- * 4. Falls back cleanly to structural canvas analysis without fabricating digits.
+ * 2. Locates & deskews physical cyclometer drums or LCD glass using visual invariants.
+ * 3. Decodes 7-segment LCDs structurally + verifies against persistent-worker Tesseract.
+ * 4. Isolates per-drum cyclometer glyphs + ensembles spaced/enhanced Tesseract passes.
+ * 5. Flags mid-rollover or low-margin readings for verification instead of guessing.
  */
 export async function recognizeSubMeterReading(
   imageDataUrl: string,
@@ -1209,59 +944,362 @@ export async function recognizeSubMeterReading(
       ? workingCanvas.toDataURL('image/jpeg', 0.93)
       : preservedColorUrl || imageDataUrl;
 
-    if (onProgress) onProgress(35);
-    const sig = computeBoxRgbSignature(workingSource);
-    const matchedProfile = matchCalibratedSubMeterProfile(sig);
+    if (onProgress) onProgress(30);
 
-    if (matchedProfile) {
-      const registerCropDataUrl = buildVerifiedValueCropScreenshot(
-        img,
-        matchedProfile.cropBox,
-        matchedProfile.reading,
-        'VERIFIED REGISTER CROP'
-      );
-      if (onProgress) onProgress(100);
-      return {
-        reading: matchedProfile.reading,
-        readingValue: matchedProfile.reading.toFixed(1),
-        rawText: `${matchedProfile.inspection.brandModel} | ${matchedProfile.inspection.registerBreakdown}`,
-        confidence: matchedProfile.confidence,
-        processedImageDataUrl: preservedColorUrl || imageDataUrl,
-        fullResUrl: preservedColorUrl || imageDataUrl,
-        registerCropDataUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
-        roiCropUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
-        isAuthentic: true,
-        inspection: matchedProfile.inspection,
-      };
-    }
-
-    const detectedCropBox = detectRegisterCropBox(workingSource);
+    // Stage 1: Physical Computer-Vision Register Localization + Structural Decode
+    const vision: VisionReadResult | null = analyzeSubMeterVision(workingSource);
+    const detectedCropBox = vision?.cropBox || detectRegisterCropBox(workingSource);
     const offlineAnalysis = analyzeRegisterWindowOffline(workingSource, detectedCropBox);
-    const primaryCropUrl = buildOcrVariantUrl(workingSource, detectedCropBox, {
-      forceInvert: false,
-      applyOtsu: false,
-    });
 
     let reading: number | null = null;
     let rawText = '';
     let contextText = '';
     let confidence = 0;
+    let needsVerification = false;
+    let unclearReason: string | undefined;
 
-    if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+    const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+
+    if (vision?.kind === 'lcd') {
+      // Primary: Geometric 7-segment decoder (resilient to shadows, glare, hooked-7, slant)
+      reading = vision.reading;
+      confidence = vision.confidence;
+      needsVerification = vision.needsVerification;
+      unclearReason = vision.unclearReason;
+      rawText = vision.debugInfo;
+
+      // Fast consensus verification on cleaned deskewed spaced strip
+      if (isOnline && vision.tesseractStripUrl) {
+        const res = await runTesseractPass(
+          vision.tesseractStripUrl,
+          Tesseract.PSM.SINGLE_LINE,
+          '0123456789.',
+          7000,
+          onProgress
+        );
+        if (res?.text) {
+          contextText = `${res.text}`.trim();
+          const parsed = parseSpacedRegisterText(res.text);
+          if (parsed.value !== null && reading !== null && Math.abs(parsed.value - reading) < 0.05) {
+            confidence = Math.max(confidence, 96);
+          } else if (reading === null && parsed.value !== null && parsed.digitCount >= 6) {
+            reading = parsed.value;
+            confidence = Math.min(82, res.confidence);
+            needsVerification = true;
+            unclearReason = '7-segment layout low contrast — verify kWh';
+          }
+        }
+      }
+    } else if (vision?.kind === 'cyclometer') {
+      needsVerification = vision.needsVerification;
+      unclearReason = vision.unclearReason;
+
+      let stripVal: { value: number | null; conf: number; count: number; text: string } = {
+        value: null,
+        conf: 0,
+        count: 0,
+        text: '',
+      };
+      let enhVal: { value: number | null; conf: number; count: number; text: string } = {
+        value: null,
+        conf: 0,
+        count: 0,
+        text: '',
+      };
+      let cellVal: {
+        value: number | null;
+        avgConf: number;
+        minConf: number;
+        digits: string;
+        confs: number[];
+      } = {
+        value: null,
+        avgConf: 0,
+        minConf: 0,
+        digits: '',
+        confs: [],
+      };
+      let cellChars: string[] = ['', '', '', '', '', ''];
+      let cellConfs: number[] = [0, 0, 0, 0, 0, 0];
+      let blackIntVal: { intStr: string | null; conf: number; raw: string } = {
+        intStr: null,
+        conf: 0,
+        raw: '',
+      };
+
+      const extractFiveIntDigits = (rawTextStr: string, digitCount: number): string | null => {
+        const clean = rawTextStr.replace(/\s+/g, '');
+        const digitsOnly = clean.replace(/[^\d]/g, '');
+        if (digitCount === 6 && digitsOnly.length === 6) return digitsOnly.slice(0, 5);
+        const dotIdx = clean.indexOf('.');
+        if (dotIdx > 0) {
+          const leftDigits = clean.slice(0, dotIdx).replace(/[^\d]/g, '');
+          if (leftDigits.length === 5) return leftDigits;
+        }
+        return null;
+      };
+
+      if (isOnline) {
+        // Pass 1: Clean isolated 6-drum black-on-white strip with explicit decimal point
+        const res1 = await runTesseractPass(
+          vision.tesseractStripUrl,
+          Tesseract.PSM.SINGLE_LINE,
+          '0123456789.',
+          8000,
+          onProgress
+        );
+        if (res1?.text) {
+          const parsed1 = parseSpacedRegisterText(res1.text, 6);
+          stripVal = {
+            value: parsed1.value,
+            conf: res1.confidence,
+            count: parsed1.digitCount,
+            text: res1.text.trim(),
+          };
+          contextText = `strip=${res1.text.trim()}(${res1.confidence})`;
+        }
+
+        // Pass 1b: 1-to-1 per-drum SINGLE_WORD verification with SINGLE_CHAR fallback
+        if (vision.cellImageUrls && vision.cellImageUrls.length === 6) {
+          const chars: string[] = [];
+          const confs: number[] = [];
+          for (let ci = 0; ci < 6; ci++) {
+            const parseCellText = (txt: string | undefined): string => {
+              const isNarrow = (vision.cellAspectRatios?.[ci] ?? 1) < 0.48;
+              const rawCell = (txt || '').replace(/[Oo]/g, '0');
+              const normalized = (isNarrow ? rawCell.replace(/[lI]/g, '1') : rawCell).replace(/[^\d]/g, '');
+              return normalized.length === 1 ? normalized[0] : '';
+            };
+            const cRes = await runTesseractPass(
+              vision.cellImageUrls[ci],
+              Tesseract.PSM.SINGLE_WORD,
+              '0123456789OolI',
+              5000,
+              onProgress
+            );
+            let cDigit = parseCellText(cRes?.text);
+            let cConf = cDigit ? Math.round(cRes?.confidence || 0) : 0;
+            if (!cDigit) {
+              const scRes = await runTesseractPass(
+                vision.cellImageUrls[ci],
+                Tesseract.PSM.SINGLE_CHAR,
+                '0123456789OolI',
+                4000,
+                onProgress
+              );
+              cDigit = parseCellText(scRes?.text);
+              cConf = cDigit ? Math.round(scRes?.confidence || 0) : 0;
+            }
+            chars.push(cDigit);
+            confs.push(cConf);
+          }
+          cellChars = chars;
+          cellConfs = confs;
+          if (chars.every((d) => d.length === 1)) {
+            const joined = chars.join('');
+            const intPart = parseInt(joined.slice(0, 5), 10);
+            const decPart = parseInt(joined.slice(5), 10);
+            cellVal = {
+              value: Math.round((intPart + decPart / 10) * 10) / 10,
+              avgConf: Math.round(confs.reduce((a, b) => a + b, 0) / 6),
+              minConf: Math.min(...confs),
+              digits: joined,
+              confs,
+            };
+            contextText = `${contextText} | cells=${joined}(min=${cellVal.minConf},avg=${cellVal.avgConf})`;
+          } else {
+            contextText = `${contextText} | cells=${chars.map((c) => c || '?').join('')}`;
+          }
+        }
+
+        // Pass 2: Clean 5-drum black integer strip + full enhanced crop when Pass 1 and per-cell do not agree
+        const passesAgree =
+          stripVal.value !== null &&
+          cellVal.value !== null &&
+          Math.abs(stripVal.value - cellVal.value) < 0.05;
+        if (!passesAgree) {
+          if (vision.blackStripUrl) {
+            const bRes = await runTesseractPass(
+              vision.blackStripUrl,
+              Tesseract.PSM.SINGLE_LINE,
+              '0123456789',
+              7000,
+              onProgress
+            );
+            if (bRes?.text) {
+              const bDigits = bRes.text.replace(/[^\d]/g, '');
+              blackIntVal = {
+                intStr: bDigits.length === 5 ? bDigits : null,
+                conf: bRes.confidence,
+                raw: bRes.text.trim(),
+              };
+              contextText = `${contextText} | blk=${bRes.text.trim()}(${bRes.confidence})`;
+            }
+          }
+          const res2 = await runTesseractPass(
+            vision.enhancedCropUrl,
+            Tesseract.PSM.SINGLE_LINE,
+            '0123456789.',
+            8000,
+            onProgress
+          );
+          if (res2?.text) {
+            const parsed2 = parseSpacedRegisterText(res2.text, 6);
+            enhVal = {
+              value: parsed2.value,
+              conf: res2.confidence,
+              count: parsed2.digitCount,
+              text: res2.text.trim(),
+            };
+            contextText = `${contextText} | enh=${res2.text.trim()}(${res2.confidence})`;
+          }
+        }
+      }
+
+      const stripInt = extractFiveIntDigits(stripVal.text, stripVal.count);
+      const enhInt = extractFiveIntDigits(enhVal.text, enhVal.count);
+      const cellInt = cellChars.slice(0, 5).every((d) => d.length === 1)
+        ? cellChars.slice(0, 5).join('')
+        : null;
+      const intVotes = new Map<string, number>();
+      for (const candidateInt of [blackIntVal.intStr, stripInt, enhInt, cellInt]) {
+        if (candidateInt) intVotes.set(candidateInt, (intVotes.get(candidateInt) || 0) + 1);
+      }
+      let consensusInt: string | null = null;
+      let consensusIntCount = 0;
+      for (const [k, v] of intVotes.entries()) {
+        if (v > consensusIntCount) {
+          consensusInt = k;
+          consensusIntCount = v;
+        }
+      }
+
+      if (
+        cellVal.value !== null &&
+        stripVal.value !== null &&
+        Math.abs(cellVal.value - stripVal.value) < 0.05
+      ) {
+        reading = cellVal.value;
+        confidence = Math.max(cellVal.avgConf, stripVal.conf, 94);
+      } else if (
+        cellVal.value !== null &&
+        enhVal.value !== null &&
+        Math.abs(cellVal.value - enhVal.value) < 0.05
+      ) {
+        reading = cellVal.value;
+        confidence = Math.max(cellVal.avgConf, enhVal.conf, 90);
+      } else if (
+        stripVal.value !== null &&
+        enhVal.value !== null &&
+        Math.abs(stripVal.value - enhVal.value) < 0.05 &&
+        (stripVal.conf >= 45 || enhVal.conf >= 45)
+      ) {
+        reading = stripVal.value;
+        confidence = Math.max(stripVal.conf, enhVal.conf, 90);
+      } else if (consensusInt && consensusIntCount >= 2) {
+        // Two or more independent OCR views agree on all 5 black integer drums
+        const stripDec = stripVal.count === 6 && stripInt === consensusInt ? stripVal.text.replace(/[^\d]/g, '')[5] : '';
+        const enhDec = enhVal.count === 6 && enhInt === consensusInt ? enhVal.text.replace(/[^\d]/g, '')[5] : '';
+        let cellDec = cellChars[5] || '';
+        let cellDecConf = cellConfs[5] || 0;
+        // Geometric disambiguation on low-confidence '3' vs '5' in normalized 28x44 drum bitmap
+        const bmp5 = vision.cellBitmaps?.[5];
+        if (cellDec === '3' && bmp5 && bmp5.length === 28 * 44) {
+          const boxDens = (x0: number, x1: number, y0: number, y1: number) => {
+            let s = 0;
+            let n = 0;
+            for (let y = y0; y <= y1; y++) {
+              for (let x = x0; x <= x1; x++) {
+                s += bmp5[y * 28 + x] ? 1 : 0;
+                n++;
+              }
+            }
+            return n > 0 ? s / n : 0;
+          };
+          const ul = boxDens(2, 11, 10, 19);
+          const ur = boxDens(17, 25, 11, 18);
+          const lr = boxDens(16, 25, 24, 35);
+          if (ul >= 0.45 && ur <= 0.14 && ul - ur >= 0.40 && lr >= 0.30) {
+            cellDec = '5';
+            cellDecConf = Math.max(cellDecConf, 78);
+          }
+        }
+        const tenthsVotes = new Map<string, number>();
+        for (const [d, c] of [
+          [stripDec, stripVal.conf],
+          [enhDec, enhVal.conf],
+          [cellDec, cellDecConf],
+        ] as Array<[string, number]>) {
+          if (d && c >= 40) tenthsVotes.set(d, (tenthsVotes.get(d) || 0) + 1);
+        }
+        let bestDec = '';
+        let bestDecVotes = 0;
+        for (const [d, v] of tenthsVotes.entries()) {
+          if (v > bestDecVotes) {
+            bestDec = d;
+            bestDecVotes = v;
+          }
+        }
+        const intNum = parseInt(consensusInt, 10);
+        const tenthsRollover = vision.rolloverPositions.includes(5);
+        if (!tenthsRollover && bestDec && bestDecVotes >= 2) {
+          reading = Math.round((intNum + parseInt(bestDec, 10) / 10) * 10) / 10;
+          confidence = Math.max(84, Math.min(92, Math.round(blackIntVal.conf || 85)));
+        } else if (!tenthsRollover && bestDec && (cellDecConf >= 55 || (enhDec === bestDec && enhVal.conf >= 55))) {
+          reading = Math.round((intNum + parseInt(bestDec, 10) / 10) * 10) / 10;
+          confidence = Math.max(76, Math.min(86, cellDecConf || enhVal.conf || 78));
+          // Flag single-source tenths unless confirmed by geometric disambiguation
+          if (tenthsVotes.size > 1 || (bestDecVotes < 2 && cellDecConf < 78)) {
+            needsVerification = true;
+            unclearReason = unclearReason || 'Tenths drum decimal uncertain — verify last digit';
+          }
+        } else if (tenthsRollover && enhDec && enhVal.conf >= 55) {
+          reading = Math.round((intNum + parseInt(enhDec, 10) / 10) * 10) / 10;
+          confidence = Math.min(72, enhVal.conf);
+          needsVerification = true;
+          unclearReason = unclearReason || 'Tenths drum is rolling over between digits — verify kWh';
+        } else {
+          reading = intNum;
+          confidence = Math.max(72, Math.round(blackIntVal.conf || 74));
+          needsVerification = true;
+          unclearReason =
+            unclearReason ||
+            (tenthsRollover
+              ? `Integer reading confirmed (${intNum} kWh); tenths drum mid-rollover — verify decimal`
+              : `Integer reading confirmed (${intNum} kWh); tenths digit unclear — verify decimal`);
+        }
+      } else if (cellVal.value !== null && stripVal.value !== null && Math.abs(cellVal.value - stripVal.value) <= 0.15) {
+        reading = cellVal.avgConf >= stripVal.conf ? cellVal.value : stripVal.value;
+        confidence = Math.max(cellVal.avgConf, stripVal.conf);
+      } else if (stripVal.count === 6 && stripVal.value !== null && stripVal.conf >= 78 && !blackIntVal.intStr && !enhVal.value) {
+        reading = stripVal.value;
+        confidence = stripVal.conf;
+      } else {
+        reading = null;
+        confidence = Math.max(stripVal.conf, enhVal.conf, cellVal.avgConf, blackIntVal.conf);
+        needsVerification = true;
+        unclearReason =
+          unclearReason || 'Cyclometer passes did not reach integer consensus — verify kWh';
+      }
+      rawText = vision.debugInfo;
+    } else if (isOnline) {
+      // Fallback generic pipeline (meters without blue+red band or inset rectangular bezel)
+      const primaryCropUrl = buildOcrVariantUrl(workingSource, detectedCropBox, {
+        forceInvert: false,
+        applyOtsu: false,
+      });
       const passSpecs: Array<{
         getUrl: () => string;
         psm: string;
         whitelist: string;
         timeoutMs: number;
       }> = [
-        // Pass 1: Smooth red-safe grayscale tight register crop (SINGLE_LINE, digits only)
         {
           getUrl: () => primaryCropUrl,
           psm: Tesseract.PSM.SINGLE_LINE,
           whitelist: '0123456789.',
-          timeoutMs: 10000,
+          timeoutMs: 9000,
         },
-        // Pass 2: Inverted / Otsu contrast fallback for dark white-on-black cyclometer drums
         {
           getUrl: () =>
             buildOcrVariantUrl(workingSource, detectedCropBox, {
@@ -1270,16 +1308,8 @@ export async function recognizeSubMeterReading(
             }),
           psm: Tesseract.PSM.SINGLE_LINE,
           whitelist: '0123456789.',
-          timeoutMs: 10000,
+          timeoutMs: 9000,
         },
-        // Pass 3: Tight primary with SINGLE_WORD
-        {
-          getUrl: () => primaryCropUrl,
-          psm: Tesseract.PSM.SINGLE_WORD,
-          whitelist: '0123456789.',
-          timeoutMs: 8000,
-        },
-        // Pass 4: Wider register band with letters allowed so '003020.7 kW·h' is captured intact
         {
           getUrl: () =>
             buildOcrVariantUrl(
@@ -1289,14 +1319,13 @@ export async function recognizeSubMeterReading(
             ),
           psm: Tesseract.PSM.AUTO,
           whitelist: '',
-          timeoutMs: 10000,
+          timeoutMs: 9000,
         },
-        // Pass 5: Bounded full photo fallback (no whitelist so brand/specs & kW·h anchor work)
         {
           getUrl: () => workingDataUrl,
           psm: Tesseract.PSM.AUTO,
           whitelist: '',
-          timeoutMs: 12000,
+          timeoutMs: 10000,
         },
       ];
 
@@ -1311,28 +1340,23 @@ export async function recognizeSubMeterReading(
           reading = extracted;
           rawText = res.text;
           confidence = Math.max(confidence, res.confidence);
-          break;
+          if (res.confidence >= 80) break;
         }
       }
-
-      // If digits-only pass succeeded and we still need device verification keywords
-      if (
-        reading !== null &&
-        !SUBMETER_KEYWORD_REGEX.test(contextText) &&
-        !offlineAnalysis.hasRegisterStructure
-      ) {
-        const metaRes = await runTesseractPass(workingDataUrl, Tesseract.PSM.AUTO, '', 9000);
-        if (metaRes?.text) {
-          contextText = `${contextText}\n${metaRes.text}`.trim();
-        }
+      if (reading !== null && confidence < 76) {
+        needsVerification = true;
+        unclearReason = 'Low OCR confidence — please verify kWh value';
       }
     }
 
     const combinedText = `${rawText}\n${contextText}`.trim();
     const hasMeterKeywords = SUBMETER_KEYWORD_REGEX.test(combinedText);
-    const isCyclometer = offlineAnalysis.inspection?.brandModel?.includes('Cyclometer') === true;
-    const isBlankLcd = offlineAnalysis.inspection?.isBlankUnpoweredLcd === true;
+    const isCyclometer =
+      vision?.kind === 'cyclometer' ||
+      offlineAnalysis.inspection?.brandModel?.includes('Cyclometer') === true;
+    const isBlankLcd = offlineAnalysis.inspection?.isBlankUnpoweredLcd === true && !vision;
     const isSubMeterDevice =
+      Boolean(vision) ||
       hasMeterKeywords ||
       offlineAnalysis.hasRegisterStructure ||
       isBlankLcd;
@@ -1345,12 +1369,14 @@ export async function recognizeSubMeterReading(
     if (!isSubMeterDevice) {
       finalReading = null;
       isAuthentic = false;
+      needsVerification = true;
+      unclearReason = 'No electric sub-meter detected';
       finalConfidence = 0;
       finalInspection = {
         brandModel: 'Not an Electric Sub-Meter',
         registerType: 'Unrecognized Device',
         registerBreakdown:
-          'No electric sub-meter dials or LCD kWh display detected in this photo. Please frame a physical sub-meter.',
+          'No electric sub-meter dials or LCD display detected in this photo.',
         serialOrBarcode: 'N/A',
         electricalSpecs: 'N/A',
       };
@@ -1358,22 +1384,31 @@ export async function recognizeSubMeterReading(
       finalReading = reading !== null ? reading : offlineAnalysis.reading;
       isAuthentic = true;
       finalConfidence =
-        reading !== null ? Math.max(confidence, 75) : offlineAnalysis.confidence;
+        reading !== null ? Math.max(confidence, 50) : offlineAnalysis.confidence;
+      if (finalReading === null) {
+        needsVerification = true;
+        unclearReason = unclearReason || 'Display unclear — enter reading manually';
+      }
 
       const meta = detectBrandMetadata(combinedText, isCyclometer);
       finalInspection =
-        reading !== null
+        finalReading !== null
           ? {
               brandModel: meta.brandModel,
-              registerType: 'Digital Register Window Digit Extraction',
-              registerBreakdown: `Verified Register: ${reading.toFixed(1)} kWh`,
+              registerType: isCyclometer
+                ? 'Mechanical Cyclometer (5 + 0.1 kWh)'
+                : 'Digital LCD Register (kW·h)',
+              registerBreakdown: needsVerification
+                ? `Detected ~${finalReading.toFixed(1)} kWh (${unclearReason || 'Verify digit'})`
+                : `Verified: ${finalReading.toFixed(1)} kWh`,
               serialOrBarcode: meta.serialOrBarcode,
               electricalSpecs: meta.electricalSpecs,
             }
           : {
               ...offlineAnalysis.inspection,
               brandModel:
-                meta.brandModel !== 'Electric kWh Sub-Meter'
+                meta.brandModel !== 'Digital LCD kWh Sub-Meter' &&
+                meta.brandModel !== 'Mechanical Cyclometer kWh Sub-Meter'
                   ? meta.brandModel
                   : offlineAnalysis.inspection.brandModel,
               electricalSpecs:
@@ -1389,10 +1424,10 @@ export async function recognizeSubMeterReading(
       detectedCropBox,
       finalReading,
       !isSubMeterDevice
-        ? 'UNRECOGNIZED NON-METER OBJECT'
-        : finalReading !== null
-        ? 'VERIFIED REGISTER CROP'
-        : 'CLOSE-UP INSPECTION CROP'
+        ? 'NOT A SUB-METER'
+        : needsVerification || finalReading === null
+        ? 'VERIFY REGISTER CROP'
+        : 'VERIFIED REGISTER CROP'
     );
 
     if (onProgress) onProgress(100);
@@ -1406,8 +1441,10 @@ export async function recognizeSubMeterReading(
       processedImageDataUrl: preservedColorUrl || imageDataUrl,
       fullResUrl: preservedColorUrl || imageDataUrl,
       registerCropDataUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
-      roiCropUrl: registerCropDataUrl || preservedColorUrl || imageDataUrl,
+      roiCropUrl: vision?.tesseractStripUrl || registerCropDataUrl || preservedColorUrl || imageDataUrl,
       isAuthentic,
+      needsVerification,
+      unclearReason,
       inspection: finalInspection,
     };
   } catch (err) {
