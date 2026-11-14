@@ -227,7 +227,7 @@ export const GUIDE_FLOWS: GuideFlowDefinition[] = [
         title: 'Pay Over Due or Prepay Next Month',
         badge: 'Step 1 • Credit',
         instruction:
-          'Record a payment larger than Remaining Balance—or use Advance / Refund quick-fills (1-Month Max Advance or Due + Next Month).',
+          'Record a payment larger than Remaining Balance, or use Advance / Refund quick-fills (Prepaid Wallet credits carry forward automatically).',
       },
       {
         stepNo: 2,
@@ -256,7 +256,7 @@ export const GUIDE_FLOWS: GuideFlowDefinition[] = [
     mascotMood: 'archive',
     mascotTip: 'Archive reading logs stay locked so your kWh audit trail is always safe.',
     ruleWarning:
-      'Sub-Meter reading logs in Archive are immutable—there is intentionally no Delete Log action to protect financial integrity.',
+      'Sub-Meter reading logs in Archive are immutable: there is intentionally no Delete Log action to protect financial integrity.',
     actionLabel: 'Open Archive Center',
     actionTarget: { type: 'tab', tab: 'archive' },
     steps: [
@@ -292,7 +292,7 @@ export const GUIDE_FLOWS: GuideFlowDefinition[] = [
     subtitle:
       'Run offline in the Mobile App or browser, then sync via Space Code.',
     mascotMood: 'sync',
-    mascotTip: 'Keep your Property Space Code private—anyone with it sees synced data!',
+    mascotTip: 'Keep your Property Space Code private: anyone with it sees synced data!',
     ruleWarning:
       'Only Desktop/Web generates Space Codes. Mobile can apply a code once per month, which refreshes the app cleanly and applies cloud data.',
     actionLabel: 'Open Sync & Security Settings',

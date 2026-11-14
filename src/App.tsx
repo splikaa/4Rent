@@ -42,11 +42,9 @@ import {
   subscribeToRealtimeSync,
 } from './services/firebaseSync';
 import {
-  applyPaymentWithOverpayment,
   clampDueDayOneToTen,
   formatMonthKeyLabel,
   getElectricRateForPeriod,
-  getRemainingAdvanceAllowance,
   isMobileDevice,
   isRunningInDesktopApp,
   isRunningInMobileApp,
@@ -55,6 +53,13 @@ import {
   recalculateActiveBillsForRates,
   roundCurrency,
 } from './utils/billingCalculator';
+import {
+  executeAdvanceDepositTransaction,
+  executeAdvanceRefundTransaction,
+  executeGenerateBillTransaction,
+  executeRecordPaymentTransaction,
+  getAdvancePolicyAllowance,
+} from './utils/financialEngine';
 import { requestAndVerifyNotifications } from './services/notificationService';
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
 import { LockScreen } from './components/security/LockScreen';
@@ -158,6 +163,18 @@ export function App() {
     | { type: 'delete_room'; room: Room }
     | null
   >(null);
+
+  const processedTxKeysRef = useRef<Set<string>>(new Set());
+  const claimTxKey = (key?: string): boolean => {
+    if (!key) return true;
+    if (processedTxKeysRef.current.has(key)) return false;
+    processedTxKeysRef.current.add(key);
+    if (processedTxKeysRef.current.size > 500) {
+      const oldest = processedTxKeysRef.current.values().next().value;
+      if (oldest) processedTxKeysRef.current.delete(oldest);
+    }
+    return true;
+  };
 
   // Occupied Room Archive Guard State (Prevents accidental direct archive of occupied rooms)
   const [roomPendingOccupiedArchive, setRoomPendingOccupiedArchive] =
@@ -1073,7 +1090,7 @@ export function App() {
       setRoomPendingOccupiedArchive(null);
       appendAuditLog(
         'Occupied Room Archived (Override)',
-        `${room.name} (${room.tenant?.fullName || 'Occupied'}) archived — Reason: ${reason}`,
+        `${room.name} (${room.tenant?.fullName || 'Occupied'}) archived | Reason: ${reason}`,
         'tenant'
       );
       triggerFeedback(
@@ -1186,110 +1203,84 @@ export function App() {
     }
   };
 
-  // Generate Bill -> Enforces 1 Active Receipt per Room (archives previous receipts for this room)
+  // Generate Bill -> Atomic centavo transaction, enforces 1 Active Receipt per Room, idempotency, and prepaid wallet math
   const handleGenerateBill = (
     newBill: BillRecord,
-    updatedRoomLastReading: number,
-    updatedRoomLastPhotoUrl: string,
-    updatedRoomUnpaidBalance: number,
-    overpaymentAddedToAdvance: number,
-    advanceDeductedFromRoom: number,
-    updatedRoomLastCropUrl?: string
+    _updatedRoomLastReading: number,
+    _updatedRoomLastPhotoUrl: string,
+    _updatedRoomUnpaidBalance: number,
+    _overpaymentAddedToAdvance: number,
+    _advanceDeductedFromRoom: number,
+    _updatedRoomLastCropUrl?: string
   ) => {
     try {
-      setBills((prev) => {
-        const archivedOlderForSameRoom = prev.map((b) =>
-          b.roomId === newBill.roomId && !b.isArchived
-            ? {
-                ...b,
-                isArchived: true,
-                archivedAt: newBill.createdAt,
-              }
-            : b
-        );
-        return [newBill, ...archivedOlderForSameRoom];
+      const targetRoom = rooms.find((r) => r.id === newBill.roomId);
+      if (!targetRoom) {
+        triggerFeedback('Bill Generation Error', 'Selected room not found.', 'error');
+        return;
+      }
+
+      const txResult = executeGenerateBillTransaction({
+        room: targetRoom,
+        existingBills: bills,
+        billDraft: newBill,
+        advanceCapMode: settings.advanceCapMode || 'unlimited',
+        idempotencyKey: newBill.idempotencyKey || newBill.id,
       });
 
-      setRooms((prev) =>
-        prev.map((r) => {
-          if (r.id !== newBill.roomId) return r;
-          const depUsed = Math.max(0, newBill.securityDepositApplied || 0);
-          const nextPaidDeposit = Math.max(
-            0,
-            roundCurrency((r.securityDepositPaid || 0) - depUsed)
-          );
-          const advUsed = advanceDeductedFromRoom;
-          const currentAdv = r.advanceRent || 0;
-          const nextAdv = Math.max(
-            0,
-            roundCurrency(currentAdv - advUsed + overpaymentAddedToAdvance)
-          );
+      if (!txResult.ok || !txResult.createdBill || !txResult.updatedRoom) {
+        triggerFeedback(
+          txResult.duplicate ? 'Duplicate Receipt Prevented' : 'Bill Generation Blocked',
+          txResult.errorMessage || 'Unable to generate official receipt.',
+          txResult.duplicate ? 'info' : 'error'
+        );
+        if (txResult.duplicate && txResult.createdBill) {
+          setActiveReceiptBill(txResult.createdBill);
+        }
+        return;
+      }
 
-          const newAdvEntries = [...(r.advanceHistory || [])];
-          if (advanceDeductedFromRoom > 0) {
-            newAdvEntries.unshift({
-              id: `adv-use-${Date.now()}`,
-              type: 'applied_to_bill',
-              amount: advanceDeductedFromRoom,
-              createdAt: newBill.createdAt,
-              note: `Applied to Receipt #${newBill.receiptNo}`,
-            });
-          }
-          if (overpaymentAddedToAdvance > 0) {
-            newAdvEntries.unshift({
-              id: `adv-over-${Date.now()}`,
-              type: 'overpayment_credit',
-              amount: overpaymentAddedToAdvance,
-              createdAt: newBill.createdAt,
-              note: `Overpayment from Receipt #${newBill.receiptNo}`,
-            });
-          }
+      const issuedBill = txResult.createdBill;
+      const nextRoom = txResult.updatedRoom;
 
-          return {
-            ...r,
-            lastMeterReading: updatedRoomLastReading,
-            lastMeterPhotoDataUrl: updatedRoomLastPhotoUrl,
-            lastMeterCropDataUrl: updatedRoomLastCropUrl || r.lastMeterCropDataUrl,
-            lastReadingDate: newBill.createdAt,
-            unpaidBalance: updatedRoomUnpaidBalance,
-            securityDepositPaid: nextPaidDeposit,
-            advanceRent: nextAdv,
-            advanceHistory: newAdvEntries,
-            activeReceiptId: newBill.id,
-            updatedAt: newBill.createdAt,
-          };
-        })
-      );
+      setBills(txResult.archivedPreviousBills);
+      setRooms((prev) => prev.map((r) => (r.id === nextRoom.id ? nextRoom : r)));
 
       appendReadingLog({
-        id: `meter-log-${newBill.id}-${Date.now()}`,
-        roomId: newBill.roomId,
-        roomName: newBill.roomName,
-        tenantName: newBill.tenantName,
-        readingDate: newBill.createdAt,
-        readingKwh: newBill.currReading,
-        consumptionDeltaKwh: newBill.consumptionKwh,
-        source: newBill.notes?.includes('Rollover')
+        id: `meter-log-${issuedBill.id}-${Date.now()}`,
+        roomId: issuedBill.roomId,
+        roomName: issuedBill.roomName,
+        tenantName: issuedBill.tenantName,
+        readingDate: issuedBill.createdAt,
+        readingKwh: issuedBill.currReading,
+        consumptionDeltaKwh: issuedBill.consumptionKwh,
+        source: issuedBill.notes?.includes('Rollover')
           ? 'rollover'
-          : (newBill.ocrConfidence ? 'ocr_scan' : 'manual_entry'),
-        photoDataUrl: newBill.meterPhotoDataUrl,
-        cropDataUrl: newBill.currMeterCropDataUrl,
-        billId: newBill.id,
-        notes: newBill.notes,
+          : issuedBill.ocrConfidence
+            ? 'ocr_scan'
+            : 'manual_entry',
+        photoDataUrl: issuedBill.meterPhotoDataUrl,
+        cropDataUrl: issuedBill.currMeterCropDataUrl,
+        billId: issuedBill.id,
+        notes: issuedBill.notes,
       });
 
       appendAuditLog(
         'Official Receipt Generated',
-        `Receipt #${newBill.receiptNo} issued for ${newBill.roomName}.`,
+        `Receipt #${issuedBill.receiptNo} issued for ${issuedBill.roomName}.`,
         'billing'
       );
-      setActiveReceiptBill(newBill);
+      setActiveReceiptBill(issuedBill);
       triggerFeedback(
-        `Receipt #${newBill.receiptNo} Generated`,
-        `${newBill.roomName}: ${newBill.consumptionKwh.toFixed(1)} kWh used • Net Due ₱${newBill.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+        `Receipt #${issuedBill.receiptNo} Generated`,
+        `${issuedBill.roomName}: ${issuedBill.consumptionKwh.toFixed(1)} kWh used • Net Due ₱${issuedBill.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}${
+          (issuedBill.advanceBalanceAfter ?? 0) > 0
+            ? ` • Advance Rem: ₱${(issuedBill.advanceBalanceAfter || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
+            : ''
+        }`,
         'success',
         'Open Receipt',
-        () => setActiveReceiptBill(newBill)
+        () => setActiveReceiptBill(issuedBill)
       );
       triggerOptionalCloudSync();
     } catch (err) {
@@ -1301,64 +1292,56 @@ export function App() {
     }
   };
 
-  // Record Payment -> Automatically credits any overpayment to the room's Withdrawable Advance Payment Balance
+  // Record Payment -> Atomically applies cash/transfer payment and credits any excess to Advance Wallet
   const handleRecordPayment = (
     billId: string,
     amount: number,
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
-    referenceNo?: string
+    referenceNo?: string,
+    idempotencyKey?: string
   ) => {
     try {
+      if (!claimTxKey(idempotencyKey)) return;
       const targetBill = bills.find((b) => b.id === billId);
       if (!targetBill) return;
+      const targetRoom = rooms.find((r) => r.id === targetBill.roomId);
 
-      const outcome = applyPaymentWithOverpayment(
-        targetBill,
-        amount,
+      const txResult = executeRecordPaymentTransaction({
+        bill: targetBill,
+        room: targetRoom,
+        paymentAmount: amount,
         method,
-        referenceNo
-      );
-      const updatedReceiptObj = outcome.updatedBill;
-      const targetRoomId = updatedReceiptObj.roomId;
+        referenceNo,
+        advanceCapMode: settings.advanceCapMode || 'unlimited',
+        idempotencyKey,
+      });
+
+      if (!txResult.ok || !txResult.updatedBill) {
+        if (txResult.duplicate) return;
+        triggerFeedback(
+          'Payment Not Recorded',
+          txResult.errorMessage || 'Unable to process payment.',
+          'error'
+        );
+        return;
+      }
+
+      const updatedReceiptObj = txResult.updatedBill;
+      const updatedRoomObj = txResult.updatedRoom;
       const newRoomRemaining = updatedReceiptObj.remainingBalance;
-      const overpaymentCredited = outcome.overpaymentCredited;
+      const overpaymentCredited = txResult.overpaymentCredited;
       const receiptNo = updatedReceiptObj.receiptNo;
 
       setBills((prev) =>
         prev.map((b) => (b.id === billId ? updatedReceiptObj : b))
       );
 
-      if (targetRoomId) {
+      if (updatedRoomObj) {
         setRooms((prev) =>
-          prev.map((r) => {
-            if (r.id !== targetRoomId) return r;
-            const nextAdv =
-              Math.round(((r.advanceRent || 0) + overpaymentCredited) * 100) /
-              100;
-            const nextHistory =
-              overpaymentCredited > 0
-                ? [
-                    {
-                      id: `adv-${Date.now()}`,
-                      type: 'overpayment_credit' as const,
-                      amount: overpaymentCredited,
-                      createdAt: new Date().toISOString(),
-                      note: `Excess payment from Receipt #${receiptNo} credited to Advance Balance (Applies Next Month / Refundable)`,
-                    },
-                    ...(r.advanceHistory || []),
-                  ]
-                : r.advanceHistory;
-
-            return {
-              ...r,
-              unpaidBalance: newRoomRemaining,
-              advanceRent: nextAdv,
-              advanceHistory: nextHistory,
-              updatedAt: new Date().toISOString(),
-            };
-          })
+          prev.map((r) => (r.id === updatedRoomObj.id ? updatedRoomObj : r))
         );
       }
+
       appendAuditLog(
         'Payment Recorded',
         `₱${amount.toFixed(2)} via ${method} for Receipt #${receiptNo}.`,
@@ -1367,7 +1350,7 @@ export function App() {
       triggerFeedback(
         `Payment Recorded (₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
         overpaymentCredited > 0
-          ? `Paid via ${method}. Excess ₱${overpaymentCredited.toFixed(2)} auto-credited to Advance Balance for next month!`
+          ? `Paid via ${method}. Excess ₱${overpaymentCredited.toFixed(2)} added to Advance Credit Wallet!`
           : `Paid via ${method} for Receipt #${receiptNo}. Remaining: ₱${newRoomRemaining.toFixed(2)}.`,
         'success',
         'View Official Receipt',
@@ -1393,38 +1376,42 @@ export function App() {
     const targetBill = bills.find((b) => b.id === billId);
     if (!targetBill) return;
     const targetRoom = rooms.find((r) => r.id === targetBill.roomId);
+    const policyMode = settings.advanceCapMode || 'unlimited';
     const excess = Math.max(
       0,
-      Math.round((amount - (targetBill.remainingBalance || 0)) * 100) / 100
+      roundCurrency(amount - (targetBill.remainingBalance || 0))
     );
     if (excess > 0) {
       if (targetRoom) {
-        const remainingAllowance = getRemainingAdvanceAllowance(
+        const allowance = getAdvancePolicyAllowance(
           targetRoom.monthlyRent,
-          targetRoom.advanceRent || 0
+          targetRoom.advanceRent || 0,
+          policyMode
         );
-        if (excess > remainingAllowance + 0.01) {
+        if (allowance.isCapped && excess > allowance.remainingAllowance + 0.01) {
           triggerFeedback(
-            '1-Month Advance Limit Reached',
-            remainingAllowance <= 0
-              ? `${targetRoom.name} already holds ₱${(targetRoom.advanceRent || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} in Advance Balance (1-month limit: ₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Max payment allowed right now: ₱${(targetBill.remainingBalance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`
-              : `Tenants can only pay up to 1 month advance (remaining allowance: ₱${remainingAllowance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Maximum payable now: ₱${roundCurrency((targetBill.remainingBalance || 0) + remainingAllowance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+            'Advance Policy Limit Reached',
+            allowance.remainingAllowance <= 0
+              ? `${targetRoom.name} already holds ₱${(targetRoom.advanceRent || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} in Advance Balance (1-month policy cap: ₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Max payable now: ₱${(targetBill.remainingBalance || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`
+              : `1-Month Advance Policy limit allows ₱${allowance.remainingAllowance.toLocaleString('en-PH', { minimumFractionDigits: 2 })} more. Max payable now: ₱${roundCurrency((targetBill.remainingBalance || 0) + allowance.remainingAllowance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
             'error'
           );
           return;
         }
       }
+      const txKey = `pay-${billId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setPendingAuthAction({
         title: `Authorize Overpayment & Advance Credit`,
-        description: `${targetBill.roomName}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} will credit to Next Month Advance Balance (1-month limit). Verify with Biometrics or your 4-Digit PIN.`,
+        description: `${targetBill.roomName}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} will credit to Advance Wallet. Verify with Biometrics or your 4-Digit PIN.`,
         onConfirm: () => {
-          handleRecordPayment(billId, amount, method, referenceNo);
+          handleRecordPayment(billId, amount, method, referenceNo, txKey);
           onCommitted?.();
         },
       });
       return;
     }
-    handleRecordPayment(billId, amount, method, referenceNo);
+    const txKey = `pay-${billId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    handleRecordPayment(billId, amount, method, referenceNo, txKey);
     onCommitted?.();
   };
 
@@ -1434,13 +1421,23 @@ export function App() {
     note: string
   ) => {
     const targetRoom = rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+    if (amount <= 0 || amount > (targetRoom.advanceRent || 0) + 0.001) {
+      triggerFeedback(
+        'Insufficient Advance Balance',
+        `Cannot withdraw ₱${amount.toFixed(2)}. Available Advance Balance: ₱${(targetRoom.advanceRent || 0).toFixed(2)}.`,
+        'error'
+      );
+      return;
+    }
+    const txKey = `wdr-${roomId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setPendingAuthAction({
       title: `Authorize Advance Refund / Withdrawal`,
       description: `Release ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} from ${
-        targetRoom?.name || 'Room'
+        targetRoom.name
       } Advance Balance. Verify with Biometrics or your 4-Digit Security PIN.`,
       onConfirm: () => {
-        handleWithdrawAdvance(roomId, amount, note);
+        handleWithdrawAdvance(roomId, amount, note, txKey);
         setAdvanceModalRoomId(null);
       },
     });
@@ -1452,31 +1449,34 @@ export function App() {
     note: string
   ) => {
     const targetRoom = rooms.find((r) => r.id === roomId);
+    const policyMode = settings.advanceCapMode || 'unlimited';
     if (targetRoom) {
       const currentUnpaid = targetRoom.unpaidBalance || 0;
       const addedAdvance = roundCurrency(Math.max(0, amount - currentUnpaid));
-      const remainingAllowance = getRemainingAdvanceAllowance(
+      const allowance = getAdvancePolicyAllowance(
         targetRoom.monthlyRent,
-        targetRoom.advanceRent || 0
+        targetRoom.advanceRent || 0,
+        policyMode
       );
-      if (addedAdvance > remainingAllowance + 0.01) {
+      if (allowance.isCapped && addedAdvance > allowance.remainingAllowance + 0.01) {
         triggerFeedback(
-          '1-Month Advance Limit Reached',
-          remainingAllowance <= 0
-            ? `${targetRoom.name} already holds ₱${(targetRoom.advanceRent || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} in Advance Balance (1-month limit: ₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}).`
-            : `Tenants can only pay an advance for 1 month (max ₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}). Max payable right now: ₱${roundCurrency(currentUnpaid + remainingAllowance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+          'Advance Policy Limit Reached',
+          allowance.remainingAllowance <= 0
+            ? `${targetRoom.name} already holds ₱${(targetRoom.advanceRent || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })} under the 1-Month Cap policy.`
+            : `1-Month Cap Policy allows ₱${allowance.remainingAllowance.toLocaleString('en-PH', { minimumFractionDigits: 2 })} more. Switch to Prepaid Wallet in Settings for multi-month advances.`,
           'error'
         );
         return;
       }
     }
+    const txKey = `dep-${roomId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setPendingAuthAction({
-      title: `Authorize Advance Payment`,
-      description: `Record ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} advance credit for ${
+      title: `Authorize Advance Credit Deposit`,
+      description: `Add ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} advance credit for ${
         targetRoom?.name || 'Room'
-      } (1-month max cap • auto-applies to next month). Verify with Biometrics or your 4-Digit Security PIN.`,
+      } (${policyMode === 'unlimited' ? 'Prepaid Wallet • Auto-applies to future bills' : '1-Month Policy • Auto-applies next cycle'}). Verify with Biometrics or your 4-Digit Security PIN.`,
       onConfirm: () => {
-        handleAddAdvanceDeposit(roomId, amount, note);
+        handleAddAdvanceDeposit(roomId, amount, note, txKey);
         setAdvanceModalRoomId(null);
       },
     });
@@ -1486,43 +1486,42 @@ export function App() {
   const handleWithdrawAdvance = (
     roomId: string,
     amount: number,
-    note: string
+    note: string,
+    idempotencyKey?: string
   ) => {
     try {
-      const nowIso = new Date().toISOString();
+      if (!claimTxKey(idempotencyKey)) return;
       const targetRoom = rooms.find((r) => r.id === roomId);
-      setRooms((prev) =>
-        prev.map((r) => {
-          if (r.id !== roomId) return r;
-          const nextAdv = Math.max(
-            0,
-            Math.round(((r.advanceRent || 0) - amount) * 100) / 100
-          );
-          return {
-            ...r,
-            advanceRent: nextAdv,
-            advanceHistory: [
-              {
-                id: `adv-w-${Date.now()}`,
-                type: 'withdrawal',
-                amount,
-                createdAt: nowIso,
-                note,
-              },
-              ...(r.advanceHistory || []),
-            ],
-            updatedAt: nowIso,
-          };
-        })
-      );
+      if (!targetRoom) return;
+
+      const res = executeAdvanceRefundTransaction({
+        room: targetRoom,
+        amount,
+        note,
+        idempotencyKey,
+      });
+
+      if (!res.ok || !res.updatedRoom) {
+        if (res.duplicate) return;
+        triggerFeedback(
+          'Advance Withdrawal Blocked',
+          res.errorMessage || 'Unable to process refund / withdrawal.',
+          'error'
+        );
+        return;
+      }
+
+      const nextRoom = res.updatedRoom;
+      setRooms((prev) => prev.map((r) => (r.id === roomId ? nextRoom : r)));
+
       appendAuditLog(
         'Advance Balance Withdrawn',
-        `₱${amount.toFixed(2)} withdrawn from room advance balance.`,
+        `₱${amount.toFixed(2)} refunded from ${targetRoom.name} (Remaining: ₱${nextRoom.advanceRent.toFixed(2)}).`,
         'billing'
       );
       triggerFeedback(
-        `Withdrew ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
-        `Advance balance updated for ${targetRoom?.name || 'Room'}.`,
+        `Refunded ₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+        `Remaining Advance Balance for ${targetRoom.name}: ₱${nextRoom.advanceRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
         'info',
         'Open Room Ledger',
         () => setSelectedRoomDetailsId(roomId)
@@ -1540,124 +1539,52 @@ export function App() {
   const handleAddAdvanceDeposit = (
     roomId: string,
     amount: number,
-    note: string
+    note: string,
+    idempotencyKey?: string
   ) => {
     try {
-      const nowIso = new Date().toISOString();
+      if (!claimTxKey(idempotencyKey)) return;
       const targetRoom = rooms.find((r) => r.id === roomId);
-      const currentUnpaid = targetRoom?.unpaidBalance || 0;
-      const autoAppliedToBill =
-        currentUnpaid > 0
-          ? Math.round(Math.min(amount, currentUnpaid) * 100) / 100
-          : 0;
-      const remainingToAdvance =
-        Math.round(Math.max(0, amount - autoAppliedToBill) * 100) / 100;
-      if (targetRoom && remainingToAdvance > 0) {
-        const remainingAllowance = getRemainingAdvanceAllowance(
-          targetRoom.monthlyRent,
-          targetRoom.advanceRent || 0
+      if (!targetRoom) return;
+
+      const res = executeAdvanceDepositTransaction({
+        room: targetRoom,
+        activeBills: bills,
+        amount,
+        note,
+        advanceCapMode: settings.advanceCapMode || 'unlimited',
+        idempotencyKey,
+      });
+
+      if (!res.ok || !res.updatedRoom) {
+        if (res.duplicate) return;
+        triggerFeedback(
+          'Advance Deposit Blocked',
+          res.errorMessage || 'Unable to add advance deposit.',
+          'error'
         );
-        if (remainingToAdvance > remainingAllowance + 0.01) {
-          triggerFeedback(
-            '1-Month Advance Limit Reached',
-            `Tenants can only pay up to 1 month advance (₱${targetRoom.monthlyRent.toLocaleString('en-PH', { minimumFractionDigits: 2 })} limit).`,
-            'error'
-          );
-          return;
-        }
+        return;
       }
 
-      if (autoAppliedToBill > 0) {
-        setBills((prev) =>
-          prev.map((b) => {
-            const isTargetActiveBill =
-              (targetRoom?.activeReceiptId &&
-                b.id === targetRoom.activeReceiptId) ||
-              (b.roomId === roomId && !b.isArchived && b.remainingBalance > 0);
-            if (!isTargetActiveBill) return b;
-
-            const nextDepositApplied =
-              Math.round(((b.depositApplied || 0) + autoAppliedToBill) * 100) /
-              100;
-            const nextTotalDue = Math.max(
-              0,
-              Math.round((b.totalAmountDue - autoAppliedToBill) * 100) / 100
-            );
-            const nextRemaining = Math.max(
-              0,
-              Math.round((b.remainingBalance - autoAppliedToBill) * 100) / 100
-            );
-            const nextStatus: BillRecord['status'] =
-              nextRemaining <= 0
-                ? 'paid'
-                : b.amountPaid > 0 || nextDepositApplied > 0
-                  ? 'partial'
-                  : 'unpaid';
-
-            return {
-              ...b,
-              depositApplied: nextDepositApplied,
-              totalAmountDue: nextTotalDue,
-              remainingBalance: nextRemaining,
-              status: nextStatus,
-              paidAt: nextRemaining <= 0 ? nowIso : b.paidAt,
-            };
-          })
-        );
-      }
-
-      setRooms((prev) =>
-        prev.map((r) => {
-          if (r.id !== roomId) return r;
-          const nextAdv =
-            Math.round(((r.advanceRent || 0) + remainingToAdvance) * 100) / 100;
-          const nextUnpaid = Math.max(
-            0,
-            Math.round(((r.unpaidBalance || 0) - autoAppliedToBill) * 100) / 100
-          );
-          const historyEntries: AdvanceBalanceTransaction[] = [
-            {
-              id: `adv-d-${Date.now()}`,
-              type: 'manual_deposit',
-              amount,
-              createdAt: nowIso,
-              note,
-            },
-          ];
-          if (autoAppliedToBill > 0) {
-            historyEntries.unshift({
-              id: `adv-auto-${Date.now() + 1}`,
-              type: 'applied_to_bill',
-              amount: autoAppliedToBill,
-              createdAt: nowIso,
-              note: 'Automatically deducted toward active room bill',
-            });
-          }
-          return {
-            ...r,
-            advanceRent: nextAdv,
-            unpaidBalance: nextUnpaid,
-            advanceHistory: [...historyEntries, ...(r.advanceHistory || [])],
-            updatedAt: nowIso,
-          };
-        })
-      );
+      const nextRoom = res.updatedRoom;
+      setBills(res.updatedBills);
+      setRooms((prev) => prev.map((r) => (r.id === roomId ? nextRoom : r)));
 
       appendAuditLog(
-        'Advance Payment Added',
-        autoAppliedToBill > 0
-          ? `₱${amount.toFixed(2)} added (₱${autoAppliedToBill.toFixed(2)} auto-deducted from active bill).`
-          : `₱${amount.toFixed(2)} added to Advance Balance (will auto-deduct on billing day).`,
+        'Advance Credit Added',
+        res.autoAppliedToBill > 0
+          ? `₱${amount.toFixed(2)} added (${targetRoom.name}: ₱${res.autoAppliedToBill.toFixed(2)} auto-applied to bill; Wallet: ₱${nextRoom.advanceRent.toFixed(2)}).`
+          : `₱${amount.toFixed(2)} added to ${targetRoom.name} Advance Wallet (Balance: ₱${nextRoom.advanceRent.toFixed(2)}).`,
         'billing'
       );
       triggerFeedback(
         `Advance Added (+₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
-        autoAppliedToBill > 0
-          ? `₱${autoAppliedToBill.toFixed(2)} auto-deducted from current bill; ₱${remainingToAdvance.toFixed(2)} stored for next cycle.`
-          : `Stored in ${targetRoom?.name || 'Room'} Advance Balance — will auto-deduct on billing day.`,
+        res.autoAppliedToBill > 0
+          ? `₱${res.autoAppliedToBill.toFixed(2)} applied to active bill; ₱${nextRoom.advanceRent.toFixed(2)} available in Advance Wallet.`
+          : `Stored in ${targetRoom.name} Advance Wallet (₱${nextRoom.advanceRent.toFixed(2)}) for upcoming billing cycles.`,
         'success',
-        'View Room Ledger',
-        () => setSelectedRoomDetailsId(roomId)
+        'Open Advance Ledger',
+        () => setAdvanceModalRoomId(roomId)
       );
       triggerOptionalCloudSync();
     } catch (err) {
@@ -1880,17 +1807,17 @@ export function App() {
     }
   };
 
-  // Whenever Electric Rates are updated in Settings, reflect instantly across active unpaid receipts
-  // while leaving previously applied/archived receipts untouched.
+  // Whenever Electric Rates are updated in Settings, reflect instantly across unlocked unpaid/partial receipts
+  // while leaving previously applied, paid, locked, or archived receipts untouched.
   const applySettingsAndRecalculateBills = (nextSettings: AppSettings) => {
     setSettings(nextSettings);
-    const { bills: nextBills, updatedCount, roomUnpaidMap } =
-      recalculateActiveBillsForRates(bills, nextSettings);
+    const { bills: nextBills, rooms: nextRooms, updatedCount, roomUnpaidMap } =
+      recalculateActiveBillsForRates(bills, nextSettings, rooms);
 
     if (updatedCount > 0) {
       setBills(nextBills);
-      setRooms((prev) =>
-        prev.map((r) =>
+      setRooms(
+        nextRooms.map((r) =>
           Object.prototype.hasOwnProperty.call(roomUnpaidMap, r.id)
             ? {
                 ...r,
@@ -2050,7 +1977,7 @@ export function App() {
       ];
       if (room.advanceRent > 0) {
         details.push(
-          `Advance Balance remaining: ₱${room.advanceRent.toFixed(2)} — refund via Advance / Refund if returning to tenant.`
+          `Advance Balance remaining: ₱${room.advanceRent.toFixed(2)} | Refund via Advance / Refund if returning to tenant.`
         );
       }
       if (room.unpaidBalance > 0) {
@@ -2214,6 +2141,7 @@ export function App() {
           <AllPaymentsView
             bills={bills}
             rooms={rooms}
+            advanceCapMode={settings.advanceCapMode || 'unlimited'}
             privacyMaskEnabled={settings.privacyMaskEnabled}
             onBack={() => setActiveTab('dashboard')}
             onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
@@ -2279,6 +2207,7 @@ export function App() {
         initialRoom={editingRoom}
         existingRooms={rooms}
         defaultRent={settings.defaultMonthlyRent}
+        advanceCapMode={settings.advanceCapMode || 'unlimited'}
         globalElectricRate={getElectricRateForPeriod(
           settings,
           new Date().toISOString()
@@ -2337,6 +2266,7 @@ export function App() {
         isOpen={isScannerOpen}
         rooms={rooms}
         initialRoom={scannerTargetRoom}
+        advanceCapMode={settings.advanceCapMode || 'unlimited'}
         globalElectricRate={getElectricRateForPeriod(
           settings,
           new Date().toISOString()
@@ -2355,6 +2285,11 @@ export function App() {
               activeReceiptBill
             : null
         }
+        roomAdvanceBalance={
+          activeReceiptBill
+            ? rooms.find((r) => r.id === activeReceiptBill.roomId)?.advanceRent
+            : undefined
+        }
         settings={settings}
         onApplyMonthlyRate={handleApplyMonthlyElectricRate}
         onClose={() => setActiveReceiptBill(null)}
@@ -2363,6 +2298,7 @@ export function App() {
       {/* Withdrawable Advance Balance Manager Modal */}
       <AdvanceBalanceModal
         room={activeAdvanceModalRoom}
+        advanceCapMode={settings.advanceCapMode || 'unlimited'}
         onClose={() => setAdvanceModalRoomId(null)}
         onWithdrawAdvance={requestWithdrawAdvance}
         onAddAdvanceDeposit={requestAddAdvanceDeposit}

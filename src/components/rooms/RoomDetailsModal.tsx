@@ -1,29 +1,28 @@
 import React from 'react';
 import {
-  X,
-  DoorOpen,
-  User,
-  Phone,
-  Zap,
-  ShieldCheck,
-  Wallet,
-  Receipt,
+  AlertCircle,
+  ArrowUpRight,
+  Archive,
   Calendar,
-  History,
-  Edit2,
   Camera,
   CheckCircle2,
-  AlertCircle,
-  Clock,
-  ArrowDownLeft,
-  ArrowUpRight,
-  MessageCircle,
   ChevronRight,
-  Sparkles,
-  Archive,
-  Trash2,
-  UserMinus,
+  Clock,
+  DoorOpen,
+  Edit2,
+  History,
   Lock,
+  MessageCircle,
+  Phone,
+  Receipt,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  User,
+  UserMinus,
+  Wallet,
+  X,
+  Zap,
 } from 'lucide-react';
 import {
   Room,
@@ -39,7 +38,9 @@ import {
   maskPhoneNumber,
   getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
+import { formatKwhReading } from '../../utils/financialEngine';
 import { loadReadingLogs } from '../../services/storageService';
+import { AdvanceLedgerList } from '../advance/AdvanceLedgerList';
 
 interface RoomDetailsModalProps {
   room: Room | null;
@@ -107,8 +108,8 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
-      <div className="w-full max-w-4xl bg-[#101622] border border-[#232F46] rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col animate-modal-pop">
-        {/* Header — Aligned & Wrapped-Proof for All Screen Sizes */}
+      <div className="w-full max-w-4xl bg-[#101622] border border-[#232F46] rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[94dvh] flex flex-col animate-modal-pop">
+        {/* Header: Aligned & Wrap-Proof for All Screen Sizes */}
         <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-[#202B3F] bg-[#141C2B] shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
@@ -185,7 +186,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 
         {/* Scrollable Content Container */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5">
-          {/* Summary Statistics Grid — Symmetrical on Both Mobile & Desktop (Never Clips Numbers) */}
+          {/* Summary Statistics Grid: Symmetrical on Mobile & Desktop (Never Clips Numbers) */}
           <div
             className={`grid ${
               isOccupied
@@ -208,9 +209,9 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug">
                 Continuous Meter
               </span>
-              <p className="text-sm sm:text-base md:text-lg font-black text-amber-400 font-mono-num mt-1 flex items-center gap-1 flex-wrap">
+              <p className="text-sm sm:text-base md:text-lg font-black text-amber-400 font-mono-num mt-1 flex items-center gap-1 flex-wrap break-words">
                 <Zap className="w-3.5 h-3.5 shrink-0" />
-                <span>{room.lastMeterReading.toFixed(1)} kWh</span>
+                <span>{formatKwhReading(room.lastMeterReading)} kWh</span>
               </p>
             </div>
 
@@ -252,7 +253,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             )}
           </div>
 
-          {/* Current Tenant & Billing Schedule — Cohesive Structured Panel */}
+          {/* Current Tenant & Billing Schedule: Cohesive Structured Panel */}
           <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-4 sm:p-5">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
               {/* Left Column: Tenant Status & Rates (7 cols on Desktop) */}
@@ -354,7 +355,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               </div>
             </div>
 
-            {/* Primary Action Buttons Row — Strong Hierarchy & Responsive Alignment */}
+            {/* Primary Action Buttons Row: Strong Hierarchy & Responsive Alignment */}
             <div
               className={`mt-4 pt-4 border-t border-[#1C263A] grid grid-cols-1 ${
                 isOccupied && activeBill
@@ -620,57 +621,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
           {/* Advance Payment Ledger (Occupied & Has Ledger History) */}
           {isOccupied && advanceHistory.length > 0 && (
             <div className="bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-4 sm:p-5">
-              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-400 mb-3">
-                <Wallet className="w-4 h-4" />
-                <span>Advance Payment & Withdrawal Ledger ({advanceHistory.length})</span>
-              </div>
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {advanceHistory.map((tx) => {
-                  const isCredit =
-                    tx.type === 'overpayment_credit' ||
-                    tx.type === 'manual_deposit';
-                  return (
-                    <div
-                      key={tx.id}
-                      className="flex items-center justify-between p-2.5 rounded-xl bg-[#111724] border border-[#1E293D] text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        {isCredit ? (
-                          <ArrowDownLeft className="w-4 h-4 text-emerald-400 shrink-0" />
-                        ) : (
-                          <ArrowUpRight className="w-4 h-4 text-amber-400 shrink-0" />
-                        )}
-                        <div>
-                          <p className="font-bold text-white">
-                            {tx.type === 'withdrawal'
-                              ? 'Advance Withdrawal'
-                              : tx.type === 'applied_to_bill'
-                              ? 'Applied to Room Bill'
-                              : 'Advance Credit'}
-                          </p>
-                          <p className="text-[10px] text-slate-400 font-mono-num">
-                            {new Date(tx.createdAt).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-right font-mono-num">
-                        <p
-                          className={`font-black ${
-                            isCredit ? 'text-emerald-400' : 'text-amber-400'
-                          }`}
-                        >
-                          {isCredit ? '+' : '-'}
-                          {formatPeso(tx.amount)}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <AdvanceLedgerList room={room} compact pageSize={4} />
             </div>
           )}
 

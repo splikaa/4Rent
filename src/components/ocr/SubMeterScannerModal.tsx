@@ -18,7 +18,7 @@ import {
   X,
   ZoomIn,
 } from 'lucide-react';
-import { BillRecord, Room } from '../../types/rental';
+import { AdvanceCapPolicyMode, BillRecord, Room } from '../../types/rental';
 import {
   calculateBillBreakdown,
   calculateSubMeterDifference,
@@ -27,10 +27,20 @@ import {
   getBillingPeriodOptions,
   getElectricRateForPeriod,
   getNextDueDateInOneToTenWindow,
-  getRemainingAdvanceAllowance,
   isRunningInMobileApp,
   roundCurrency,
 } from '../../utils/billingCalculator';
+import {
+  formatKwhReading,
+  fromCentavos,
+  getAdvancePolicyAllowance,
+  toCentavos,
+} from '../../utils/financialEngine';
+import {
+  formatPrimaryRoomLabel,
+  getSelectedRoomInfoSummary,
+  sortAndDeduplicateActiveRooms,
+} from '../../utils/roomSelection';
 import {
   generateSimulatedSubMeterDataUrl,
   generateSimulatedValueCropDataUrl,
@@ -45,6 +55,7 @@ interface SubMeterScannerModalProps {
   isOpen: boolean;
   rooms: Room[];
   initialRoom?: Room | null;
+  advanceCapMode?: AdvanceCapPolicyMode;
   globalElectricRate: number;
   monthlyElectricRates?: Record<string, number>;
   securityPin?: string;
@@ -64,18 +75,22 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   isOpen,
   rooms,
   initialRoom,
+  advanceCapMode = 'unlimited',
   globalElectricRate,
   monthlyElectricRates,
   securityPin = '',
   onClose,
   onGenerateBill,
 }) => {
-  const activeRooms = rooms.filter((r) => !r.isArchived);
+  const activeRooms = sortAndDeduplicateActiveRooms(rooms);
   const [selectedRoomId, setSelectedRoomId] = useState<string>('');
   const selectedRoom =
     activeRooms.find((r) => r.id === selectedRoomId) ||
-    initialRoom ||
+    (initialRoom && activeRooms.find((r) => r.id === initialRoom.id)) ||
     activeRooms[0];
+  const selectedRoomInfo = getSelectedRoomInfoSummary(selectedRoom);
+  const isSubmittingBillRef = useRef(false);
+  const [billSessionKey, setBillSessionKey] = useState<string>('');
 
   const billingPeriodOptions = getBillingPeriodOptions();
 
@@ -208,48 +223,52 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   }, [initialRoom, activeRooms.length]);
 
   useEffect(() => {
-    if (selectedRoom) {
-      const prev = selectedRoom.lastMeterReading || 0;
-      setPrevReading(String(prev));
-      // Current reading starts ready for new month's reading
-      setCurrReading(String(prev));
-      setBaseRent(String(selectedRoom.monthlyRent || 0));
-      setCarryOverBalance(String(selectedRoom.unpaidBalance || 0));
-      setReqDepositApplied(String(selectedRoom.securityDepositPaid || 0));
-      setDepositApplied(String(selectedRoom.advanceRent || 0));
-      setDueDayOneToTen(
-        String(clampDueDayOneToTen(selectedRoom.tenant?.dueDayOfMonth || 5))
-      );
+    if (!isOpen || !selectedRoom) return;
+    const prev = selectedRoom.lastMeterReading || 0;
+    setPrevReading(String(prev));
+    // Current reading starts ready for new month's reading
+    setCurrReading(String(prev));
+    setBaseRent(String(selectedRoom.monthlyRent || 0));
+    setCarryOverBalance(String(selectedRoom.unpaidBalance || 0));
+    setReqDepositApplied(String(selectedRoom.securityDepositPaid || 0));
+    setDepositApplied(String(selectedRoom.advanceRent || 0));
+    setDueDayOneToTen(
+      String(clampDueDayOneToTen(selectedRoom.tenant?.dueDayOfMonth || 5))
+    );
 
-      // Previous slot has previous photo and value crop
-      setPrevMeterSnapshotUrl(
-        selectedRoom.lastMeterPhotoDataUrl ||
-          generateSimulatedSubMeterDataUrl(prev)
-      );
-      setPrevMeterCropUrl(
-        selectedRoom.lastMeterCropDataUrl ||
-          generateSimulatedValueCropDataUrl(prev)
-      );
+    // Previous slot has previous photo and value crop
+    setPrevMeterSnapshotUrl(
+      selectedRoom.lastMeterPhotoDataUrl ||
+        generateSimulatedSubMeterDataUrl(prev)
+    );
+    setPrevMeterCropUrl(
+      selectedRoom.lastMeterCropDataUrl ||
+        generateSimulatedValueCropDataUrl(prev)
+    );
 
-      // Current slot is clean and waiting for the new month's photo/reading
-      setCurrMeterSnapshotUrl('');
-      setCurrMeterCropUrl('');
-      setTargetMeterSlot('curr');
+    // Current slot is clean and waiting for the new month's photo/reading
+    setCurrMeterSnapshotUrl('');
+    setCurrMeterCropUrl('');
+    setTargetMeterSlot('curr');
 
-      setOcrStatusMsg(null);
-      setMeterInspection(null);
-      setCollectedSnapshots([]);
+    setOcrStatusMsg(null);
+    setOcrConfidence(null);
+    setMeterInspection(null);
+    setCollectedSnapshots([]);
+    setInitialPayStatus('unpaid');
+    setInitialAmountPaid('0');
+    setBillSessionKey(`gen-${selectedRoom.id}-${Date.now()}`);
+    isSubmittingBillRef.current = false;
 
-      // Reset rollover override state and reading lock when switching rooms
-      setIsRollover(false);
-      setRolloverType('dial_rollover');
-      setDialDigits(5);
-      setIsReadingsLocked(true);
-      setShowPinUnlockModal(false);
-      setPinInput('');
-      setPinError(null);
-    }
-  }, [selectedRoom?.id]);
+    // Reset rollover override state and reading lock when switching rooms or reopening
+    setIsRollover(false);
+    setRolloverType('dial_rollover');
+    setDialDigits(5);
+    setIsReadingsLocked(true);
+    setShowPinUnlockModal(false);
+    setPinInput('');
+    setPinError(null);
+  }, [isOpen, selectedRoom?.id]);
 
   useEffect(() => {
     const win = window as any;
@@ -670,11 +689,11 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       if (isRecognized && result.needsVerification) {
         setOcrStatusMsg(
-          `⚠️ Read ${detectedVal.toFixed(1)} kWh (${slot === 'prev' ? 'Previous' : 'Current'}) — ${result.unclearReason || 'verify ambiguous digit before saving'}.`
+          `⚠️ Detected ${formatKwhReading(detectedVal)} kWh (${slot === 'prev' ? 'Previous' : 'Current'}) | ${result.unclearReason || 'Verify digits before saving'}.`
         );
       } else if (isRecognized) {
         setOcrStatusMsg(
-          `✓ Read ${detectedVal.toFixed(1)} kWh into ${
+          `✓ Detected ${formatKwhReading(detectedVal)} kWh for ${
             slot === 'prev' ? 'Previous Slot' : 'Current Slot'
           }.`
         );
@@ -903,34 +922,38 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const handleConfirmGenerateBill = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subMeterCheck.isValid) return;
+    if (!subMeterCheck.isValid || isSubmittingBillRef.current) return;
+    isSubmittingBillRef.current = true;
 
     const nowIso = new Date().toISOString();
     const totalDue = billBreakdown.totalAmountDue;
-
-    const remainingAdvAfterDeduction = getRemainingAdvanceAllowance(
+    const remainingAdvAfterDeduction = fromCentavos(
+      Math.max(0, toCentavos(availableAdvance) - toCentavos(advUsedNum))
+    );
+    const allowance = getAdvancePolicyAllowance(
       selectedRoom.monthlyRent,
-      Math.max(0, availableAdvance - advUsedNum)
+      remainingAdvAfterDeduction,
+      advanceCapMode
     );
-    const maxPayableWithAdvanceCap = roundCurrency(
-      totalDue + remainingAdvAfterDeduction
-    );
+    const maxPayableWithPolicy = allowance.isCapped
+      ? roundCurrency(totalDue + allowance.remainingAllowance)
+      : Number.POSITIVE_INFINITY;
 
     let paidAmount = 0;
     if (initialPayStatus === 'paid') {
       const customEntered = parseFloat(initialAmountPaid) || 0;
       const requestedPaid = customEntered >= totalDue ? customEntered : totalDue;
-      paidAmount = Math.min(requestedPaid, maxPayableWithAdvanceCap);
+      paidAmount = Math.min(requestedPaid, maxPayableWithPolicy);
     } else if (initialPayStatus === 'partial') {
-      paidAmount = Math.max(0, parseFloat(initialAmountPaid) || 0);
+      paidAmount = Math.min(
+        Math.max(0, parseFloat(initialAmountPaid) || 0),
+        maxPayableWithPolicy
+      );
     }
 
     const overpaymentAddedToAdvance =
-      paidAmount > totalDue
-        ? Math.min(
-            remainingAdvAfterDeduction,
-            Math.round((paidAmount - totalDue) * 100) / 100
-          )
+      toCentavos(paidAmount) > toCentavos(totalDue)
+        ? fromCentavos(toCentavos(paidAmount) - toCentavos(totalDue))
         : 0;
 
     const remainingBalance = Math.max(
@@ -989,6 +1012,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       currMeterCropDataUrl: finalCurrCrop,
       ocrConfidence: ocrConfidence ?? undefined,
       baseRent: rentNum,
+      grossCharges: billBreakdown.grossTotal,
       securityDepositRequired: selectedRoom.securityDeposit || rentNum,
       securityDepositApplied: reqDepUsedNum,
       securityDepositRemainingAfterBill: remainingDepositAfterBill,
@@ -1000,8 +1024,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       overpaymentToAdvance: overpaymentAddedToAdvance,
       remainingBalance,
       status: finalStatus,
+      idempotencyKey: billSessionKey || billId,
       paymentMethod: paidAmount > 0 ? paymentMethod : undefined,
-      paidAt: paidAmount > 0 ? nowIso : undefined,
+      paidAt: finalStatus === 'paid' ? nowIso : undefined,
       paymentHistory:
         paidAmount > 0
           ? [
@@ -1047,7 +1072,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-5xl rounded-3xl bg-[#141A25] border border-[#263147] shadow-2xl overflow-hidden my-auto max-h-[95vh] flex flex-col animate-modal-pop">
+      <div className="w-full max-w-5xl rounded-3xl bg-[#141A25] border border-[#263147] shadow-2xl overflow-hidden my-auto max-h-[94dvh] flex flex-col animate-modal-pop">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 bg-[#192130] border-b border-[#263147] shrink-0">
           <div className="flex items-center gap-3">
@@ -1115,7 +1140,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 >
                   {activeRooms.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.name} • {r.tenant?.fullName || 'Vacant'} ({r.lastMeterReading.toFixed(1)} kWh)
+                      {formatPrimaryRoomLabel(r)}
                     </option>
                   ))}
                 </select>
@@ -1161,6 +1186,36 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </select>
               </div>
             </div>
+
+            {/* Dedicated Selected Room Information Panel */}
+            {selectedRoomInfo && (
+              <div className="rounded-2xl bg-[#0D1119] border border-[#243047] p-3 sm:p-3.5 grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+                <div className="min-w-0">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
+                    Tenant
+                  </span>
+                  <span className="font-bold text-white truncate block mt-0.5">
+                    {selectedRoomInfo.tenantName}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
+                    Stored Meter Reading
+                  </span>
+                  <span className="font-extrabold text-amber-400 font-mono-num block mt-0.5">
+                    {selectedRoomInfo.storedReadingFormatted} kWh
+                  </span>
+                </div>
+                <div className="col-span-2 sm:col-span-1 min-w-0">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
+                    Advance Credit Available
+                  </span>
+                  <span className="font-extrabold text-emerald-400 font-mono-num block mt-0.5">
+                    {formatPeso(selectedRoomInfo.advanceCredit)}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {selectedRoom.status === 'vacant' && (
               <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-1 animate-card-in">
@@ -1251,9 +1306,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                             e.stopPropagation();
                             openLightbox(
                               slotCfg.snapshotUrl,
-                              `${slotCfg.lightboxLabel} Sub-Meter Proof — ${selectedRoom.name}`,
+                              `${slotCfg.lightboxLabel} Sub-Meter Proof | ${formatPrimaryRoomLabel(selectedRoom)}`,
                               slotCfg.cropUrl,
-                              `${slotCfg.readingNum.toFixed(1)} kWh`
+                              `${formatKwhReading(slotCfg.readingNum)} kWh`
                             );
                           }}
                           className="relative group cursor-zoom-in"
@@ -1518,7 +1573,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         <Camera className="w-6 h-6" />
                       </div>
                       <p className="text-xs font-bold text-white">
-                        Snapshot Camera —{' '}
+                        Snapshot Camera |{' '}
                         {targetMeterSlot === 'prev'
                           ? 'Slot #1 (Previous)'
                           : 'Slot #2 (Current)'}
@@ -1860,7 +1915,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 }`}>
                   <div className="flex items-center justify-between gap-2">
                     <label className="block text-[11px] font-semibold text-slate-300">
-                      1. Prev (kWh)
+                      1. Previous (kWh)
                     </label>
                     {isReadingsLocked && (
                       <Lock className="w-3 h-3 text-slate-500 shrink-0" />
@@ -1868,7 +1923,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   </div>
                   <input
                     type="number"
-                    step="0.1"
+                    step="0.01"
                     value={prevReading}
                     readOnly={isReadingsLocked}
                     onClick={() => {
@@ -1892,9 +1947,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     ? 'bg-[#15140F] border-amber-500/40'
                     : 'bg-[#1A1812] border-amber-500/80 ring-1 ring-amber-500/50'
                 }`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="block text-[11px] font-bold text-amber-400">
-                      2. Curr (kWh) *
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <label className="block text-[11px] font-bold text-amber-400 whitespace-nowrap">
+                      2. Current (kWh) *
                     </label>
                     {isReadingsLocked ? (
                       <span className="text-[10px] text-amber-400/90 font-semibold inline-flex items-center gap-1 shrink-0 whitespace-nowrap">
@@ -1907,7 +1962,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   </div>
                   <input
                     type="number"
-                    step="0.1"
+                    step="0.01"
                     required
                     value={currReading}
                     readOnly={isReadingsLocked}
@@ -2201,7 +2256,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   <div className="grid grid-cols-2 gap-2 mt-2.5">
                     <div>
                       <label className="block text-[10px] text-slate-400 mb-1">
-                        Amount Paid (₱ • Max 1-Mo Adv)
+                        {advanceCapMode === '1_month'
+                          ? 'Amount Paid (₱ • Max 1-Mo Adv)'
+                          : 'Cash / Transfer Received (₱)'}
                       </label>
                       <input
                         type="number"
@@ -2254,7 +2311,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   className="w-full py-3 px-4 rounded-2xl opacity-60 bg-[#1A2334] text-slate-400 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-not-allowed border border-slate-700"
                 >
                   <AlertCircle className="w-4 h-4 text-amber-400" />
-                  <span>Room is Vacant — Assign Tenant to Bill</span>
+                  <span>Room is Vacant | Assign Tenant to Bill</span>
                 </button>
                 <p className="text-[11px] text-slate-400">
                   Vacant rooms cannot generate monthly billing receipts. Assign an active tenant in Room Management to start transactions.

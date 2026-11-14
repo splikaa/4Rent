@@ -169,7 +169,7 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
                 Create Passcode PIN Only
               </div>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                Choose a 4-digit PIN now — you can set up Biometrics later in Settings.
+                Choose a 4-digit PIN now • You can set up Biometrics later in Settings.
               </p>
             </div>
             <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition shrink-0" />

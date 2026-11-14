@@ -1,4 +1,20 @@
-import { AppSettings, BillRecord, PaymentTransaction, Room } from '../types/rental';
+import {
+  AdvanceCapPolicyMode,
+  AppSettings,
+  BillRecord,
+  PaymentTransaction,
+  Room,
+} from '../types/rental';
+import {
+  allocateChargesAndCredits,
+  executeRecordPaymentTransaction,
+  fromCentavos,
+  getAdvancePolicyAllowance,
+  recalculateUnlockedBillsForRates,
+  roundCurrencyCentavos,
+  roundKwh,
+  toCentavos,
+} from './financialEngine';
 
 export interface OcrVerificationResult {
   rawReading: number;
@@ -300,7 +316,7 @@ export function getBillingPeriodOptions(): string[] {
 }
 
 export function roundCurrency(value: number): number {
-  return Math.round((Number(value) || 0) * 100) / 100;
+  return roundCurrencyCentavos(value);
 }
 
 /**
@@ -430,15 +446,20 @@ export function getScheduledMonthKeys(
 }
 
 /**
- * Returns the maximum additional advance rent credit allowed under the 1-month cap.
+ * Returns the maximum additional advance rent credit allowed under the active advance policy.
+ * Defaults to 1-month cap when policyMode is omitted for direct helper compatibility;
+ * pass settings.advanceCapMode ('unlimited' for Prepaid Rental Wallet) from app callers.
  */
 export function getRemainingAdvanceAllowance(
   monthlyRent: number,
-  currentAdvance: number
+  currentAdvance: number,
+  policyMode: AdvanceCapPolicyMode = '1_month'
 ): number {
-  const cap = Math.max(0, roundCurrency(monthlyRent || 0));
-  const used = Math.max(0, roundCurrency(currentAdvance || 0));
-  return Math.max(0, roundCurrency(cap - used));
+  return getAdvancePolicyAllowance(
+    monthlyRent,
+    currentAdvance,
+    policyMode
+  ).remainingAllowance;
 }
 
 /**
@@ -458,60 +479,25 @@ export function getElectricRateForPeriod(
 }
 
 /**
- * Recalculates active unpaid/partial bills when the landlord applies updated monthly electric rates.
- * Previous archived receipts or already paid/applied receipts remain strictly locked at their original rate.
+ * Recalculates active unlocked unpaid/partial bills when the landlord applies updated monthly electric rates.
+ * Previous archived receipts, locked receipts, or settled/paid receipts remain strictly unchanged.
  */
 export function recalculateActiveBillsForRates(
   bills: BillRecord[],
-  settings: Pick<AppSettings, 'defaultElectricRate' | 'monthlyElectricRates'>
-): { bills: BillRecord[]; updatedCount: number; roomUnpaidMap: Record<string, number> } {
-  let updatedCount = 0;
-  const roomUnpaidMap: Record<string, number> = {};
-  const nowIso = new Date().toISOString();
-
-  const updatedBills = bills.map((b) => {
-    // Previous/archived receipts or already paid/settled receipts must NOT change when rate updates
-    if (b.isArchived || b.status === 'paid') {
-      return b;
-    }
-
-    const nextRate = getElectricRateForPeriod(settings, b.billingPeriod);
-    const nextElecTotal = roundCurrency(b.consumptionKwh * nextRate);
-    const nextTotalDue = Math.max(
-      0,
-      roundCurrency(
-        b.baseRent + nextElecTotal + b.previousBalanceCarryOver - b.depositApplied
-      )
-    );
-    const nextRemaining = Math.max(0, roundCurrency(nextTotalDue - b.amountPaid));
-    const nextStatus: BillRecord['status'] =
-      nextRemaining <= 0.009 ? 'paid' : b.amountPaid > 0 ? 'partial' : 'unpaid';
-
-    roomUnpaidMap[b.roomId] = nextRemaining;
-
-    if (
-      nextRate !== b.electricRate ||
-      nextElecTotal !== b.electricTotal ||
-      nextTotalDue !== b.totalAmountDue ||
-      nextRemaining !== b.remainingBalance
-    ) {
-      updatedCount += 1;
-      return {
-        ...b,
-        electricRate: nextRate,
-        electricTotal: nextElecTotal,
-        totalAmountDue: nextTotalDue,
-        remainingBalance: nextRemaining,
-        status: nextStatus,
-        paidAt: nextStatus === 'paid' ? b.paidAt || nowIso : b.paidAt,
-        updatedAt: nowIso,
-      };
-    }
-
-    return b;
-  });
-
-  return { bills: updatedBills, updatedCount, roomUnpaidMap };
+  settings: Pick<AppSettings, 'defaultElectricRate' | 'monthlyElectricRates'>,
+  rooms: Room[] = []
+): {
+  bills: BillRecord[];
+  rooms: Room[];
+  updatedCount: number;
+  roomUnpaidMap: Record<string, number>;
+} {
+  return recalculateUnlockedBillsForRates(
+    bills,
+    rooms,
+    settings,
+    getElectricRateForPeriod
+  );
 }
 
 export interface MonthlyPaymentStatusSummary {
@@ -718,8 +704,8 @@ export function calculateSubMeterDifference(
     };
   }
 
-  const consumptionKwh = deltaResult.delta;
-  const electricTotal = Math.round(consumptionKwh * rate * 100) / 100;
+  const consumptionKwh = roundKwh(deltaResult.delta);
+  const electricTotal = fromCentavos(Math.round(consumptionKwh * toCentavos(rate)));
 
   return {
     isValid: true,
@@ -731,7 +717,7 @@ export function calculateSubMeterDifference(
 }
 
 /**
- * Calculates the full apartment bill breakdown:
+ * Calculates the full apartment bill breakdown using exact integer centavo math:
  * Total Due = Base Rent + (Curr - Prev) * Global Rate + Previous Unpaid Balance - Advance/Deposit Applied
  */
 export function calculateBillBreakdown(input: FullBillInput): FullBillResult {
@@ -744,37 +730,27 @@ export function calculateBillBreakdown(input: FullBillInput): FullBillResult {
     isReset: input.isReset,
   });
 
-  const baseRent = Math.max(0, Number(input.baseRent) || 0);
-  const previousBalanceCarryOver = Math.max(
-    0,
-    Number(input.previousBalanceCarryOver) || 0
-  );
-  const depositApplied = Math.max(0, Number(input.depositApplied) || 0);
-
-  const grossTotal =
-    Math.round(
-      (baseRent + subMeter.electricTotal + previousBalanceCarryOver) * 100
-    ) / 100;
-  const totalAmountDue = Math.max(
-    0,
-    Math.round((grossTotal - depositApplied) * 100) / 100
-  );
+  const allocated = allocateChargesAndCredits({
+    baseRent: input.baseRent,
+    electricTotal: subMeter.electricTotal,
+    previousBalanceCarryOver: input.previousBalanceCarryOver,
+    availableAdvanceCredit: input.depositApplied || 0,
+  });
 
   return {
     consumptionKwh: subMeter.consumptionKwh,
     electricTotal: subMeter.electricTotal,
-    baseRent,
-    previousBalanceCarryOver,
-    depositApplied,
-    grossTotal,
-    totalAmountDue,
+    baseRent: allocated.baseRent,
+    previousBalanceCarryOver: allocated.previousBalanceCarryOver,
+    depositApplied: allocated.totalCreditsApplied,
+    grossTotal: allocated.grossCharges,
+    totalAmountDue: allocated.netTotalAmountDue,
   };
 }
 
 /**
- * Applies a payment to a bill record.
- * If the tenant pays MORE than the remaining balance due, the excess is automatically
- * calculated as `overpaymentToAdvance` so it goes into the room's withdrawable Advance Payment Balance.
+ * Applies a payment to a bill record using integer centavos.
+ * Excess payments credit to advance balance and never forge fake cash receipts.
  */
 export function applyPaymentWithOverpayment(
   bill: BillRecord,
@@ -783,70 +759,24 @@ export function applyPaymentWithOverpayment(
   referenceNo?: string,
   note?: string
 ): ApplyPaymentOutcome {
-  const validPayment = Math.max(
-    0,
-    Math.round(Number(paymentAmount) * 100) / 100
-  );
-  const nowIso = new Date().toISOString();
-
-  const currentRemaining = Math.max(
-    0,
-    Math.round((bill.totalAmountDue - (bill.amountPaid || 0)) * 100) / 100
-  );
-
-  const overpaymentCredited =
-    validPayment > currentRemaining
-      ? Math.round((validPayment - currentRemaining) * 100) / 100
-      : 0;
-
-  const newTx: PaymentTransaction = {
-    id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    amount: validPayment,
-    overpaymentCredited:
-      overpaymentCredited > 0 ? overpaymentCredited : undefined,
+  const result = executeRecordPaymentTransaction({
+    bill,
+    paymentAmount,
     method,
-    paidAt: nowIso,
     referenceNo,
-    note:
-      overpaymentCredited > 0
-        ? `Excess ₱${overpaymentCredited.toFixed(
-            2
-          )} credited to Advance Payment Balance`
-        : note,
-  };
+    note,
+  });
 
-  const newAmountPaid =
-    Math.round(((bill.amountPaid || 0) + validPayment) * 100) / 100;
-  const remainingBalance = Math.max(
-    0,
-    Math.round((bill.totalAmountDue - newAmountPaid) * 100) / 100
-  );
-  const totalOverpayment =
-    Math.round(((bill.overpaymentToAdvance || 0) + overpaymentCredited) * 100) /
-    100;
-
-  let status: 'paid' | 'partial' | 'unpaid' = 'unpaid';
-  if (remainingBalance <= 0.009) {
-    status = 'paid';
-  } else if (newAmountPaid > 0) {
-    status = 'partial';
+  if (!result.ok || !result.updatedBill) {
+    return {
+      updatedBill: bill,
+      overpaymentCredited: 0,
+    };
   }
 
-  const updatedBill: BillRecord = {
-    ...bill,
-    amountPaid: newAmountPaid,
-    overpaymentToAdvance: totalOverpayment,
-    remainingBalance,
-    status,
-    paymentMethod: method,
-    paidAt: status === 'paid' ? nowIso : bill.paidAt || nowIso,
-    paymentHistory: [...(bill.paymentHistory || []), newTx],
-    updatedAt: nowIso,
-  };
-
   return {
-    updatedBill,
-    overpaymentCredited,
+    updatedBill: result.updatedBill,
+    overpaymentCredited: result.overpaymentCredited,
   };
 }
 
@@ -1230,19 +1160,24 @@ export function formatMessengerBillSummary(
   );
 
   if (bill.amountPaid > 0) {
-    lines.push(`• Paid: ${formatPeso(bill.amountPaid)}${bill.paymentMethod ? ` (${bill.paymentMethod})` : ''}`);
-    lines.push(`• Remaining Balance: *${formatPeso(bill.remainingBalance)}*`);
+    lines.push(`• Cash / Transfer Paid: ${formatPeso(bill.amountPaid)}${bill.paymentMethod ? ` (${bill.paymentMethod})` : ''}`);
+  }
+  lines.push(`• Remaining Balance: *${formatPeso(bill.remainingBalance)}*`);
+  if ((bill.advanceBalanceAfter ?? 0) > 0) {
+    lines.push(
+      `• Remaining Advance Credit: *${formatPeso(bill.advanceBalanceAfter || 0)}*`
+    );
   }
   if (bill.overpaymentToAdvance > 0) {
     lines.push(
-      `• Advance Credit (${nextCycleLabel}): +${formatPeso(
+      `• Excess Payment Credited to Advance (${nextCycleLabel}): +${formatPeso(
         bill.overpaymentToAdvance
       )}`
     );
   }
 
   lines.push(`• Status: ${statusLabel}`);
-  lines.push(`Payment Window: Every 1st–10th Monthly • 4Rent v1.0.0`);
+  lines.push(`Payment Window: Every 1st-10th Monthly | 4Rent Management System`);
   return lines.join('\n');
 }
 

@@ -1788,7 +1788,7 @@ function readLcdRegister(loc: RegionLocalization): VisionReadResult {
     confidence: Math.min(99, avgConf),
     needsVerification: isUnclear,
     unclearReason: isUnclear
-      ? `Ambiguous LCD digit #${worstDigitIdx + 1} — verify from close-up crop`
+      ? `Ambiguous LCD digit #${worstDigitIdx + 1}: verify from close-up crop`
       : undefined,
     perDigitConfidences,
     rolloverPositions: [],
@@ -2337,7 +2337,7 @@ function readCyclometerRegister(loc: RegionLocalization): VisionReadResult {
   const missingDrums = cells.filter((cl) => !cl.hasInk).length;
   const needsVerification = hasIntegerRollover || missingDrums > 1;
   const unclearReason = hasIntegerRollover
-    ? `Integer dial drum #${rolloverPositions.find((p) => p < 5)! + 1} is mid-rollover — please verify`
+    ? `Integer dial drum #${rolloverPositions.find((p) => p < 5)! + 1} is mid-rollover: please verify`
     : rolloverPositions.includes(5)
     ? 'Tenths drum (.1) is rolling over between values'
     : undefined;

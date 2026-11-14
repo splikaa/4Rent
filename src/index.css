@@ -355,10 +355,10 @@ textarea:focus {
   background: #f59e0b;
 }
 
-/* Single-Sheet Formal White Print Stylesheet */
+/* Dedicated A4 Portrait Receipt Print Stylesheet */
 @page {
   size: A4 portrait;
-  margin: 10mm 12mm;
+  margin: 8mm 10mm;
 }
 
 @media print {
@@ -379,7 +379,8 @@ textarea:focus {
   aside,
   main,
   nav,
-  .no-print {
+  .no-print,
+  .receipt-mobile-interactive {
     display: none !important;
   }
 
@@ -407,28 +408,33 @@ textarea:focus {
     border-radius: 0 !important;
   }
 
-  .receipt-sheet-container {
-    background: #ffffff !important;
-    padding: 0 !important;
-    margin: 0 !important;
+  .printable-a4-stage {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    z-index: auto !important;
+    pointer-events: auto !important;
     width: 100% !important;
+    max-width: 794px !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
     display: block !important;
-    overflow: visible !important;
   }
 
-  .receipt-white-sheet,
-  #receipt-printable-sheet,
+  .printable-a4-sheet,
   #printable-receipt-area {
     width: 100% !important;
-    max-width: 680px !important;
+    max-width: 794px !important;
     min-height: 0 !important;
     margin: 0 auto !important;
-    padding: 16px !important;
+    padding: 12px 16px !important;
     background: #ffffff !important;
     color: #0f172a !important;
-    border: 1px solid #cbd5e1 !important;
+    border: none !important;
     box-shadow: none !important;
-    border-radius: 12px !important;
+  }
+
+  [data-pdf-block] {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }

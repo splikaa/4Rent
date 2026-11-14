@@ -4,10 +4,15 @@ import android.app.Activity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ContentProvider;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -18,7 +23,13 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
+import android.os.Environment;
+import android.os.ParcelFileDescriptor;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.Window;
 import android.view.WindowManager;
@@ -33,7 +44,11 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -409,6 +424,169 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public boolean sharePdfReceipt(final String pdfBase64, final String filename, final String summaryText, final boolean preferMessenger) {
+            if (pdfBase64 == null || pdfBase64.trim().isEmpty()) {
+                return false;
+            }
+            try {
+                String b64 = pdfBase64.contains(",")
+                        ? pdfBase64.substring(pdfBase64.indexOf(",") + 1)
+                        : pdfBase64;
+                final byte[] pdfBytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                if (pdfBytes == null || pdfBytes.length == 0) {
+                    return false;
+                }
+
+                final String safeName = ReceiptFileProvider.sanitizePdfFilename(filename);
+                final File cacheFile = ReceiptFileProvider.writeSharedReceiptBytes(MainActivity.this, safeName, pdfBytes);
+                if (cacheFile == null) {
+                    return false;
+                }
+                final Uri contentUri = ReceiptFileProvider.buildUri(safeName);
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            Intent baseIntent = new Intent(Intent.ACTION_SEND);
+                            baseIntent.setType("application/pdf");
+                            baseIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+                            baseIntent.putExtra(Intent.EXTRA_SUBJECT, safeName);
+                            if (summaryText != null && !summaryText.trim().isEmpty()) {
+                                baseIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                            }
+                            baseIntent.setClipData(ClipData.newUri(getContentResolver(), safeName, contentUri));
+                            baseIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+                            if (preferMessenger) {
+                                String[] messengerPkgs = new String[]{"com.facebook.orca", "com.facebook.mlite"};
+                                for (String pkg : messengerPkgs) {
+                                    if (isPackageInstalled(pkg)) {
+                                        try {
+                                            Intent directMessenger = new Intent(baseIntent);
+                                            directMessenger.setPackage(pkg);
+                                            startActivity(directMessenger);
+                                            return;
+                                        } catch (Exception e) {
+                                            Log.w("4Rent", "Direct PDF Messenger share failed for " + pkg, e);
+                                        }
+                                    }
+                                }
+                            }
+
+                            Intent chooser = Intent.createChooser(baseIntent, "Share Official Receipt PDF");
+                            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            startActivity(chooser);
+                        } catch (Exception e) {
+                            Log.e("4Rent", "PDF receipt share failed", e);
+                        }
+                    }
+                });
+                return true;
+            } catch (Exception e) {
+                Log.e("4Rent", "Failed preparing receipt PDF", e);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean savePdfReceipt(final String pdfBase64, final String filename) {
+            if (pdfBase64 == null || pdfBase64.trim().isEmpty()) {
+                return false;
+            }
+            try {
+                String b64 = pdfBase64.contains(",")
+                        ? pdfBase64.substring(pdfBase64.indexOf(",") + 1)
+                        : pdfBase64;
+                byte[] pdfBytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                if (pdfBytes == null || pdfBytes.length == 0) {
+                    return false;
+                }
+                String safeName = ReceiptFileProvider.sanitizePdfFilename(filename);
+
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.Downloads.DISPLAY_NAME, safeName);
+                    values.put(MediaStore.Downloads.MIME_TYPE, "application/pdf");
+                    values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/4Rent");
+                    values.put(MediaStore.Downloads.IS_PENDING, 1);
+
+                    Uri itemUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (itemUri != null) {
+                        try (OutputStream out = getContentResolver().openOutputStream(itemUri)) {
+                            if (out != null) {
+                                out.write(pdfBytes);
+                                out.flush();
+                            }
+                        }
+                        values.clear();
+                        values.put(MediaStore.Downloads.IS_PENDING, 0);
+                        getContentResolver().update(itemUri, values, null, null);
+                        return true;
+                    }
+                }
+                return sharePdfReceipt(pdfBase64, safeName, "", false);
+            } catch (Exception e) {
+                Log.e("4Rent", "Failed to save PDF to Downloads", e);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean savePngReceipt(final String pngBase64, final String filename) {
+            if (pngBase64 == null || !pngBase64.contains(",")) {
+                return false;
+            }
+            try {
+                String b64 = pngBase64.substring(pngBase64.indexOf(",") + 1);
+                byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bitmap == null) {
+                    return false;
+                }
+                String title = (filename != null && !filename.trim().isEmpty())
+                        ? filename.trim()
+                        : ("4Rent_Receipt_" + System.currentTimeMillis() + ".png");
+                String savedPath = MediaStore.Images.Media.insertImage(
+                        getContentResolver(),
+                        bitmap,
+                        title,
+                        "4Rent Official Statement & Receipt"
+                );
+                return savedPath != null;
+            } catch (Exception e) {
+                Log.e("4Rent", "Failed to save PNG receipt", e);
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean printCurrentPage(final String jobName) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (webView == null) return;
+                        PrintManager printManager = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+                        if (printManager == null) return;
+                        String safeJob = (jobName != null && !jobName.trim().isEmpty())
+                                ? jobName.trim()
+                                : "4Rent Official Receipt";
+                        PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(safeJob);
+                        PrintAttributes attrs = new PrintAttributes.Builder()
+                                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                                .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                                .build();
+                        printManager.print(safeJob, adapter, attrs);
+                    } catch (Exception e) {
+                        Log.e("4Rent", "Android PrintManager print failed", e);
+                    }
+                }
+            });
+            return true;
+        }
+
+        @JavascriptInterface
         public boolean shareToMessenger(final String pngBase64, final String summaryText, final String handle) {
             runOnUiThread(new Runnable() {
                 @Override
@@ -436,25 +614,15 @@ public class MainActivity extends Activity {
                             }
                         }
 
-                        // If user has a specific Messenger handle, open direct thread or m.me
-                        if (handle != null && !handle.trim().isEmpty()) {
-                            try {
-                                Intent directIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://m.me/" + handle.trim()));
-                                if (isPackageInstalled("com.facebook.orca")) {
-                                    directIntent.setPackage("com.facebook.orca");
-                                }
-                                startActivity(directIntent);
-                                return;
-                            } catch (Exception ignored) {
-                            }
-                        }
-
-                        // If Messenger app is installed, attempt direct share to Messenger
+                        // Always prioritize sending the receipt attachment rather than stripping it for m.me
                         if (isPackageInstalled("com.facebook.orca") && contentUri != null) {
                             try {
                                 Intent directMessenger = new Intent(Intent.ACTION_SEND);
                                 directMessenger.setType("image/png");
                                 directMessenger.putExtra(Intent.EXTRA_STREAM, contentUri);
+                                if (summaryText != null && !summaryText.isEmpty()) {
+                                    directMessenger.putExtra(Intent.EXTRA_TEXT, summaryText);
+                                }
                                 directMessenger.setPackage("com.facebook.orca");
                                 directMessenger.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                                 startActivity(directMessenger);
@@ -468,6 +636,9 @@ public class MainActivity extends Activity {
                         if (contentUri != null) {
                             sendIntent.setType("image/png");
                             sendIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+                            if (summaryText != null && !summaryText.isEmpty()) {
+                                sendIntent.putExtra(Intent.EXTRA_TEXT, summaryText);
+                            }
                             sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
                         } else {
                             sendIntent.setType("text/plain");
@@ -476,7 +647,7 @@ public class MainActivity extends Activity {
                             }
                         }
 
-                        Intent chooser = Intent.createChooser(sendIntent, "Share Receipt Image");
+                        Intent chooser = Intent.createChooser(sendIntent, "Share Official Receipt");
                         chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                         startActivity(chooser);
                     } catch (Exception e) {
@@ -726,6 +897,138 @@ public class MainActivity extends Activity {
             webView.goBack();
         } else {
             super.onBackPressed();
+        }
+    }
+
+    /**
+     * Zero-dependency framework ContentProvider serving cached PDF receipts cleanly
+     * via content:// URIs for Messenger and Android system share sheets.
+     */
+    public static class ReceiptFileProvider extends ContentProvider {
+        private static final String AUTHORITY = "com.splikaa.fourrent.fileprovider";
+        private static final String SUBDIR = "shared_receipts";
+
+        static String sanitizePdfFilename(String raw) {
+            String base = (raw != null ? raw : "4Rent_Receipt.pdf").trim();
+            base = base.replaceAll("[^a-zA-Z0-9._-]+", "_");
+            if (base.isEmpty()) base = "4Rent_Receipt";
+            if (!base.toLowerCase().endsWith(".pdf")) {
+                base = base + ".pdf";
+            }
+            return base;
+        }
+
+        static File writeSharedReceiptBytes(Context ctx, String safeName, byte[] data) {
+            try {
+                File dir = new File(ctx.getCacheDir(), SUBDIR);
+                if (!dir.exists()) {
+                    dir.mkdirs();
+                }
+                File outFile = new File(dir, safeName);
+                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                    fos.write(data);
+                    fos.flush();
+                }
+                return outFile;
+            } catch (Exception e) {
+                Log.e("4Rent", "Failed writing shared receipt cache file", e);
+                return null;
+            }
+        }
+
+        static Uri buildUri(String safeName) {
+            return new Uri.Builder()
+                    .scheme("content")
+                    .authority(AUTHORITY)
+                    .appendPath("receipts")
+                    .appendPath(safeName)
+                    .build();
+        }
+
+        private File resolveSafeFile(Uri uri) throws FileNotFoundException {
+            Context ctx = getContext();
+            if (ctx == null || uri == null) {
+                throw new FileNotFoundException("Unavailable provider context");
+            }
+            String segment = uri.getLastPathSegment();
+            if (segment == null || segment.trim().isEmpty()) {
+                throw new FileNotFoundException("Missing file segment");
+            }
+            File dir = new File(ctx.getCacheDir(), SUBDIR);
+            File target = new File(dir, new File(segment).getName());
+            try {
+                String baseCanonical = dir.getCanonicalPath() + File.separator;
+                String targetCanonical = target.getCanonicalPath();
+                if (!targetCanonical.startsWith(baseCanonical) || !target.exists()) {
+                    throw new FileNotFoundException("Invalid receipt URI: " + uri);
+                }
+                return target;
+            } catch (FileNotFoundException fnf) {
+                throw fnf;
+            } catch (Exception e) {
+                throw new FileNotFoundException("Unable to open receipt file");
+            }
+        }
+
+        @Override
+        public boolean onCreate() {
+            return true;
+        }
+
+        @Override
+        public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
+            try {
+                File file = resolveSafeFile(uri);
+                String[] cols = projection != null
+                        ? projection
+                        : new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+                MatrixCursor cursor = new MatrixCursor(cols, 1);
+                Object[] row = new Object[cols.length];
+                for (int i = 0; i < cols.length; i++) {
+                    if (OpenableColumns.DISPLAY_NAME.equals(cols[i])) {
+                        row[i] = file.getName();
+                    } else if (OpenableColumns.SIZE.equals(cols[i])) {
+                        row[i] = file.length();
+                    } else {
+                        row[i] = null;
+                    }
+                }
+                cursor.addRow(row);
+                return cursor;
+            } catch (FileNotFoundException e) {
+                return new MatrixCursor(new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, 0);
+            }
+        }
+
+        @Override
+        public String getType(Uri uri) {
+            String path = uri != null ? uri.toString().toLowerCase() : "";
+            if (path.endsWith(".png")) return "image/png";
+            return "application/pdf";
+        }
+
+        @Override
+        public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+            if (mode == null || !mode.equals("r")) {
+                throw new SecurityException("Read-only receipt provider");
+            }
+            File file = resolveSafeFile(uri);
+            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+        }
+
+        @Override
+        public Uri insert(Uri uri, ContentValues values) {
+            return null;
+        }
+
+        @Override
+        public int delete(Uri uri, String selection, String[] selectionArgs) {
+            return 0;
+        }
+
+        @Override
+        public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
+            return 0;
         }
     }
 }

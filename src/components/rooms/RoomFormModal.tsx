@@ -11,7 +11,17 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { Room } from '../../types/rental';
+import {
+  AdvanceBalanceTransaction,
+  AdvanceCapPolicyMode,
+  Room,
+} from '../../types/rental';
+import {
+  generateFinancialRefNo,
+  getAdvancePolicyAllowance,
+  roundCurrencyCentavos,
+  toCentavos,
+} from '../../utils/financialEngine';
 import {
   clampDueDayOneToTen,
   formatPeso,
@@ -23,6 +33,7 @@ interface RoomFormModalProps {
   isOpen: boolean;
   initialRoom?: Room | null;
   defaultRent: number;
+  advanceCapMode?: AdvanceCapPolicyMode;
   globalElectricRate: number; // Strictly controlled from Settings
   existingRooms?: Room[];
   onClose: () => void;
@@ -37,6 +48,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   isOpen,
   initialRoom,
   defaultRent,
+  advanceCapMode = 'unlimited',
   globalElectricRate,
   existingRooms,
   onClose,
@@ -206,47 +218,79 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
     }
 
     const baseAdvance =
-      status === 'occupied' ? Math.max(0, parseFloat(advanceRent) || 0) : 0;
+      status === 'occupied' ? Math.max(0, roundCurrencyCentavos(advanceRent)) : 0;
     const totalAdvance =
       status === 'occupied'
-        ? Math.round((baseAdvance + excessDepositToAdvance) * 100) / 100
+        ? roundCurrencyCentavos(baseAdvance + excessDepositToAdvance)
         : 0;
-    const maxAllowedAdvance = Math.max(
+    const allowance = getAdvancePolicyAllowance(
+      rentNum,
       initialRoom?.advanceRent || 0,
-      Math.round(rentNum * 100) / 100
+      advanceCapMode
     );
-    if (status === 'occupied' && totalAdvance > maxAllowedAdvance + 0.01) {
+    if (
+      status === 'occupied' &&
+      allowance.isCapped &&
+      totalAdvance > Math.max(initialRoom?.advanceRent || 0, allowance.maxAllowed) + 0.01
+    ) {
       setFormError(
         `Advance Balance cannot exceed 1 month of rent (${formatPeso(
           rentNum
-        )} max advance limit).`
+        )} max advance limit under active 1-Month Policy).`
       );
       return;
     }
 
     const nowIso = new Date().toISOString();
-    const prevAdvanceHistory = initialRoom?.advanceHistory || [];
-    const updatedAdvanceHistory =
-      status === 'occupied' && excessDepositToAdvance > 0
-        ? [
-            {
-              id: `adv-${Date.now()}`,
-              type: 'overpayment_credit' as const,
-              amount: excessDepositToAdvance,
-              createdAt: nowIso,
-              note: `Tenant paid ${formatPeso(
-                paidDepNum
-              )} for required deposit ${formatPeso(
-                reqDepNum
-              )} (+${formatPeso(
-                excessDepositToAdvance
-              )} to Advance Balance)`,
-            },
-            ...prevAdvanceHistory,
-          ]
-        : status === 'occupied'
-        ? prevAdvanceHistory
-        : [];
+    const prevAdvanceHistory: AdvanceBalanceTransaction[] = initialRoom?.advanceHistory || [];
+    let updatedAdvanceHistory = prevAdvanceHistory;
+    if (status === 'occupied') {
+      const entriesToPrepend: AdvanceBalanceTransaction[] = [];
+      const initialRoomAdv = roundCurrencyCentavos(initialRoom?.advanceRent || 0);
+      if (!initialRoom && baseAdvance > 0) {
+        entriesToPrepend.unshift({
+          id: `adv-init-${Date.now()}`,
+          type: 'manual_deposit',
+          category: 'advance_credit',
+          amount: baseAdvance,
+          createdAt: nowIso,
+          description: 'Opening Advance Credit Balance',
+          note: `Opening Advance Balance on ${cleanName} move-in`,
+          referenceNo: generateFinancialRefNo('ADV', nowIso),
+          balanceBefore: 0,
+          balanceAfter: baseAdvance,
+          status: 'completed',
+        });
+      }
+      if (excessDepositToAdvance > 0) {
+        const beforeCents = toCentavos(baseAdvance);
+        const afterCents = beforeCents + toCentavos(excessDepositToAdvance);
+        entriesToPrepend.unshift({
+          id: `adv-exdep-${Date.now() + 1}`,
+          type: 'overpayment_credit',
+          category: 'advance_credit',
+          amount: excessDepositToAdvance,
+          createdAt: nowIso,
+          description: 'Excess Security Deposit Credited to Advance',
+          note: `Tenant paid ${formatPeso(
+            paidDepNum
+          )} for required deposit ${formatPeso(
+            reqDepNum
+          )} (+${formatPeso(
+            excessDepositToAdvance
+          )} to Advance Balance)`,
+          referenceNo: generateFinancialRefNo('ADV', nowIso),
+          balanceBefore: beforeCents / 100,
+          balanceAfter: afterCents / 100,
+          status: 'completed',
+        });
+      }
+      if (entriesToPrepend.length > 0) {
+        updatedAdvanceHistory = [...entriesToPrepend, ...prevAdvanceHistory];
+      }
+    } else {
+      updatedAdvanceHistory = [];
+    }
 
     const appliedSecurityDepositPaid =
       status === 'occupied'
@@ -550,7 +594,9 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
 
                   <div className="flex flex-col">
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Advance Balance (₱ • Max 1-Month Rent)
+                      {advanceCapMode === '1_month'
+                        ? 'Advance Balance (₱ • Max 1-Month Rent)'
+                        : 'Advance Credit Wallet (₱ • Prepaid)'}
                     </label>
                     <input
                       type="number"

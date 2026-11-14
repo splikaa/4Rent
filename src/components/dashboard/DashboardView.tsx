@@ -38,6 +38,7 @@ import {
   getRoomMonthlyPaymentStatus,
   isMobileDevice,
 } from '../../utils/billingCalculator';
+import { formatKwhReading } from '../../utils/financialEngine';
 import { loadReadingLogs } from '../../services/storageService';
 
 interface DashboardViewProps {
@@ -845,11 +846,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <span className="font-bold text-slate-200 group-hover:text-amber-400 transition">
                             {r.name}{' '}
                             <span className="text-slate-400 font-normal">
-                              (Meter: {r.lastMeterReading.toFixed(1)} kWh)
+                              (Meter: {formatKwhReading(r.lastMeterReading)} kWh)
                             </span>
                           </span>
                           <span className="font-mono-num font-bold text-amber-400 shrink-0">
-                            {roomKwh.toFixed(1)} kWh billed
+                            {formatKwhReading(roomKwh)} kWh billed
                           </span>
                         </div>
                         <div className="w-full h-3 rounded-full bg-[#0D121B] border border-[#202B40] overflow-hidden">

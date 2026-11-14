@@ -400,7 +400,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                     If downloading the raw .EXE, Chrome may show a standard safety prompt (&quot;This file isn&apos;t commonly downloaded&quot;). Simply click <strong className="text-amber-300">&quot;Download suspicious file&quot;</strong> to complete the download.
                   </li>
                   <li>
-                    Extract the ZIP (or place the .EXE anywhere on your PC) — zero installation is required.
+                    Extract the ZIP (or place the .EXE anywhere on your PC): zero installation is required.
                   </li>
                   <li>
                     Double-click <code className="text-amber-300">4Rent-Launcher.exe</code>. If Windows SmartScreen appears on first run, click <strong className="text-white">More info &gt; Run anyway</strong>.

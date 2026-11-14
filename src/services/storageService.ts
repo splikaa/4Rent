@@ -12,6 +12,7 @@ import {
   saveSnapshotToIndexedDb,
   loadSnapshotFromIndexedDb,
 } from './idbDatabase';
+import { reconcileRoomAdvanceLedger } from '../utils/financialEngine';
 
 let _isAppHydrated = false;
 
@@ -56,6 +57,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   monthlyElectricRates: {},
   defaultMonthlyRent: 4500.0,
   defaultSecurityDeposit: 4500.0,
+  advanceCapMode: 'unlimited',
   remindersPromptShown: false,
   remindersEnabled: false,
   receiptPrintFormat: 'standard',
@@ -162,13 +164,14 @@ export function loadRooms(): Room[] {
       const isVacant = r.status === 'vacant';
       const safeDeposit =
         r.securityDeposit > 0 ? r.securityDeposit : r.monthlyRent || 4500;
-      return {
+      const sanitized: Room = {
         ...r,
         securityDeposit: safeDeposit,
         advanceRent: isVacant ? 0 : Math.max(0, r.advanceRent || 0),
         unpaidBalance: isVacant ? 0 : Math.max(0, r.unpaidBalance || 0),
         activeReceiptId: isVacant ? undefined : r.activeReceiptId,
       };
+      return isVacant ? sanitized : reconcileRoomAdvanceLedger(sanitized);
     });
   } catch {
     return [];
@@ -178,12 +181,13 @@ export function loadRooms(): Room[] {
 export function saveRooms(rooms: Room[]): void {
   const sanitized = rooms.map((r) => {
     const isVacant = r.status === 'vacant';
-    return {
+    const nextRoom: Room = {
       ...r,
       advanceRent: isVacant ? 0 : Math.max(0, r.advanceRent || 0),
       unpaidBalance: isVacant ? 0 : Math.max(0, r.unpaidBalance || 0),
       activeReceiptId: isVacant ? undefined : r.activeReceiptId,
     };
+    return isVacant ? nextRoom : reconcileRoomAdvanceLedger(nextRoom);
   });
   const nextRaw = JSON.stringify(sanitized);
   if (localStorage.getItem(STORAGE_KEYS.ROOMS) !== nextRaw) {

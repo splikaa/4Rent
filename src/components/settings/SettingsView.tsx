@@ -603,6 +603,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
+          {/* Advance Credit Policy Mode */}
+          <div className="pt-4 border-t border-[#232F44] space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-white">
+                  Advance Payment Policy
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                  Controls how tenant prepaid balances and cash overpayments are held across billing cycles.
+                </p>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-bold text-emerald-300">
+                {(form.advanceCapMode || 'unlimited') === 'unlimited'
+                  ? 'Prepaid Wallet Active'
+                  : '1-Month Cap Active'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() =>
+                  setForm((prev) => ({ ...prev, advanceCapMode: 'unlimited' }))
+                }
+                className={`rounded-2xl p-3 text-left border transition cursor-pointer ${
+                  (form.advanceCapMode || 'unlimited') === 'unlimited'
+                    ? 'bg-emerald-500/15 border-emerald-500/50 text-white'
+                    : 'bg-[#0D121B] border-[#263248] text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <div className="text-xs font-extrabold text-emerald-300">
+                  Prepaid Wallet (Recommended)
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                  Supports multi-month advances and large electricity deposits (e.g., ₱20,000 advance covering rent + utilities with remaining balance carried forward).
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setForm((prev) => ({ ...prev, advanceCapMode: '1_month' }))
+                }
+                className={`rounded-2xl p-3 text-left border transition cursor-pointer ${
+                  form.advanceCapMode === '1_month'
+                    ? 'bg-amber-500/15 border-amber-500/50 text-white'
+                    : 'bg-[#0D121B] border-[#263248] text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <div className="text-xs font-extrabold text-amber-300">
+                  Legacy 1-Month Rent Cap
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                  Restricts stored advance credit to a maximum of 1 month base rent. Existing larger balances remain refundable or usable.
+                </p>
+              </button>
+            </div>
+          </div>
+
           <div className="flex justify-end pt-1">
             <button
               type="submit"
@@ -1269,8 +1328,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
                   {isMobile
-                    ? 'Mobile can only apply a code generated from Desktop/Web (once per month). Never share your code — sharing it exposes your data publicly.'
-                    : 'Generate this code on Desktop/Web and apply it on Mobile (once/month). Never share it — anyone with this code can access your data.'}
+                    ? 'Mobile can only apply a code generated from Desktop/Web (once per month). Never share your code | Sharing exposes your data publicly.'
+                    : 'Generate this code on Desktop/Web and apply it on Mobile (once/month). Never share it | Anyone with this code can access your data.'}
                 </p>
                 <div className="pt-2 border-t border-[#1C2536] flex items-center justify-between gap-2">
                   <span className="text-xs text-slate-400">

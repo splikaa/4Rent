@@ -1,4 +1,4 @@
-const CACHE_NAME = '4rent-management-system-v1.0.3-ocr-security-ui';
+const CACHE_NAME = '4rent-management-system-v1.0.4-a4-wallet-ocr';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

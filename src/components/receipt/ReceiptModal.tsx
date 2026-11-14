@@ -3,6 +3,8 @@ import { toPng } from 'html-to-image';
 import {
   CalendarClock,
   Check,
+  ChevronDown,
+  ChevronUp,
   Download,
   ExternalLink,
   Eye,
@@ -12,6 +14,7 @@ import {
   Lock,
   MessageCircle,
   Printer,
+  Share2,
   ShieldCheck,
   X,
   Zap,
@@ -32,16 +35,22 @@ import {
   maskPhoneNumber,
   normalizeMonthKey,
 } from '../../utils/billingCalculator';
-import { buildSinglePageReceiptPdfBlob } from '../../utils/pdfReceiptGenerator';
+import { formatKwhReading } from '../../utils/financialEngine';
+import {
+  buildA4ReceiptPdfFromElement,
+  buildReceiptDocumentMeta,
+} from '../../utils/pdfReceiptGenerator';
 import {
   generateSimulatedSubMeterDataUrl,
   generateSimulatedValueCropDataUrl,
 } from '../../services/ocrService';
-import { openMessengerAppWithReceipt } from '../../services/notificationService';
+import { shareReceiptDocument } from '../../services/notificationService';
 import { MeterPhotoLightboxModal } from '../ocr/MeterPhotoLightboxModal';
+import { PrintableA4Receipt } from './PrintableA4Receipt';
 
 interface ReceiptModalProps {
   bill: BillRecord | null;
+  roomAdvanceBalance?: number;
   settings: AppSettings;
   onApplyMonthlyRate?: (monthKeyOrPeriod: string, rate: number) => void;
   onClose: () => void;
@@ -83,9 +92,9 @@ function buildMonthlyScheduleBreakdown(billingPeriod: string, dueDateIso: string
 
   return {
     currentLabel: `${curMonthShort} ${curYear}`,
-    currentRange: `${curMonthShort} 1 – ${curLastDay}, ${curYear}`,
+    currentRange: `${curMonthShort} 1 - ${curLastDay}, ${curYear}`,
     nextLabel: `${nextMonthShort} ${nextYear}`,
-    nextRange: `${nextMonthShort} 1 – ${nextLastDay}, ${nextYear}`,
+    nextRange: `${nextMonthShort} 1 - ${nextLastDay}, ${nextYear}`,
     dueDayNumber: safeDueDay,
     nextDueLabel: nextDueDateObj.toLocaleDateString('en-PH', {
       month: 'short',
@@ -97,16 +106,18 @@ function buildMonthlyScheduleBreakdown(billingPeriod: string, dueDateIso: string
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   bill,
+  roomAdvanceBalance,
   settings,
   onApplyMonthlyRate,
   onClose,
 }) => {
-  const receiptRef = useRef<HTMLDivElement | null>(null);
+  const printableRef = useRef<HTMLDivElement | null>(null);
   const [maskContactsOnReceipt, setMaskContactsOnReceipt] = useState<boolean>(
     () => settings.maskReceiptContacts ?? true
   );
   const [isExporting, setIsExporting] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const [showYtdSchedule, setShowYtdSchedule] = useState(false);
   const [quickRateMonthKey, setQuickRateMonthKey] = useState<string>(() =>
     normalizeMonthKey(bill?.billingPeriod)
   );
@@ -207,15 +218,23 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     bill.dueDate
   );
 
-  const generateReceiptPngDataUrl = async (): Promise<string | null> => {
-    if (!receiptRef.current) return null;
+  const receiptMeta = buildReceiptDocumentMeta(bill);
+  const resolvedRemainingAdvance = Math.max(
+    0,
+    typeof bill.advanceBalanceAfter === 'number'
+      ? bill.advanceBalanceAfter
+      : roomAdvanceBalance ?? 0
+  );
+
+  const capturePrintablePngDataUrl = async (): Promise<string | null> => {
+    if (!printableRef.current) return null;
     try {
       setIsExporting(true);
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-      const node = receiptRef.current;
+      const node = printableRef.current;
       const rect = node.getBoundingClientRect();
-      const fullWidth = Math.ceil(rect.width || node.scrollWidth || 660);
+      const fullWidth = Math.ceil(rect.width || node.scrollWidth || 794);
       const fullHeight = Math.ceil(
         Math.max(node.scrollHeight, node.offsetHeight, rect.height || 0)
       );
@@ -230,11 +249,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         height: fullHeight,
         canvasWidth: fullWidth * 2,
         canvasHeight: fullHeight * 2,
-        filter: (domNode: HTMLElement) =>
-          !(
-            domNode instanceof HTMLElement &&
-            domNode.classList?.contains('no-print')
-          ),
         style: {
           transform: 'none',
           maxHeight: 'none',
@@ -254,22 +268,52 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
-  const getSafeReceiptBaseFilename = () => {
-    const safeTenant = (bill.tenantName || 'Tenant')
-      .trim()
-      .replace(/[^a-zA-Z0-9_-]/g, '_');
-    const safeRoom = bill.roomName.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-    return `Receipt_${safeTenant}_${safeRoom}_${bill.receiptNo}`;
+  const captureA4PdfBundle = async () => {
+    if (!printableRef.current) return null;
+    try {
+      setIsExporting(true);
+      return await buildA4ReceiptPdfFromElement(printableRef.current, {
+        pixelRatio: 2,
+        jpegQuality: 0.92,
+      });
+    } catch {
+      return null;
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleDownloadPng = async () => {
     setShareFeedback(null);
-    const dataUrl = await generateReceiptPngDataUrl();
+    const dataUrl = await capturePrintablePngDataUrl();
     if (!dataUrl) {
       setShareFeedback('Could not generate PNG receipt.');
       return;
     }
-    const filename = `${getSafeReceiptBaseFilename()}.png`;
+    const filename = receiptMeta.pngFilename;
+    const win = window as unknown as {
+      AndroidNative?: {
+        savePngReceipt?: (pngBase64: string, fileName: string) => boolean;
+      };
+    };
+
+    if (
+      isRunningInMobileApp() &&
+      win.AndroidNative &&
+      typeof win.AndroidNative.savePngReceipt === 'function'
+    ) {
+      try {
+        if (win.AndroidNative.savePngReceipt(dataUrl, filename)) {
+          setShareFeedback(`Saved PNG to Downloads: ${filename}`);
+          setTimeout(() => {
+            setShareFeedback((prev) => (prev?.includes(filename) ? null : prev));
+          }, 4500);
+          return;
+        }
+      } catch {
+        // fall through to anchor download
+      }
+    }
 
     const link = document.createElement('a');
     link.download = filename;
@@ -286,16 +330,45 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const handleDownloadPdf = async () => {
     setShareFeedback(null);
-    const pngDataUrl = await generateReceiptPngDataUrl();
-    if (!pngDataUrl) {
-      setShareFeedback('Could not generate PDF receipt.');
+    const pdfBundle = await captureA4PdfBundle();
+    if (!pdfBundle) {
+      setShareFeedback('Could not generate A4 PDF receipt.');
       return;
     }
 
     try {
-      setIsExporting(true);
-      const { blob, dataUrl } = await buildSinglePageReceiptPdfBlob(pngDataUrl);
-      const filename = `${getSafeReceiptBaseFilename()}.pdf`;
+      const { blob, dataUrl, pageCount } = pdfBundle;
+      const filename = receiptMeta.pdfFilename;
+      const win = window as unknown as {
+        AndroidNative?: {
+          savePdfReceipt?: (pdfBase64: string, fileName: string) => boolean;
+          sharePdfReceipt?: (
+            pdfBase64: string,
+            fileName: string,
+            summaryText: string,
+            preferMessenger: boolean
+          ) => boolean;
+        };
+      };
+
+      // Native Android APK: write real PDF directly into Downloads/4Rent or Share chooser
+      if (isRunningInMobileApp() && win.AndroidNative) {
+        if (typeof win.AndroidNative.savePdfReceipt === 'function') {
+          const saved = win.AndroidNative.savePdfReceipt(dataUrl, filename);
+          if (saved) {
+            setShareFeedback(`Saved A4 PDF (${pageCount}p): ${filename}`);
+            setTimeout(() => {
+              setShareFeedback((prev) => (prev?.includes(filename) ? null : prev));
+            }, 5000);
+            return;
+          }
+        }
+        if (typeof win.AndroidNative.sharePdfReceipt === 'function') {
+          win.AndroidNative.sharePdfReceipt(dataUrl, filename, receiptMeta.shareTitle, false);
+          setShareFeedback(`PDF ready (${pageCount}p): ${filename}`);
+          return;
+        }
+      }
 
       // iOS Safari mobile browsers prefer system Files/Share sheet for PDF blobs
       const isIOS = /iPad|iPhone|iPod/i.test(navigator.userAgent || '');
@@ -305,9 +378,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           if (navigator.canShare?.({ files: [pdfFile] })) {
             await navigator.share({
               files: [pdfFile],
-              title: filename,
+              title: receiptMeta.shareTitle,
             });
-            setShareFeedback(`PDF ready: ${filename}`);
+            setShareFeedback(`A4 PDF ready (${pageCount}p): ${filename}`);
             return;
           }
         } catch (err: any) {
@@ -315,7 +388,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         }
       }
 
-      // Direct .pdf file download (works cleanly on Mobile Chrome/Edge & Desktop)
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.download = filename;
@@ -325,32 +397,64 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       link.click();
       link.remove();
 
-      // If running inside Android APK WebView where <a download> isn't intercepted by OS DownloadManager,
-      // also offer fallback open of PDF data URL if WebView ignores blob download.
-      if (isRunningInMobileApp() && dataUrl) {
-        const win = window as any;
-        if (win.AndroidNative?.shareToMessenger) {
-          setShareFeedback(
-            `PDF ready (${filename}). Use PNG or Messenger in Mobile App if downloads are skipped.`
-          );
-          setTimeout(() => {
-            URL.revokeObjectURL(blobUrl);
-            setShareFeedback((prev) => (prev?.includes(filename) ? null : prev));
-          }, 6000);
-          return;
-        }
-      }
-
       setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
-      setShareFeedback(`Downloaded PDF: ${filename}`);
+      setShareFeedback(`Downloaded A4 PDF (${pageCount}p): ${filename}`);
       setTimeout(() => {
-        setShareFeedback((prev) => (prev?.startsWith('Downloaded PDF') ? null : prev));
+        setShareFeedback((prev) => (prev?.startsWith('Downloaded A4 PDF') ? null : prev));
       }, 4500);
     } catch {
-      setShareFeedback('Could not build PDF file. Try Download PNG instead.');
-    } finally {
-      setIsExporting(false);
+      setShareFeedback('Could not save PDF file. Try Share Receipt instead.');
     }
+  };
+
+  const handlePrintReceipt = () => {
+    setShareFeedback(null);
+    const win = window as unknown as {
+      AndroidNative?: {
+        printCurrentPage?: (jobName: string) => boolean;
+      };
+    };
+    if (
+      isRunningInMobileApp() &&
+      win.AndroidNative &&
+      typeof win.AndroidNative.printCurrentPage === 'function'
+    ) {
+      try {
+        if (win.AndroidNative.printCurrentPage(receiptMeta.shareTitle)) {
+          return;
+        }
+      } catch {
+        // fall through to browser print
+      }
+    }
+    window.print();
+  };
+
+  const handleShareReceipt = async () => {
+    setShareFeedback(null);
+    const pdfBundle = await captureA4PdfBundle();
+    const summaryText = formatMessengerBillSummary(
+      bill,
+      settings.apartmentName || '4Rent Management System',
+      settings
+    );
+
+    const res = await shareReceiptDocument({
+      mode: 'share',
+      textSummary: summaryText,
+      pdfBlob: pdfBundle?.blob,
+      pdfDataUrl: pdfBundle?.dataUrl,
+      pngDataUrl: pdfBundle?.pngDataUrl,
+      receiptNo: bill.receiptNo,
+      tenantName: bill.tenantName,
+      roomName: bill.roomName,
+      messengerHandle: bill.tenantMessenger,
+      shareUrl: window.location.href,
+    });
+    setShareFeedback(res.message);
+    setTimeout(() => {
+      setShareFeedback((prev) => (prev === res.message ? null : prev));
+    }, 5500);
   };
 
   const handleShareToMessenger = async () => {
@@ -365,29 +469,31 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         if (preOpenedWindow && preOpenedWindow.document) {
           preOpenedWindow.document.title = 'Opening Messenger...';
           preOpenedWindow.document.body.innerHTML =
-            '<div style="font-family:system-ui,sans-serif;background:#0b111c;color:#f8fafc;height:100vh;display:flex;align-items:center;justify-content:center;margin:0;text-align:center;"><div><h2 style="margin:0 0 8px;">Preparing Official Receipt...</h2><p style="color:#94a3b8;font-size:14px;margin:0;">Copying receipt image and opening Facebook Messenger.</p></div></div>';
+            '<div style="font-family:system-ui,sans-serif;background:#0b111c;color:#f8fafc;height:100vh;display:flex;align-items:center;justify-content:center;margin:0;text-align:center;"><div><h2 style="margin:0 0 8px;">Preparing A4 PDF Receipt...</h2><p style="color:#94a3b8;font-size:14px;margin:0;">Downloading your PDF receipt and opening Messenger.</p></div></div>';
         }
       } catch {
         preOpenedWindow = null;
       }
     }
 
-    const pngData = await generateReceiptPngDataUrl();
+    const pdfBundle = await captureA4PdfBundle();
     const summaryText = formatMessengerBillSummary(
       bill,
-      settings.apartmentName || 'Rental Management',
+      settings.apartmentName || '4Rent Management System',
       settings
     );
 
-    const res = await openMessengerAppWithReceipt({
+    const res = await shareReceiptDocument({
+      mode: 'messenger',
       textSummary: summaryText,
-      pngDataUrl: pngData || undefined,
+      pdfBlob: pdfBundle?.blob,
+      pdfDataUrl: pdfBundle?.dataUrl,
+      pngDataUrl: pdfBundle?.pngDataUrl,
       receiptNo: bill.receiptNo,
       tenantName: bill.tenantName,
       roomName: bill.roomName,
       messengerHandle: bill.tenantMessenger,
       shareUrl: window.location.href,
-      autoDownloadPng: true,
       preOpenedWindow,
     });
     setShareFeedback(res.message);
@@ -435,7 +541,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       aria-modal="true"
       aria-label="Official Statement and Receipt"
     >
-      <div className="receipt-print-shell w-full max-w-3xl rounded-2xl sm:rounded-3xl bg-[#111724] border border-[#243148] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[95vh] animate-modal-pop relative">
+      <div className="receipt-print-shell w-full max-w-3xl rounded-2xl sm:rounded-3xl bg-[#111724] border border-[#243148] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[94dvh] animate-modal-pop relative">
         {/* Modal Top Control Header (Hidden when printed) */}
         <div className="no-print flex items-center justify-between gap-2.5 px-4 sm:px-6 py-3 bg-[#162030] border-b border-[#243148] shrink-0">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -488,8 +594,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   Previous applied receipt locked at{' '}
                   <strong className="text-amber-300 font-mono-num">
                     {formatPeso(bill.electricRate)}/kWh
-                  </strong>{' '}
-                  — future rate updates will not alter this receipt.
+                  </strong>
+                  : future rate updates will not alter this receipt.
                 </span>
               </div>
             ) : (
@@ -552,12 +658,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         )}
 
-        {/* Scrollable Backdrop Container */}
-        <div className="receipt-sheet-container flex-1 overflow-y-auto p-2.5 sm:p-6 bg-[#090D15]">
+        {/* Mobile-First Interactive Receipt View (Hidden during A4 Print/PDF) */}
+        <div className="receipt-mobile-interactive receipt-sheet-container flex-1 overflow-y-auto p-2.5 sm:p-5 bg-[#090D15]">
           <div
-            ref={receiptRef}
             id="receipt-printable-sheet"
-            className="receipt-white-sheet mx-auto w-full max-w-[680px] bg-white text-slate-900 rounded-2xl p-4 sm:p-7 shadow-2xl font-sans border border-slate-200 relative space-y-4"
+            className="receipt-white-sheet mx-auto w-full max-w-[660px] bg-white text-slate-900 rounded-2xl p-4 sm:p-6 shadow-2xl font-sans border border-slate-200 relative space-y-3.5"
           >
             {/* 1. Clean Text-Only Centered Letterhead (No System Logo) */}
             <div className="text-center border-b-2 border-slate-900 pb-4 space-y-1.5">
@@ -641,7 +746,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </div>
                 <div className="bg-slate-50 p-3 flex flex-col justify-center">
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Due Date (1st–10th)
+                    Due Date (1st-10th)
                   </span>
                   <strong className="text-xs sm:text-sm font-black font-mono-num text-slate-950 block mt-1">
                     {formattedDueDate}
@@ -651,60 +756,73 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             </div>
 
             {/* 3. Monthly Electric Rate Breakdown & Billing Schedule */}
-            <div className="border border-slate-300 rounded-xl p-3.5 sm:p-4 bg-slate-50/70 space-y-3">
+            <div className="border border-slate-300 rounded-xl p-3 sm:p-4 bg-slate-50/70 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <CalendarClock className="w-4 h-4 text-amber-600 shrink-0" />
                   <span className="text-xs font-black uppercase tracking-wider text-slate-900">
-                    Monthly Electric Rate Breakdown ({billMonthKey.split('-')[0]} YTD)
+                    Monthly Electric Rate ({billMonthKey.split('-')[0]})
                   </span>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white border border-slate-300 text-slate-700">
-                  {isRateLockedReceipt ? 'Locked (Applied Receipt)' : 'Jan – Current Month'}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowYtdSchedule((prev) => !prev)}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
+                >
+                  <span>
+                    {isRateLockedReceipt ? 'Locked Rate' : 'YTD Rate Table'}
+                  </span>
+                  {showYtdSchedule ? (
+                    <ChevronUp className="w-3 h-3" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3" />
+                  )}
+                </button>
               </div>
 
-              {/* Clean Aligned Year-to-Date Monthly Electric Rate Table (Jan -> Current Month) */}
-              <div className="rounded-lg border border-slate-200 bg-white overflow-hidden p-2">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
-                  {scheduledRateMonthKeys.map((mk) => {
-                    const isBillMonth = mk === billMonthKey;
-                    const hasCustomOverride =
-                      settings.monthlyElectricRates?.[mk] !== undefined;
-                    const displayRate = isBillMonth
-                      ? bill.electricRate
-                      : getElectricRateForPeriod(settings, mk);
-                    return (
-                      <div
-                        key={mk}
-                        className={`rounded-md border px-2.5 py-1.5 flex flex-col justify-between gap-0.5 text-xs ${
-                          isBillMonth
-                            ? 'bg-amber-50 border-amber-300'
-                            : 'bg-slate-50/70 border-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1 min-w-0">
-                          <span className="font-bold text-slate-900 truncate">
-                            {formatMonthKeyLabel(mk, 'short')}
+              {/* Collapsible Year-to-Date Monthly Electric Rate Table */}
+              {showYtdSchedule && (
+                <div className="rounded-lg border border-slate-200 bg-white overflow-hidden p-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
+                    {scheduledRateMonthKeys.map((mk) => {
+                      const isBillMonth = mk === billMonthKey;
+                      const hasCustomOverride =
+                        settings.monthlyElectricRates?.[mk] !== undefined;
+                      const displayRate = isBillMonth
+                        ? bill.electricRate
+                        : getElectricRateForPeriod(settings, mk);
+                      return (
+                        <div
+                          key={mk}
+                          className={`rounded-md border px-2.5 py-1.5 flex flex-col justify-between gap-0.5 text-xs ${
+                            isBillMonth
+                              ? 'bg-amber-50 border-amber-300'
+                              : 'bg-slate-50/70 border-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1 min-w-0">
+                            <span className="font-bold text-slate-900 truncate">
+                              {formatMonthKeyLabel(mk, 'short')}
+                            </span>
+                            {isBillMonth ? (
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200/80 text-amber-950 shrink-0">
+                                Applied
+                              </span>
+                            ) : hasCustomOverride ? (
+                              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 text-blue-800 shrink-0">
+                                Custom
+                              </span>
+                            ) : null}
+                          </div>
+                          <span className="font-mono-num font-black text-slate-950 text-[11px] sm:text-xs">
+                            {formatPeso(displayRate)}/kWh
                           </span>
-                          {isBillMonth ? (
-                            <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200/80 text-amber-950 shrink-0">
-                              Applied
-                            </span>
-                          ) : hasCustomOverride ? (
-                            <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 text-blue-800 shrink-0">
-                              Custom
-                            </span>
-                          ) : null}
                         </div>
-                        <span className="font-mono-num font-black text-slate-950 text-[11px] sm:text-xs">
-                          {formatPeso(displayRate)}/kWh
-                        </span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* This Cycle vs Next Cycle Alignment Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -731,7 +849,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   </div>
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-slate-600">
-                      Electric ({bill.consumptionKwh.toFixed(1)} kWh)
+                      Electric ({formatKwhReading(bill.consumptionKwh)} kWh)
                     </span>
                     <span className="font-mono-num font-bold text-slate-950 text-right">
                       {formatPeso(bill.electricRate)}/kWh = {formatPeso(bill.electricTotal)}
@@ -770,7 +888,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-slate-600">Start Meter &amp; Rate</span>
                       <span className="font-mono-num font-bold text-slate-950 text-right">
-                        {bill.currReading.toFixed(1)} kWh (@{formatPeso(nextMonthRate)})
+                        {formatKwhReading(bill.currReading)} kWh (@{formatPeso(nextMonthRate)})
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
@@ -795,25 +913,27 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-slate-600">Payment Window</span>
                       <span className="font-mono-num font-semibold text-slate-900">
-                        1st–10th Monthly (Day {cycleSchedule.dueDayNumber})
+                        1st-10th Monthly (Day {cycleSchedule.dueDayNumber})
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-slate-600">Rate Basis</span>
                       <span className="font-mono-num font-bold text-slate-950">
-                        Jan – {formatMonthKeyLabel(currentCalendarKey, 'short')} YTD
+                        Jan - {formatMonthKeyLabel(currentCalendarKey, 'short')} YTD
                       </span>
                     </div>
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-slate-600">Closing Meter Carry</span>
                       <span className="font-mono-num font-bold text-slate-950 text-right">
-                        {bill.currReading.toFixed(1)} kWh
+                        {formatKwhReading(bill.currReading)} kWh
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-600">Max Advance Policy</span>
-                      <span className="font-mono-num font-bold text-slate-900">
-                        1 Month ({formatPeso(bill.baseRent)})
+                      <span className="text-slate-600">Advance Policy</span>
+                      <span className="font-mono-num font-bold text-slate-900 text-right">
+                        {settings.advanceCapMode === '1_month'
+                          ? `1 Month (${formatPeso(bill.baseRent)})`
+                          : 'Prepaid Wallet'}
                       </span>
                     </div>
                   </div>
@@ -844,7 +964,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       1. Previous Meter
                     </span>
                     <span className="font-mono-num font-black text-slate-950">
-                      {bill.prevReading.toFixed(1)} kWh
+                      {formatKwhReading(bill.prevReading)} kWh
                     </span>
                   </div>
                   {prevMeterProofImg && (
@@ -852,9 +972,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       onClick={() =>
                         openLightbox(
                           prevMeterProofImg,
-                          `Previous Sub-Meter — ${bill.roomName}`,
+                          `Previous Sub-Meter | ${bill.roomName}`,
                           prevMeterCropImg,
-                          `${bill.prevReading.toFixed(1)} kWh`
+                          `${formatKwhReading(bill.prevReading)} kWh`
                         )
                       }
                       className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 p-1"
@@ -873,9 +993,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       onClick={() =>
                         openLightbox(
                           prevMeterProofImg,
-                          `Previous Sub-Meter — ${bill.roomName}`,
+                          `Previous Sub-Meter | ${bill.roomName}`,
                           prevMeterCropImg,
-                          `${bill.prevReading.toFixed(1)} kWh`
+                          `${formatKwhReading(bill.prevReading)} kWh`
                         )
                       }
                       className="no-print w-full py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
@@ -893,7 +1013,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       2. Current Meter
                     </span>
                     <span className="font-mono-num font-black text-slate-950">
-                      {bill.currReading.toFixed(1)} kWh
+                      {formatKwhReading(bill.currReading)} kWh
                     </span>
                   </div>
                   {currMeterProofImg && (
@@ -901,9 +1021,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       onClick={() =>
                         openLightbox(
                           currMeterProofImg,
-                          `Current Sub-Meter — ${bill.roomName}`,
+                          `Current Sub-Meter | ${bill.roomName}`,
                           currMeterCropImg,
-                          `${bill.currReading.toFixed(1)} kWh`
+                          `${formatKwhReading(bill.currReading)} kWh`
                         )
                       }
                       className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 p-1"
@@ -922,9 +1042,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       onClick={() =>
                         openLightbox(
                           currMeterProofImg,
-                          `Current Sub-Meter — ${bill.roomName}`,
+                          `Current Sub-Meter | ${bill.roomName}`,
                           currMeterCropImg,
-                          `${bill.currReading.toFixed(1)} kWh`
+                          `${formatKwhReading(bill.currReading)} kWh`
                         )
                       }
                       className="no-print w-full py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
@@ -940,10 +1060,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-center text-xs text-slate-800 leading-relaxed">
                 <span className="font-semibold">Usage: </span>
                 <strong className="font-mono-num text-slate-950">
-                  {bill.currReading.toFixed(1)} − {bill.prevReading.toFixed(1)} ={' '}
-                  {bill.consumptionKwh.toFixed(1)} kWh
+                  {formatKwhReading(bill.currReading)} - {formatKwhReading(bill.prevReading)} ={' '}
+                  {formatKwhReading(bill.consumptionKwh)} kWh
                 </strong>{' '}
-                × {formatPeso(bill.electricRate)}/kWh ={' '}
+                x {formatPeso(bill.electricRate)}/kWh ={' '}
                 <strong className="font-mono-num text-slate-950 font-black">
                   {formatPeso(bill.electricTotal)}
                 </strong>
@@ -966,7 +1086,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
                 <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-slate-800">
                   <span>
-                    2. Sub-Meter Electricity ({bill.consumptionKwh.toFixed(1)} kWh @{' '}
+                    2. Sub-Meter Electricity ({formatKwhReading(bill.consumptionKwh)} kWh @{' '}
                     {formatPeso(bill.electricRate)}/kWh)
                   </span>
                   <span className="font-mono-num font-bold text-slate-950 shrink-0 text-right">
@@ -1053,10 +1173,20 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {bill.overpaymentToAdvance > 0 && (
                   <div className="flex justify-between gap-2 text-xs font-bold text-emerald-700 pt-0.5">
                     <span>
-                      Advance Credit (1-Month Advance Reserve)
+                      Excess Credited to Advance Balance
                     </span>
                     <span className="font-mono-num">
                       +{formatPeso(bill.overpaymentToAdvance)}
+                    </span>
+                  </div>
+                )}
+                {(resolvedRemainingAdvance > 0 ||
+                  (bill.advanceApplied || 0) > 0 ||
+                  bill.overpaymentToAdvance > 0) && (
+                  <div className="flex justify-between gap-2 text-xs font-extrabold text-emerald-800 pt-1 border-t border-slate-200">
+                    <span>Remaining Advance Credit</span>
+                    <span className="font-mono-num">
+                      {formatPeso(resolvedRemainingAdvance)}
                     </span>
                   </div>
                 )}
@@ -1068,7 +1198,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               <div className="inline-flex items-center justify-center gap-1.5 text-[11px] text-slate-600 font-medium">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <span>
-                  Payment Window: 1st–10th Monthly • Statement Verification
+                  Payment Window: 1st-10th Monthly • Statement Verification
                 </span>
               </div>
               <div>
@@ -1081,54 +1211,80 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Bottom Action Toolbar (Hidden when printed) */}
-        <div className="no-print px-4 sm:px-6 py-3.5 bg-[#141C2B] border-t border-[#243148] flex flex-wrap items-center justify-between gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={handleShareToMessenger}
-            disabled={isExporting}
-            className="flex-1 min-w-[200px] h-11 py-2.5 px-4 rounded-xl bg-[#0084FF] hover:bg-[#1890FF] text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition cursor-pointer btn-fluid"
-          >
-            {isExporting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <MessageCircle className="w-4 h-4 fill-white" />
-            )}
-            <span>Share Receipt to Messenger</span>
-            <ExternalLink className="w-3.5 h-3.5 opacity-80" />
-          </button>
+        {/* Dedicated Offscreen A4 Portrait Document Used for PDF Export, PNG Export, Sharing & Print */}
+        <div
+          aria-hidden="true"
+          className="printable-a4-stage fixed -left-[9999px] top-0 w-[794px] bg-white pointer-events-none z-[-1]"
+        >
+          <PrintableA4Receipt
+            ref={printableRef}
+            bill={bill}
+            settings={settings}
+            maskContactsOnReceipt={maskContactsOnReceipt}
+            prevMeterProofImg={prevMeterProofImg}
+            currMeterProofImg={currMeterProofImg}
+            remainingAdvanceCredit={resolvedRemainingAdvance}
+          />
+        </div>
 
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        {/* Modal Bottom Action Toolbar (Hidden when printed) */}
+        <div className="no-print px-3 sm:px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#141C2B] border-t border-[#243148] flex flex-col gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleShareToMessenger}
+              disabled={isExporting}
+              className="flex-1 min-w-[180px] h-11 py-2 px-3 rounded-xl bg-[#0084FF] hover:bg-[#1890FF] text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition cursor-pointer btn-fluid"
+            >
+              {isExporting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <MessageCircle className="w-4 h-4 fill-white" />
+              )}
+              <span>Share PDF to Messenger</span>
+              <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleShareReceipt}
+              disabled={isExporting}
+              className="h-11 py-2 px-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-indigo-500/20 transition cursor-pointer btn-fluid"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Share Receipt</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={isExporting}
+              className="h-10 py-2 px-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] sm:text-xs flex items-center justify-center gap-1 shadow-md shadow-emerald-500/15 transition cursor-pointer btn-fluid"
+            >
+              <FileDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span>Download PDF</span>
+            </button>
+
             <button
               type="button"
               onClick={handleDownloadPng}
               disabled={isExporting}
-              className="flex-1 sm:flex-none h-11 py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/15 transition cursor-pointer btn-fluid"
+              className="h-10 py-2 px-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] sm:text-xs flex items-center justify-center gap-1 shadow-md shadow-amber-500/15 transition cursor-pointer btn-fluid"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               <span>Download PNG</span>
             </button>
 
             <button
               type="button"
-              onClick={handleDownloadPdf}
-              disabled={isExporting}
-              className="flex-1 sm:flex-none h-11 py-2.5 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/15 transition cursor-pointer btn-fluid"
+              onClick={handlePrintReceipt}
+              className="h-10 py-2 px-2 rounded-xl bg-[#1A2335] hover:bg-[#24314A] border border-[#2A3955] text-white font-bold text-[11px] sm:text-xs flex items-center justify-center gap-1 transition cursor-pointer btn-fluid"
             >
-              <FileDown className="w-4 h-4" />
-              <span>Download PDF</span>
+              <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
+              <span>Print Receipt</span>
             </button>
-
-            {!isMobileDevice() && !isRunningInMobileApp() && (
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="h-11 py-2.5 px-3.5 rounded-xl bg-[#1A2335] hover:bg-[#24314A] border border-[#2A3955] text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
-              >
-                <Printer className="w-4 h-4 text-amber-400" />
-                <span>Print</span>
-              </button>
-            )}
           </div>
         </div>
       </div>

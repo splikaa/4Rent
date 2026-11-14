@@ -37,12 +37,41 @@ export interface TenantHistoryEntry {
   notes?: string;
 }
 
+export type AdvanceTransactionType =
+  | 'overpayment_credit'
+  | 'manual_deposit'
+  | 'withdrawal'
+  | 'applied_to_bill'
+  | 'adjustment';
+
+export type AdvanceTransactionStatus = 'completed' | 'pending' | 'reversed';
+
+export type AdvanceCapPolicyMode = 'unlimited' | '1_month';
+
 export interface AdvanceBalanceTransaction {
   id: string;
-  type: 'overpayment_credit' | 'manual_deposit' | 'withdrawal' | 'applied_to_bill';
+  type: AdvanceTransactionType;
   amount: number;
   createdAt: string;
   note: string;
+  description?: string;
+  referenceNo?: string;
+  balanceBefore?: number;
+  balanceAfter?: number;
+  status?: AdvanceTransactionStatus;
+  billingPeriod?: string;
+  billId?: string;
+  receiptNo?: string;
+  idempotencyKey?: string;
+  category?:
+    | 'rent'
+    | 'electricity'
+    | 'carryover'
+    | 'other'
+    | 'deposit'
+    | 'refund'
+    | 'advance_credit'
+    | 'adjustment';
 }
 
 export interface Room {
@@ -122,10 +151,14 @@ export interface BillRecord {
 
   // Financial Breakdown
   baseRent: number;
+  otherCharges?: number;
+  grossCharges?: number; // baseRent + electricTotal + previousBalanceCarryOver + otherCharges
   securityDepositRequired: number;
   securityDepositApplied?: number; // Paid required deposit deducted from this bill
   securityDepositRemainingAfterBill?: number; // Remaining paid deposit carried forward to future bills
   advanceApplied?: number; // Advance balance deducted from this bill
+  advanceBalanceBefore?: number; // Wallet advance credit available before this bill
+  advanceBalanceAfter?: number; // Wallet advance credit remaining after this bill / payment
   previousBalanceCarryOver: number;
   depositApplied: number; // Total Deposit + Advance credit deducted from this bill
   totalAmountDue: number;
@@ -135,9 +168,17 @@ export interface BillRecord {
   status: 'paid' | 'partial' | 'unpaid';
   paymentMethod?: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer';
   paidAt?: string;
+  isLocked?: boolean; // Finalized/locked receipt protection against retroactive mutation
   isArchived?: boolean; // Previous receipts archived when a new receipt is issued for the room
   archivedAt?: string;
+  idempotencyKey?: string;
   notes?: string;
+  adjustmentNotes?: Array<{
+    id: string;
+    createdAt: string;
+    reason: string;
+    deltaAmount: number;
+  }>;
   paymentHistory: PaymentTransaction[];
   updatedAt: string;
 }
@@ -184,6 +225,7 @@ export interface AppSettings {
   monthlyElectricRates?: Record<string, number>; // Monthly rate overrides keyed by YYYY-MM (e.g. '2026-11': 11.84)
   defaultMonthlyRent: number;
   defaultSecurityDeposit: number;
+  advanceCapMode?: AdvanceCapPolicyMode; // 'unlimited' = Prepaid Wallet (default), '1_month' = Legacy 1-month cap
   remindersPromptShown: boolean;
   remindersEnabled: boolean;
   notificationsVerified?: boolean;

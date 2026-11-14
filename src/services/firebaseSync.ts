@@ -5,6 +5,7 @@ import {
   normalizeMonthKey,
 } from '../utils/billingCalculator';
 import { getStoredMobileAppliedMonth } from './storageService';
+import { reconcileRoomAdvanceLedger } from '../utils/financialEngine';
 
 export function normalizePropertyCode(raw: string): string {
   return (raw || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
@@ -488,7 +489,9 @@ export function mergeDatabaseSnapshots(
   return {
     version: '1.0.0',
     exportedAt: new Date().toISOString(),
-    rooms: Array.from(roomMap.values()),
+    rooms: Array.from(roomMap.values()).map((r) =>
+      r.status === 'vacant' ? r : reconcileRoomAdvanceLedger(r)
+    ),
     bills: Array.from(billMap.values()),
     inquiries: Array.from(inquiryMap.values()),
     tenantHistory: Array.from(historyMap.values()),

@@ -11,20 +11,25 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { BillRecord, Room } from '../../types/rental';
+import {
+  AdvanceCapPolicyMode,
+  BillRecord,
+  Room,
+} from '../../types/rental';
 import {
   formatPeso,
   formatPesoPrivacy,
   getCurrentCalendarPeriodLabel,
-  getRemainingAdvanceAllowance,
   getRoomMonthlyPaymentStatus,
   normalizeMonthKey,
   roundCurrency,
 } from '../../utils/billingCalculator';
+import { getAdvancePolicyAllowance } from '../../utils/financialEngine';
 
 interface AllPaymentsViewProps {
   bills: BillRecord[];
   rooms?: Room[];
+  advanceCapMode?: AdvanceCapPolicyMode;
   privacyMaskEnabled?: boolean;
   onBack: () => void;
   onSelectBillForReceipt: (bill: BillRecord) => void;
@@ -44,6 +49,7 @@ interface AllPaymentsViewProps {
 export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   bills,
   rooms = [],
+  advanceCapMode = 'unlimited',
   privacyMaskEnabled = false,
   onBack,
   onSelectBillForReceipt,
@@ -106,17 +112,23 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   const payingRoom = payingBill
     ? rooms.find((r) => r.id === payingBill.roomId)
     : undefined;
-  const remainingAdvanceAllowance = payingRoom
-    ? getRemainingAdvanceAllowance(
+  const advanceAllowanceInfo = payingRoom
+    ? getAdvancePolicyAllowance(
         payingRoom.monthlyRent,
-        payingRoom.advanceRent || 0
+        payingRoom.advanceRent || 0,
+        advanceCapMode
       )
-    : payingBill
-    ? Math.max(0, roundCurrency(payingBill.baseRent || 0))
-    : 0;
-  const maxPayableWithAdvanceCap = payingBill
-    ? roundCurrency((payingBill.remainingBalance || 0) + remainingAdvanceAllowance)
-    : 0;
+    : getAdvancePolicyAllowance(
+        payingBill?.baseRent || 0,
+        0,
+        advanceCapMode
+      );
+  const remainingAdvanceAllowance = advanceAllowanceInfo.remainingAllowance;
+  const isAdvanceCapped = advanceAllowanceInfo.isCapped;
+  const maxPayableWithAdvanceCap =
+    payingBill && isAdvanceCapped
+      ? roundCurrency((payingBill.remainingBalance || 0) + remainingAdvanceAllowance)
+      : Number.POSITIVE_INFINITY;
 
   const handleConfirmPayment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,9 +139,9 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     const excess = roundCurrency(
       Math.max(0, amt - (payingBill.remainingBalance || 0))
     );
-    if (excess > remainingAdvanceAllowance + 0.01) {
+    if (isAdvanceCapped && excess > remainingAdvanceAllowance + 0.01) {
       setPayError(
-        `Advance credit is limited to 1 month of rent. Maximum payable now: ${formatPeso(
+        `Advance credit is limited to 1 month of rent under active policy. Maximum payable now: ${formatPeso(
           maxPayableWithAdvanceCap
         )}.`
       );
@@ -585,19 +597,24 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                       </p>
                     )}
                     <p className="text-emerald-300">
-                      • Credited to Advance Balance (1-Month Max Allowance:{' '}
-                      {formatPeso(remainingAdvanceAllowance)}):{' '}
+                      • Credited to Advance Balance
+                      {isAdvanceCapped
+                        ? ` (1-Month Max Allowance: ${formatPeso(remainingAdvanceAllowance)})`
+                        : ' (Prepaid Wallet)'}
+                      :{' '}
                       <strong className="font-mono-num">
                         +{formatPeso(excessOverpayment)}
                       </strong>
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      Recorded as a tracked Advance Transaction — refundable anytime via Advance / Refund if tenant moves out.
+                      Recorded as a tracked Advance Transaction | Refundable anytime via Advance / Refund if tenant moves out.
                     </p>
                   </div>
                 ) : (
                   <p className="text-[11px] text-slate-400 mt-1.5">
-                    Credits against Remaining Balance first. Excess up to 1 month&apos;s rent advance ({formatPeso(remainingAdvanceAllowance)} remaining allowance) stores in Advance Balance.
+                    {isAdvanceCapped
+                      ? `Credits against Remaining Balance first. Excess up to 1 month's rent advance (${formatPeso(remainingAdvanceAllowance)} remaining allowance) stores in Advance Balance.`
+                      : 'Credits against Remaining Balance first. Any excess automatically rolls into Prepaid Advance Credit.'}
                   </p>
                 )}
               </div>

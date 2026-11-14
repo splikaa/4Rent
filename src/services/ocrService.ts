@@ -986,7 +986,7 @@ export async function recognizeSubMeterReading(
             reading = parsed.value;
             confidence = Math.min(82, res.confidence);
             needsVerification = true;
-            unclearReason = '7-segment layout low contrast — verify kWh';
+            unclearReason = '7-segment layout low contrast: verify kWh';
           }
         }
       }
@@ -1251,13 +1251,13 @@ export async function recognizeSubMeterReading(
           // Flag single-source tenths unless confirmed by geometric disambiguation
           if (tenthsVotes.size > 1 || (bestDecVotes < 2 && cellDecConf < 78)) {
             needsVerification = true;
-            unclearReason = unclearReason || 'Tenths drum decimal uncertain — verify last digit';
+            unclearReason = unclearReason || 'Tenths drum decimal uncertain: verify last digit';
           }
         } else if (tenthsRollover && enhDec && enhVal.conf >= 55) {
           reading = Math.round((intNum + parseInt(enhDec, 10) / 10) * 10) / 10;
           confidence = Math.min(72, enhVal.conf);
           needsVerification = true;
-          unclearReason = unclearReason || 'Tenths drum is rolling over between digits — verify kWh';
+          unclearReason = unclearReason || 'Tenths drum is rolling over between digits: verify kWh';
         } else {
           reading = intNum;
           confidence = Math.max(72, Math.round(blackIntVal.conf || 74));
@@ -1265,8 +1265,8 @@ export async function recognizeSubMeterReading(
           unclearReason =
             unclearReason ||
             (tenthsRollover
-              ? `Integer reading confirmed (${intNum} kWh); tenths drum mid-rollover — verify decimal`
-              : `Integer reading confirmed (${intNum} kWh); tenths digit unclear — verify decimal`);
+              ? `Integer reading confirmed (${intNum} kWh); tenths drum mid-rollover: verify decimal`
+              : `Integer reading confirmed (${intNum} kWh); tenths digit unclear: verify decimal`);
         }
       } else if (cellVal.value !== null && stripVal.value !== null && Math.abs(cellVal.value - stripVal.value) <= 0.15) {
         reading = cellVal.avgConf >= stripVal.conf ? cellVal.value : stripVal.value;
@@ -1279,7 +1279,7 @@ export async function recognizeSubMeterReading(
         confidence = Math.max(stripVal.conf, enhVal.conf, cellVal.avgConf, blackIntVal.conf);
         needsVerification = true;
         unclearReason =
-          unclearReason || 'Cyclometer passes did not reach integer consensus — verify kWh';
+          unclearReason || 'Cyclometer passes did not reach integer consensus: verify kWh';
       }
       rawText = vision.debugInfo;
     } else if (isOnline) {
@@ -1345,7 +1345,7 @@ export async function recognizeSubMeterReading(
       }
       if (reading !== null && confidence < 76) {
         needsVerification = true;
-        unclearReason = 'Low OCR confidence — please verify kWh value';
+        unclearReason = 'Low OCR confidence: please verify kWh value';
       }
     }
 
@@ -1387,7 +1387,7 @@ export async function recognizeSubMeterReading(
         reading !== null ? Math.max(confidence, 50) : offlineAnalysis.confidence;
       if (finalReading === null) {
         needsVerification = true;
-        unclearReason = unclearReason || 'Display unclear — enter reading manually';
+        unclearReason = unclearReason || 'Display unclear: enter reading manually';
       }
 
       const meta = detectBrandMetadata(combinedText, isCyclometer);
