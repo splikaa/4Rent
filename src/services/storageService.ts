@@ -789,6 +789,59 @@ export async function applyCloudSnapshotCleanly(
   clearPendingCloudApply();
 }
 
+/**
+ * Updates only the active cloudSync metadata block on the currently stored settings.
+ */
+export function updateStoredCloudSync(
+  cloudSync: AppSettings['cloudSync']
+): void {
+  const current = loadSettings();
+  saveSettings({
+    ...current,
+    cloudSync: {
+      ...cloudSync,
+      propertyCode: normalizePropertyCode(cloudSync.propertyCode),
+    },
+  });
+}
+
+/**
+ * Resets all workspace collections and property settings cleanly for a brand-new
+ * Property Space Code while preserving local device security (PIN/biometrics)
+ * and overwriting IndexedDB so previous space data never resurrects on reload.
+ */
+export async function resetWorkspaceForPropertyCode(
+  cloudSyncOverride: AppSettings['cloudSync']
+): Promise<void> {
+  clearPendingCloudApply();
+  saveRooms([]);
+  saveBills([]);
+  saveInquiries([]);
+  saveTenantHistory([]);
+  saveReadingLogs([]);
+
+  const localSettings = loadSettings();
+  const cleanDefaults = createDefaultSettings();
+  const normalizedCode = normalizePropertyCode(cloudSyncOverride.propertyCode);
+  const nextCloudSync: AppSettings['cloudSync'] = {
+    ...cloudSyncOverride,
+    propertyCode: normalizedCode || cleanDefaults.cloudSync.propertyCode,
+  };
+
+  saveSettings({
+    ...cleanDefaults,
+    security: localSettings.security,
+    remindersPromptShown: localSettings.remindersPromptShown,
+    cloudSync: nextCloudSync,
+  });
+
+  if (nextCloudSync.mobileCodeAppliedMonth) {
+    setStoredMobileAppliedMonth(nextCloudSync.mobileCodeAppliedMonth);
+  }
+  await flushMasterIndexedDbNow();
+  clearPendingCloudApply();
+}
+
 const SYNC_CHANNEL_NAME = '4rent_realtime_sync_channel';
 const WINDOW_INSTANCE_ID = Math.random().toString(36).slice(2, 10);
 

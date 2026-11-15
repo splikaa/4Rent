@@ -251,6 +251,7 @@ export async function pullSnapshotFromFirebase(
   config: CloudSyncConfig
 ): Promise<{
   ok: boolean;
+  notFound?: boolean;
   message: string;
   snapshot?: AppDatabaseSnapshot;
   updatedAt?: string;
@@ -282,7 +283,8 @@ export async function pullSnapshotFromFirebase(
     if (!data || !data.snapshot) {
       return {
         ok: false,
-        message: `No cloud snapshot found yet in Firebase for Property "${propCode}". Tap "Sync Now" to initialize it.`,
+        notFound: true,
+        message: `No cloud snapshot found yet in Firebase for Property "${propCode}". Tap "Apply Code & Sync Push" to initialize it.`,
       };
     }
 

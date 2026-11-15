@@ -33,22 +33,15 @@ import {
   SecurityAuditEntry,
 } from '../../types/rental';
 import {
-  clearPendingCloudApply,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   loadAuditLogs,
-  saveSettings,
-  setPendingCloudApply,
-  setStoredMobileAppliedMonth,
 } from '../../services/storageService';
 import {
   generatePropertyCode,
   getMobileCodeMonthlyLock,
   getNetworkStatus,
-  mergeDatabaseSnapshots,
   normalizePropertyCode,
-  pullSnapshotFromCloud,
-  pushSnapshotToCloud,
   FIREBASE_RULES_JSON,
 } from '../../services/firebaseSync';
 import { requestAndVerifyNotifications } from '../../services/notificationService';
@@ -64,12 +57,19 @@ import {
   normalizeMonthKey,
 } from '../../utils/billingCalculator';
 import { resolveConfiguredPropertyCode } from '../../utils/propertyCode';
+import { applyPropertyCodeAndSync } from '../../services/propertySpaceSwitch';
+
+export interface ReloadAllDataOptions {
+  switchToDashboard?: boolean;
+  title?: string;
+  message?: string;
+}
 
 interface SettingsViewProps {
   settings: AppSettings;
   onBack: () => void;
   onUpdateSettings: (newSettings: AppSettings) => void;
-  onReloadAllData: () => void;
+  onReloadAllData: (options?: ReloadAllDataOptions) => void;
   onOpenSecuritySetup: () => void;
   onInstallDesktopApp?: () => void;
   onOpenDownloadModal?: () => void;
@@ -106,6 +106,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   }, [settings]);
 
   const mobileLock = getMobileCodeMonthlyLock(form.cloudSync);
+  const committedPropertyCode = resolveConfiguredPropertyCode(
+    settings.cloudSync?.propertyCode
+  );
+  const draftPropertyCode = resolveConfiguredPropertyCode(
+    isMobile ? mobileCodeDraft : form.cloudSync?.propertyCode
+  );
+  const isPropertyCodeChanged =
+    draftPropertyCode !== committedPropertyCode &&
+    (!isMobile || !mobileLock.isLockedThisMonth);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isVerifyingNotification, setIsVerifyingNotification] = useState(false);
   const [isEnrollingBiometrics, setIsEnrollingBiometrics] = useState(false);
@@ -141,8 +150,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const auditLogs: SecurityAuditEntry[] = loadAuditLogs();
 
-  const handleSaveGeneral = (e: React.FormEvent) => {
+  const executePropertyCodeAndSync = async (
+    targetCode: string,
+    mobileInitiated = false
+  ) => {
+    const net = getNetworkStatus();
+    if (mobileInitiated) {
+      setIsApplyingMobileCode(true);
+    } else {
+      setIsSyncing(true);
+    }
+    setStatusBanner(null);
+
+    try {
+      const result = await applyPropertyCodeAndSync({
+        previousCode: committedPropertyCode,
+        targetCloudSync: {
+          ...form.cloudSync,
+          enabled: true,
+          provider: 'firebase',
+          propertyCode: targetCode,
+        },
+        isOnline: net.isOnline,
+        networkLabel: net.label,
+        isMobile,
+        mobileLock,
+      });
+
+      if (!result.ok) {
+        setStatusBanner(result.message);
+        return;
+      }
+
+      const nextSettings: AppSettings = {
+        ...form,
+        cloudSync: result.appliedCloudSync,
+      };
+
+      if (result.mode === 'switched-existing' || result.mode === 'switched-new') {
+        onReloadAllData({
+          switchToDashboard: true,
+          title:
+            result.mode === 'switched-existing'
+              ? `Property Space "${result.appliedCloudSync.propertyCode}" Loaded`
+              : `New Property Space "${result.appliedCloudSync.propertyCode}" Reset & Synced`,
+          message: result.message,
+        });
+        return;
+      }
+
+      if (result.requiresReload) {
+        onReloadAllData({
+          title: 'Cloud Database Synced',
+          message: result.message,
+        });
+      } else {
+        setForm(nextSettings);
+        onUpdateSettings(nextSettings);
+      }
+      setStatusBanner(result.message);
+    } catch {
+      setStatusBanner('Could not complete cloud sync. Current local data was kept safe.');
+    } finally {
+      if (mobileInitiated) {
+        setIsApplyingMobileCode(false);
+      } else {
+        setIsSyncing(false);
+      }
+    }
+  };
+
+  const handleSaveGeneral = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPropertyCodeChanged) {
+      await executePropertyCodeAndSync(draftPropertyCode, false);
+      return;
+    }
+
     const normalizedForm: AppSettings = {
       ...form,
       cloudSync: {
@@ -157,68 +241,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   /**
-   * Syncs data seamlessly across devices:
-   * Pulls remote snapshot, merges with local changes, saves merged state locally, and pushes to cloud.
+   * Applies any changed Property Space Code (loading existing cloud data or resetting cleanly
+   * for a brand-new code) and syncs with Firebase.
    */
   const handleSmartSync = async () => {
-    setIsSyncing(true);
-    setStatusBanner(null);
-    const normalizedForm: AppSettings = {
-      ...form,
-      cloudSync: {
-        ...form.cloudSync,
-        propertyCode: resolveConfiguredPropertyCode(form.cloudSync?.propertyCode),
-      },
-    };
-    setForm(normalizedForm);
-    onUpdateSettings(normalizedForm);
-
-    const net = getNetworkStatus();
-    if (!net.isOnline) {
-      setIsSyncing(false);
-      setStatusBanner('Device is currently Offline. Local changes are saved in IndexedDB.');
-      return;
-    }
-
-    try {
-      // 1. Pull remote
-      const pullRes = await pullSnapshotFromCloud(form.cloudSync);
-      const localSnap = exportDatabaseSnapshot();
-
-      let finalSnap = localSnap;
-      if (pullRes.ok && pullRes.snapshot) {
-        // 2. Smart Merge
-        finalSnap = mergeDatabaseSnapshots(localSnap, pullRes.snapshot);
-        importDatabaseSnapshot(finalSnap, { preserveLocalSecurity: true });
-        clearPendingCloudApply();
-        onReloadAllData();
-      }
-
-      // 3. Push merged snapshot
-      const pushRes = await pushSnapshotToCloud(form.cloudSync, finalSnap);
-      setIsSyncing(false);
-
-      if (pushRes.ok) {
-        clearPendingCloudApply();
-        const updated: AppSettings = {
-          ...form,
-          cloudSync: { ...form.cloudSync, lastSyncedAt: pushRes.syncedAt },
-        };
-        setForm(updated);
-        onUpdateSettings(updated);
-        setStatusBanner(`Synced via ${net.label} at ${new Date().toLocaleTimeString()}`);
-      } else {
-        setStatusBanner(pushRes.message || 'Data saved locally in IndexedDB.');
-      }
-    } catch {
-      setIsSyncing(false);
-      setStatusBanner('Sync completed locally.');
-    }
+    const targetCode =
+      isMobile && mobileLock.isLockedThisMonth
+        ? committedPropertyCode
+        : draftPropertyCode;
+    await executePropertyCodeAndSync(targetCode, false);
   };
 
   /**
-   * Mobile-only one-shot monthly Property Space Code application:
-   * validates network & cloud snapshot before refreshing the app and applying its data.
+   * Mobile Property Space Code application (once per month on Mobile).
+   * Loads existing cloud space or resets & initializes a brand-new space cleanly.
    */
   const handleApplyMobilePropertyCode = async () => {
     if (!isMobile) return;
@@ -231,53 +267,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     const nextCode = normalizePropertyCode(mobileCodeDraft);
     if (nextCode.length < 4) {
-      setStatusBanner('Enter a valid Property Space Code from Desktop/Web.');
+      setStatusBanner('Enter a valid Property Space Code (at least 4 characters).');
       return;
     }
 
-    const net = getNetworkStatus();
-    if (!net.isOnline) {
-      setStatusBanner('Connect to Wi-Fi or Mobile Data to apply a Property Space Code.');
-      return;
-    }
-
-    setIsApplyingMobileCode(true);
-    setStatusBanner(null);
-
-    try {
-      const candidateSync = {
-        ...form.cloudSync,
-        enabled: true,
-        provider: 'firebase' as const,
-        propertyCode: nextCode,
-      };
-      const pullRes = await pullSnapshotFromCloud(candidateSync);
-      if (!pullRes.ok || !pullRes.snapshot) {
-        setIsApplyingMobileCode(false);
-        setStatusBanner(
-          pullRes.message || `No cloud data found for "${nextCode}". Sync from Desktop/Web first.`
-        );
-        return;
-      }
-
-      const appliedAt = new Date().toISOString();
-      const updatedSettings: AppSettings = {
-        ...form,
-        cloudSync: {
-          ...candidateSync,
-          mobileCodeAppliedMonth: mobileLock.currentMonthKey,
-          mobileCodeAppliedAt: appliedAt,
-        },
-      };
-
-      setStoredMobileAppliedMonth(mobileLock.currentMonthKey);
-      setPendingCloudApply(nextCode, mobileLock.currentMonthKey);
-      saveSettings(updatedSettings);
-      window.location.reload();
-    } catch {
-      setIsApplyingMobileCode(false);
-      setStatusBanner('Could not verify Property Space Code. Your local data was kept safe.');
-    }
+    await executePropertyCodeAndSync(nextCode, true);
   };
 
   /**
@@ -352,13 +346,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const getPropertyCodeHint = (): string => {
+    if (isPropertyCodeChanged) {
+      return `Code changed (${committedPropertyCode} -> ${draftPropertyCode}). Tap "Apply Code & Sync Push" to load its cloud data, or reset the dashboard cleanly if this is a brand-new code.`;
+    }
     if (!isMobile) {
-      return 'Generate a private code on Desktop/Web, sync your data, then enter it once per month on Mobile.';
+      return 'Enter any Property Space Code and tap Apply Code & Sync Push: existing cloud codes load their saved records cleanly, while brand-new codes reset the dashboard and initialize a fresh space.';
     }
     if (mobileLock.isLockedThisMonth) {
-      return `Active code (${resolveConfiguredPropertyCode(form.cloudSync.propertyCode)}) applied for ${formatMonthKeyLabel(mobileLock.currentMonthKey, 'long')}. Code changes are limited to once per month on mobile.`;
+      return `Active code (${committedPropertyCode}) applied for ${formatMonthKeyLabel(mobileLock.currentMonthKey, 'long')}. Code changes are limited to once per month on mobile.`;
     }
-    return 'Paste the code from Desktop/Web and tap Apply Code & Refresh. Refreshes the app and loads all data inside that code (allowed once per month).';
+    return 'Enter a code from Desktop/Web or a new code and tap Apply Code & Sync Push. Existing codes load their cloud records; new codes reset this device cleanly (allowed once per month on mobile).';
   };
 
   return (
@@ -1038,8 +1035,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     />
                     <span>
                       {isApplyingMobileCode
-                        ? 'Applying & Refreshing...'
-                        : 'Apply Code & Refresh'}
+                        ? 'Applying & Syncing...'
+                        : 'Apply Code & Sync Push'}
                     </span>
                   </button>
                 )}
@@ -1113,12 +1110,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="button"
                 onClick={handleSmartSync}
                 disabled={isSyncing}
-                className="px-4 py-2 rounded-xl bg-blue-500 hover:bg-blue-400 text-white font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-blue-500/20"
+                className={`px-4 py-2 rounded-xl text-white font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shadow-lg transition ${
+                  isPropertyCodeChanged
+                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                    : 'bg-blue-500 hover:bg-blue-400 shadow-blue-500/20'
+                }`}
               >
                 <RefreshCw
                   className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`}
                 />
-                <span>Sync Now</span>
+                <span>
+                  {isSyncing
+                    ? isPropertyCodeChanged
+                      ? 'Applying & Syncing...'
+                      : 'Syncing...'
+                    : isPropertyCodeChanged
+                      ? 'Apply Code & Sync Push'
+                      : 'Sync Now'}
+                </span>
               </button>
             </div>
           </div>

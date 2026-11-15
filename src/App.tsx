@@ -34,6 +34,7 @@ import {
 import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
   getMobileCodeMonthlyLock,
+  getNetworkStatus,
   isCloudConfigured,
   mergeDatabaseSnapshots,
   normalizePropertyCode,
@@ -41,6 +42,7 @@ import {
   pushSnapshotToCloud,
   subscribeToRealtimeSync,
 } from './services/firebaseSync';
+import { applyPropertyCodeAndSync } from './services/propertySpaceSwitch';
 import {
   clampDueDayOneToTen,
   formatMonthKeyLabel,
@@ -434,6 +436,7 @@ export function App() {
                   'error'
                 );
               } else {
+                const net = getNetworkStatus();
                 const nextSync = {
                   ...currentSettings.cloudSync,
                   enabled: true,
@@ -441,55 +444,34 @@ export function App() {
                   propertyCode: syncProp,
                   ...(syncProj ? { firebaseProjectId: syncProj } : {}),
                   ...(syncDbUrl ? { firebaseDatabaseUrl: syncDbUrl } : {}),
-                  ...(mobileDevice
-                    ? {
-                        mobileCodeAppliedMonth: mobileLock.currentMonthKey,
-                        mobileCodeAppliedAt: new Date().toISOString(),
-                      }
-                    : {}),
                 };
 
-                pullSnapshotFromCloud(nextSync).then(async (res) => {
+                applyPropertyCodeAndSync({
+                  previousCode: currentSettings.cloudSync?.propertyCode || '',
+                  targetCloudSync: nextSync,
+                  isOnline: net.isOnline,
+                  networkLabel: net.label,
+                  isMobile: mobileDevice,
+                  mobileLock,
+                }).then((syncResult) => {
                   if (!mounted) return;
-                  if (res.ok && res.snapshot) {
-                    if (mobileDevice) {
-                      await applyCloudSnapshotCleanly(res.snapshot, {
-                        ...nextSync,
-                        lastSyncedAt: res.updatedAt || new Date().toISOString(),
-                      });
-                    } else {
-                      const updatedSettings: AppSettings = {
-                        ...currentSettings,
-                        cloudSync: nextSync,
-                      };
-                      saveSettings(updatedSettings);
-                      const merged = mergeDatabaseSnapshots(
-                        exportDatabaseSnapshot(),
-                        res.snapshot
-                      );
-                      importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
-                    }
+                  if (syncResult.ok) {
                     setSettings(loadSettings());
                     setRooms(loadRooms());
                     setBills(loadBills());
                     setInquiries(loadInquiries());
                     setTenantHistory(loadTenantHistory());
                     triggerFeedback(
-                      'Mobile & Desktop Synced',
-                      `Connected to Property "${syncProp}". All data updated from cloud.`,
+                      syncResult.mode === 'switched-new'
+                        ? 'New Property Space Initialized'
+                        : 'Mobile & Desktop Synced',
+                      syncResult.message,
                       'success'
                     );
-                  } else if (!mobileDevice) {
-                    const updatedSettings: AppSettings = {
-                      ...currentSettings,
-                      cloudSync: nextSync,
-                    };
-                    setSettings(updatedSettings);
-                    saveSettings(updatedSettings);
                   } else {
                     triggerFeedback(
-                      'Property Code Not Found',
-                      res.message || `No cloud data found for "${syncProp}".`,
+                      'Property Code Switch Error',
+                      syncResult.message,
                       'error'
                     );
                   }
@@ -1705,16 +1687,34 @@ export function App() {
     }
   };
 
-  const handleReloadAllData = () => {
+  const handleReloadAllData = (options?: {
+    switchToDashboard?: boolean;
+    title?: string;
+    message?: string;
+  }) => {
     try {
+      setEditingRoom(null);
+      setIsRoomModalOpen(false);
+      setSelectedRoomDetailsId(null);
+      setScannerTargetRoom(null);
+      setIsScannerOpen(false);
+      setActiveReceiptBill(null);
+      setAdvanceModalRoomId(null);
+      setPendingConfirmAction(null);
+
       setRooms(loadRooms());
       setBills(loadBills());
       setInquiries(loadInquiries());
       setTenantHistory(loadTenantHistory());
       setSettings(loadSettings());
+
+      if (options?.switchToDashboard) {
+        setActiveTab('dashboard');
+      }
+
       triggerFeedback(
-        'Database Synchronized',
-        'All rooms, sub-meter readings, and receipts have been refreshed.',
+        options?.title || 'Database Synchronized',
+        options?.message || 'All rooms, sub-meter readings, and receipts have been refreshed.',
         'success',
         'Go to Dashboard',
         () => setActiveTab('dashboard')
