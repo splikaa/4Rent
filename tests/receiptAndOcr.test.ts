@@ -27,6 +27,7 @@ function makeRoom(overrides: Partial<Room>): Room {
     lastMeterReading: 3020.7,
     status: 'occupied',
     tenant: {
+      id: 'ten-1',
       fullName: 'Yuri Santos',
       phone: '0917-555-0101',
       moveInDate: '2026-10-01',
@@ -119,6 +120,17 @@ test('Scenario G: Sharing & Messenger PDF export works when tenant name or messe
   assert.equal(meta.hasNamedTenant, false);
   assert.equal(meta.pdfFilename, '4Rent_Receipt_4R-202611-003_Room_2.pdf');
   assert.equal(meta.messengerHandle, 'room2.tenant');
+
+  // Case 4: Placeholder tenant labels and Facebook Messenger URL parity
+  const shareFromUrl = buildReceiptShareDescriptor({
+    receiptNo: '4R-202611-004',
+    roomName: 'Unit 4A',
+    tenantName: 'Current Room Tenant',
+    messengerHandle: 'https://www.messenger.com/t/unit4.tenant/',
+  });
+  assert.equal(shareFromUrl.pdfFilename, '4Rent_Receipt_4R-202611-004_Unit_4A.pdf');
+  assert.equal(shareFromUrl.messengerHandle, 'unit4.tenant');
+  assert.equal(shareFromUrl.targetMessengerUrl, 'https://m.me/unit4.tenant');
 });
 
 test('OCR Room Selection: Primary label shows Room # only, deduplicates collisions, and isolates readings', () => {
@@ -126,7 +138,7 @@ test('OCR Room Selection: Primary label shows Room # only, deduplicates collisio
   assert.equal(formatPrimaryRoomLabel({ name: '3' }), 'Room 3');
 
   const rooms: Room[] = [
-    makeRoom({ id: 'r3', name: 'Room 3', lastMeterReading: 3312.0, tenant: { fullName: 'Mikel', phone: '', moveInDate: '', dueDayOfMonth: 5 } }),
+    makeRoom({ id: 'r3', name: 'Room 3', lastMeterReading: 3312.0, tenant: { id: 'ten-3', fullName: 'Mikel', phone: '', moveInDate: '', dueDayOfMonth: 5 } }),
     makeRoom({ id: 'r1-dup-vacant', name: 'Room 1', status: 'vacant', tenant: undefined, lastMeterReading: 5520.0, updatedAt: '2026-10-10T00:00:00.000Z' }),
     makeRoom({ id: 'r1-occupied', name: 'Room 1', status: 'occupied', lastMeterReading: 3020.75, updatedAt: '2026-11-10T00:00:00.000Z' }),
     makeRoom({ id: 'r2', name: 'Room 2', status: 'vacant', tenant: undefined, lastMeterReading: 5225.0 }),
@@ -196,4 +208,108 @@ test('Em-dash check: Core UI data, PDF generator, notification service, and rece
       `Found prohibited em dash (—) in ${relPath}`
     );
   }
+});
+
+test('PrintableA4Receipt places Rate in Billing Period, includes cropped meter photos, and explains charges & deductions clearly', async () => {
+  const React = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { PrintableA4Receipt } = await import('../src/components/receipt/PrintableA4Receipt');
+
+  const bill: import('../src/types/rental').BillRecord = {
+    id: 'bill-test-unified',
+    receiptNo: '4R-202611-1',
+    roomId: 'room-1',
+    roomName: 'Room 1',
+    tenantName: 'Yuri',
+    tenantPhone: '09261234541',
+    billingPeriod: 'Nov 2026',
+    createdAt: '2026-11-14T08:00:00.000Z',
+    dueDate: '2026-12-04T00:00:00.000Z',
+    baseRent: 4500,
+    prevReading: 0,
+    currReading: 3020.7,
+    consumptionKwh: 3020.7,
+    electricRate: 11.84,
+    electricTotal: 35765.09,
+    previousBalanceCarryOver: 0,
+    grossCharges: 40265.09,
+    securityDepositRequired: 2500,
+    securityDepositApplied: 2500,
+    securityDepositRemainingAfterBill: 0,
+    advanceApplied: 25000,
+    advanceBalanceBefore: 25000,
+    advanceBalanceAfter: 0,
+    depositApplied: 27500,
+    totalAmountDue: 12765.09,
+    amountPaid: 12765.09,
+    overpaymentToAdvance: 0,
+    remainingBalance: 0,
+    status: 'paid',
+    paymentMethod: 'GCash',
+    paymentHistory: [],
+    paidAt: '2026-11-14T09:00:00.000Z',
+    updatedAt: '2026-11-14T09:00:00.000Z',
+    isLocked: true,
+  };
+
+  const settings: import('../src/types/rental').AppSettings = {
+    apartmentName: '4Rent Residences',
+    landlordName: 'Authorized Landlord',
+    landlordPhone: '09170000000',
+    landlordMessenger: '',
+    paymentInstructions: 'GCash or Cash',
+    defaultElectricRate: 11.84,
+    monthlyElectricRates: { '2026-11': 11.84 },
+    defaultMonthlyRent: 4500,
+    defaultSecurityDeposit: 2500,
+    advanceCapMode: 'unlimited',
+    remindersPromptShown: false,
+    remindersEnabled: false,
+    receiptPrintFormat: 'standard',
+    maskReceiptContacts: true,
+    security: {
+      isSetupComplete: true,
+      lockEnabled: false,
+      authMethod: 'none',
+      pinCode: '1234',
+    },
+    cloudSync: {
+      enabled: false,
+      propertyCode: '4R-TEST99',
+    },
+  };
+
+  const html = renderToStaticMarkup(
+    React.createElement(PrintableA4Receipt as any, {
+      bill,
+      settings,
+      maskContactsOnReceipt: true,
+      prevMeterProofImg: 'data:image/jpeg;base64,PREV_FULL',
+      prevMeterCropImg: 'data:image/jpeg;base64,PREV_CROP',
+      currMeterProofImg: 'data:image/jpeg;base64,CURR_FULL',
+      currMeterCropImg: 'data:image/jpeg;base64,CURR_CROP',
+      remainingAdvanceCredit: 0,
+    })
+  );
+
+  assert.ok(!html.includes('Due Date &amp; Rate') && !html.includes('Due Date & Rate'));
+  const billingIdx = html.indexOf('Billing Period');
+  const dueIdx = html.indexOf('Due Date');
+  const meterSectionIdx = html.toLowerCase().indexOf('sub-meter reading');
+  assert.ok(billingIdx >= 0 && dueIdx > billingIdx && meterSectionIdx > dueIdx);
+
+  const billingCellHtml = html.slice(billingIdx, dueIdx);
+  const dueCellHtml = html.slice(dueIdx, meterSectionIdx);
+  assert.ok(billingCellHtml.includes('Nov 2026'));
+  assert.ok(billingCellHtml.includes('11.84/kWh'));
+  assert.ok(!dueCellHtml.includes('/kWh') && !dueCellHtml.includes('Rate:'));
+
+  assert.ok(html.includes('data:image/jpeg;base64,PREV_FULL'));
+  assert.ok(html.includes('data:image/jpeg;base64,PREV_CROP'));
+  assert.ok(html.includes('data:image/jpeg;base64,CURR_FULL'));
+  assert.ok(html.includes('data:image/jpeg;base64,CURR_CROP'));
+
+  assert.ok(html.includes('Total Deductions Applied'));
+  assert.ok(html.includes('Net Total Amount Due'));
+  assert.ok(!html.includes('\u2014'));
 });

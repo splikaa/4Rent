@@ -324,37 +324,6 @@ function loadHtmlImage(imageDataUrl: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Converts any rendered receipt data URL (PNG/WebP/JPEG) into an opaque white-background
- * Baseline JPEG data URL + exact pixel dimensions for PDF /DCTDecode embedding.
- */
-export async function rasterizeToOpaqueJpeg(
-  imageDataUrl: string,
-  quality = 0.94
-): Promise<{ jpegDataUrl: string; width: number; height: number }> {
-  const img = await loadHtmlImage(imageDataUrl);
-  const width = Math.max(1, img.naturalWidth || img.width || 1200);
-  const height = Math.max(1, img.naturalHeight || img.height || 1600);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    throw new Error('2D canvas unavailable for PDF generation');
-  }
-
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(img, 0, 0, width, height);
-
-  return {
-    jpegDataUrl: canvas.toDataURL('image/jpeg', quality),
-    width,
-    height,
-  };
-}
-
-/**
  * Renders a pre-captured receipt image into a paginated standard A4 Portrait PDF
  * (`595.28 x 841.89 pt`), respecting optional section boundaries.
  */
@@ -481,15 +450,4 @@ export async function buildA4ReceiptPdfFromElement(
   );
 
   return { blob, dataUrl, pngDataUrl, pageCount };
-}
-
-/**
- * Legacy-compatible export preserved for any callers expecting `buildSinglePageReceiptPdfBlob`.
- * Upgraded to output clean standard A4 Portrait pages (`595.28 x 841.89 pt`).
- */
-export async function buildSinglePageReceiptPdfBlob(
-  receiptPngDataUrl: string
-): Promise<{ blob: Blob; dataUrl: string }> {
-  const { blob, dataUrl } = await buildA4ReceiptPdfBlob(receiptPngDataUrl);
-  return { blob, dataUrl };
 }

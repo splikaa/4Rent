@@ -49,6 +49,8 @@ import {
   SubMeterHardwareInspection,
 } from '../../services/ocrService';
 import { saveMeterMasterImage } from '../../services/idbDatabase';
+import { computeLandscapeFrameProjection } from '../../utils/cameraGeometry';
+import { peekCachedMeterImage, resolveMeterImageSrc } from '../../utils/resolveMeterImage';
 import { MeterPhotoLightboxModal } from './MeterPhotoLightboxModal';
 
 interface SubMeterScannerModalProps {
@@ -60,15 +62,7 @@ interface SubMeterScannerModalProps {
   monthlyElectricRates?: Record<string, number>;
   securityPin?: string;
   onClose: () => void;
-  onGenerateBill: (
-    newBill: BillRecord,
-    updatedRoomLastReading: number,
-    updatedRoomLastPhotoUrl: string,
-    updatedRoomUnpaidBalance: number,
-    overpaymentAddedToAdvance: number,
-    advanceDeductedFromRoom: number,
-    updatedRoomLastCropUrl?: string
-  ) => void;
+  onGenerateBill: (newBill: BillRecord) => boolean | Promise<boolean> | void;
 }
 
 export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
@@ -143,6 +137,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   // OCR, Inspection & Snapshot Camera state
   const [scanTab, setScanTab] = useState<'upload' | 'camera'>('upload');
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isLandscapeLocked, setIsLandscapeLocked] = useState(false);
   const [isRegisterLocked, setIsRegisterLocked] = useState(false);
   const [autoSnapEnabled, setAutoSnapEnabled] = useState(false);
   const [showShutterFlash, setShowShutterFlash] = useState(false);
@@ -185,6 +180,40 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   useEffect(() => {
     isOcrRunningRef.current = isOcrRunning;
   }, [isOcrRunning]);
+
+  const unlockScreenOrientation = () => {
+    try {
+      const orientation = (screen as any)?.orientation;
+      if (orientation && typeof orientation.unlock === 'function') {
+        orientation.unlock();
+      }
+    } catch {
+      // Ignore unsupported orientation API
+    }
+    setIsLandscapeLocked(false);
+  };
+
+  const toggleLandscapeOrientationLock = async () => {
+    const orientation = (screen as any)?.orientation;
+    if (isLandscapeLocked) {
+      unlockScreenOrientation();
+      return;
+    }
+    try {
+      if (orientation && typeof orientation.lock === 'function') {
+        await orientation.lock('landscape');
+        setIsLandscapeLocked(true);
+        return;
+      }
+      setOcrStatusMsg(
+        'Landscape 16:9 viewfinder crop active (rotate phone sideways if screen lock is unavailable).'
+      );
+    } catch {
+      setOcrStatusMsg(
+        'Landscape 16:9 viewfinder crop active (rotate phone sideways for horizontal view).'
+      );
+    }
+  };
 
   // 1:1 Pixel Inspection Lightbox State
   const [lightboxState, setLightboxState] = useState<{
@@ -236,14 +265,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       String(clampDueDayOneToTen(selectedRoom.tenant?.dueDayOfMonth || 5))
     );
 
-    // Previous slot has previous photo and value crop
+    // Previous slot has previous photo and value crop (resolve cached IDB references cleanly)
+    const cachedPrevSnap = peekCachedMeterImage(selectedRoom.lastMeterPhotoDataUrl);
+    const cachedPrevCrop = peekCachedMeterImage(selectedRoom.lastMeterCropDataUrl);
     setPrevMeterSnapshotUrl(
-      selectedRoom.lastMeterPhotoDataUrl ||
-        generateSimulatedSubMeterDataUrl(prev)
+      cachedPrevSnap || generateSimulatedSubMeterDataUrl(prev)
     );
     setPrevMeterCropUrl(
-      selectedRoom.lastMeterCropDataUrl ||
-        generateSimulatedValueCropDataUrl(prev)
+      cachedPrevCrop || generateSimulatedValueCropDataUrl(prev)
     );
 
     // Current slot is clean and waiting for the new month's photo/reading
@@ -297,6 +326,41 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     return () => stopCamera();
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      unlockScreenOrientation();
+      return;
+    }
+    if (!selectedRoom) return;
+    let cancelled = false;
+    const photoRef = selectedRoom.lastMeterPhotoDataUrl;
+    const cropRef = selectedRoom.lastMeterCropDataUrl;
+
+    if (photoRef && photoRef.startsWith('idb:meter:')) {
+      void resolveMeterImageSrc(photoRef).then((resolved) => {
+        if (!cancelled && resolved) {
+          setPrevMeterSnapshotUrl(resolved);
+        }
+      });
+    }
+    if (cropRef && cropRef.startsWith('idb:meter:')) {
+      void resolveMeterImageSrc(cropRef).then((resolved) => {
+        if (!cancelled && resolved) {
+          setPrevMeterCropUrl(resolved);
+        }
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    selectedRoom?.id,
+    selectedRoom?.lastMeterPhotoDataUrl,
+    selectedRoom?.lastMeterCropDataUrl,
+  ]);
+
   const attachOffscreenVideoRef = (video: HTMLVideoElement | null) => {
     videoRef.current = video;
     if (video) {
@@ -336,17 +400,18 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         return;
       }
 
-      const vw = video.videoWidth || 640;
-      const vh = video.videoHeight || 480;
+      const vw = video.videoWidth || 1280;
+      const vh = video.videoHeight || 720;
       if (vw < 32 || vh < 32) return;
 
-      // Match viewfinder aspect dynamically to the active camera orientation so mobile never crops the sides
-      const previewScale = Math.min(1, 720 / Math.max(vw, vh));
-      const targetCw = Math.max(320, Math.round(vw * previewScale));
-      const targetCh = Math.max(240, Math.round(vh * previewScale));
-      if (canvas.width !== targetCw || canvas.height !== targetCh) {
-        canvas.width = targetCw;
-        canvas.height = targetCh;
+      // Always enforce true 16:9 landscape framing (center-cropping mobile portrait streams)
+      const proj = computeLandscapeFrameProjection(vw, vh, {
+        targetAspect: 16 / 9,
+        maxEdge: 800,
+      });
+      if (canvas.width !== proj.outWidth || canvas.height !== proj.outHeight) {
+        canvas.width = proj.outWidth;
+        canvas.height = proj.outHeight;
       }
 
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -356,7 +421,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       const ch = canvas.height;
 
       try {
-        ctx.drawImage(video, 0, 0, vw, vh, 0, 0, cw, ch);
+        ctx.drawImage(
+          video,
+          proj.sx,
+          proj.sy,
+          proj.sw,
+          proj.sh,
+          0,
+          0,
+          cw,
+          ch
+        );
       } catch {
         return;
       }
@@ -495,6 +570,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     autoSnapCooldownRef.current = false;
     setIsCameraActive(false);
     setIsRegisterLocked(false);
+    unlockScreenOrientation();
   };
 
   const startCamera = async () => {
@@ -527,8 +603,18 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         {
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            aspectRatio: { ideal: 16 / 9 },
+          },
+          audio: false,
+        },
+        {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            aspectRatio: { ideal: 16 / 9 },
           },
           audio: false,
         },
@@ -552,6 +638,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       if (stream) {
         streamRef.current = stream;
         const [videoTrack] = stream.getVideoTracks();
+        if (videoTrack?.applyConstraints) {
+          try {
+            await videoTrack.applyConstraints({
+              aspectRatio: { ideal: 16 / 9 },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            });
+          } catch {
+            // Device hardware may lock portrait sensor dimensions; 16:9 crop projection still enforces landscape output.
+          }
+        }
         if (videoTrack && 'ImageCapture' in window) {
           try {
             imageCaptureRef.current = new (window as any).ImageCapture(videoTrack);
@@ -744,18 +841,31 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
    */
   const handleRolloverNextMonth = () => {
     const currVal = parseFloat(currReading) || 0;
+    const cachedFallbackPhoto = peekCachedMeterImage(selectedRoom?.lastMeterPhotoDataUrl);
+    const cachedFallbackCrop = peekCachedMeterImage(selectedRoom?.lastMeterCropDataUrl);
     const finalPhoto =
       currMeterSnapshotUrl ||
-      selectedRoom?.lastMeterPhotoDataUrl ||
+      cachedFallbackPhoto ||
       generateSimulatedSubMeterDataUrl(currVal);
     const finalCrop =
       currMeterCropUrl ||
-      selectedRoom?.lastMeterCropDataUrl ||
+      cachedFallbackCrop ||
       generateSimulatedValueCropDataUrl(currVal);
 
     setPrevReading(String(currVal));
     setPrevMeterSnapshotUrl(finalPhoto);
     setPrevMeterCropUrl(finalCrop);
+
+    if (!currMeterSnapshotUrl && selectedRoom?.lastMeterPhotoDataUrl?.startsWith('idb:meter:')) {
+      void resolveMeterImageSrc(selectedRoom.lastMeterPhotoDataUrl).then((resolved) => {
+        if (resolved) setPrevMeterSnapshotUrl(resolved);
+      });
+    }
+    if (!currMeterCropUrl && selectedRoom?.lastMeterCropDataUrl?.startsWith('idb:meter:')) {
+      void resolveMeterImageSrc(selectedRoom.lastMeterCropDataUrl).then((resolved) => {
+        if (resolved) setPrevMeterCropUrl(resolved);
+      });
+    }
 
     // Prepare Current for new consumption
     setCurrReading(String(currVal));
@@ -778,6 +888,56 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       reader.readAsDataURL(blob);
     });
 
+  const normalizeCapturedDataUrlToLandscape = (rawDataUrl: string): Promise<string> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) {
+          resolve(rawDataUrl);
+          return;
+        }
+        const proj = computeLandscapeFrameProjection(w, h, {
+          targetAspect: 16 / 9,
+          maxEdge: 1920,
+        });
+        if (
+          w > h &&
+          Math.abs(w / h - 16 / 9) <= 0.08 &&
+          proj.outWidth === w &&
+          proj.outHeight === h
+        ) {
+          resolve(rawDataUrl);
+          return;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = proj.outWidth;
+        canvas.height = proj.outHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(rawDataUrl);
+          return;
+        }
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(
+          img,
+          proj.sx,
+          proj.sy,
+          proj.sw,
+          proj.sh,
+          0,
+          0,
+          proj.outWidth,
+          proj.outHeight
+        );
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
+      };
+      img.onerror = () => resolve(rawDataUrl);
+      img.src = rawDataUrl;
+    });
+
   const captureHighResSnapshotAndScan = async (keepCameraOpen = true) => {
     if (isOcrRunningRef.current) return;
 
@@ -796,25 +956,40 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
             window.setTimeout(() => reject(new Error('takePhoto timeout')), 1600)
           ),
         ]);
-        capturedDataUrl = await readBlobAsDataUrl(photoBlob);
+        const rawPhoto = await readBlobAsDataUrl(photoBlob);
+        capturedDataUrl = await normalizeCapturedDataUrlToLandscape(rawPhoto);
       } catch {
         capturedDataUrl = null;
       }
     }
 
-    // 2. Fallback to full-resolution offscreen camera frame capture
+    // 2. Fallback to full-resolution offscreen camera frame capture (projected to 16:9 landscape)
     if (!capturedDataUrl && videoRef.current && videoRef.current.readyState >= 2) {
       const video = videoRef.current;
       const width = video.videoWidth || 1280;
       const height = video.videoHeight || 720;
+      const proj = computeLandscapeFrameProjection(width, height, {
+        targetAspect: 16 / 9,
+        maxEdge: 1920,
+      });
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = proj.outWidth;
+      canvas.height = proj.outHeight;
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(video, 0, 0, width, height);
+        ctx.drawImage(
+          video,
+          proj.sx,
+          proj.sy,
+          proj.sw,
+          proj.sh,
+          0,
+          0,
+          proj.outWidth,
+          proj.outHeight
+        );
         capturedDataUrl = canvas.toDataURL('image/jpeg', 0.96);
       }
     }
@@ -920,154 +1095,152 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     }
   );
 
-  const handleConfirmGenerateBill = (e: React.FormEvent) => {
+  const handleConfirmGenerateBill = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!subMeterCheck.isValid || isSubmittingBillRef.current) return;
     isSubmittingBillRef.current = true;
 
-    const nowIso = new Date().toISOString();
-    const totalDue = billBreakdown.totalAmountDue;
-    const remainingAdvAfterDeduction = fromCentavos(
-      Math.max(0, toCentavos(availableAdvance) - toCentavos(advUsedNum))
-    );
-    const allowance = getAdvancePolicyAllowance(
-      selectedRoom.monthlyRent,
-      remainingAdvAfterDeduction,
-      advanceCapMode
-    );
-    const maxPayableWithPolicy = allowance.isCapped
-      ? roundCurrency(totalDue + allowance.remainingAllowance)
-      : Number.POSITIVE_INFINITY;
-
-    let paidAmount = 0;
-    if (initialPayStatus === 'paid') {
-      const customEntered = parseFloat(initialAmountPaid) || 0;
-      const requestedPaid = customEntered >= totalDue ? customEntered : totalDue;
-      paidAmount = Math.min(requestedPaid, maxPayableWithPolicy);
-    } else if (initialPayStatus === 'partial') {
-      paidAmount = Math.min(
-        Math.max(0, parseFloat(initialAmountPaid) || 0),
-        maxPayableWithPolicy
+    try {
+      const nowIso = new Date().toISOString();
+      const totalDue = billBreakdown.totalAmountDue;
+      const remainingAdvAfterDeduction = fromCentavos(
+        Math.max(0, toCentavos(availableAdvance) - toCentavos(advUsedNum))
       );
+      const allowance = getAdvancePolicyAllowance(
+        selectedRoom.monthlyRent,
+        remainingAdvAfterDeduction,
+        advanceCapMode
+      );
+      const maxPayableWithPolicy = allowance.isCapped
+        ? roundCurrency(totalDue + allowance.remainingAllowance)
+        : Number.POSITIVE_INFINITY;
+
+      let paidAmount = 0;
+      if (initialPayStatus === 'paid') {
+        const customEntered = parseFloat(initialAmountPaid) || 0;
+        const requestedPaid = customEntered >= totalDue ? customEntered : totalDue;
+        paidAmount = Math.min(requestedPaid, maxPayableWithPolicy);
+      } else if (initialPayStatus === 'partial') {
+        paidAmount = Math.min(
+          Math.max(0, parseFloat(initialAmountPaid) || 0),
+          maxPayableWithPolicy
+        );
+      }
+
+      const overpaymentAddedToAdvance =
+        toCentavos(paidAmount) > toCentavos(totalDue)
+          ? fromCentavos(toCentavos(paidAmount) - toCentavos(totalDue))
+          : 0;
+
+      const remainingBalance = Math.max(
+        0,
+        fromCentavos(toCentavos(totalDue) - toCentavos(paidAmount))
+      );
+      const finalStatus: 'paid' | 'partial' | 'unpaid' =
+        toCentavos(remainingBalance) === 0
+          ? 'paid'
+          : toCentavos(paidAmount) > 0
+            ? 'partial'
+            : 'unpaid';
+
+      const receiptCode = `4R-${new Date()
+        .toISOString()
+        .slice(0, 7)
+        .replace('-', '')}-${selectedRoom.name.replace(/\D/g, '') || '101'}`;
+
+      const finalPrevPhoto =
+        prevMeterSnapshotUrl || generateSimulatedSubMeterDataUrl(prevNum);
+      const finalCurrPhoto =
+        currMeterSnapshotUrl || generateSimulatedSubMeterDataUrl(currNum);
+      const finalPrevCrop =
+        prevMeterCropUrl || generateSimulatedValueCropDataUrl(prevNum);
+      const finalCurrCrop =
+        currMeterCropUrl || generateSimulatedValueCropDataUrl(currNum);
+
+      const billId = `bill-${Date.now()}`;
+      if (finalPrevPhoto) {
+        saveMeterMasterImage(`${billId}_prev`, finalPrevPhoto).catch(() => {});
+      }
+      if (finalCurrPhoto) {
+        saveMeterMasterImage(`${billId}_curr`, finalCurrPhoto).catch(() => {});
+      }
+
+      const newBill: BillRecord = {
+        id: billId,
+        receiptNo: receiptCode,
+        roomId: selectedRoom.id,
+        roomName: selectedRoom.name,
+        tenantName: selectedRoom.tenant?.fullName || 'Current Room Tenant',
+        tenantPhone: selectedRoom.tenant?.phone,
+        tenantMessenger: selectedRoom.tenant?.messengerUsername,
+        billingPeriod,
+        createdAt: nowIso,
+        dueDate: new Date(computedDueDateIso).toISOString(),
+        paymentWindowLabel: `Every 1st to 10th of the Month (Day ${safeDueDay})`,
+        prevReading: prevNum,
+        currReading: currNum,
+        consumptionKwh: billBreakdown.consumptionKwh,
+        electricRate: rateNum,
+        electricTotal: billBreakdown.electricTotal,
+        prevMeterPhotoDataUrl: finalPrevPhoto,
+        meterPhotoDataUrl: finalCurrPhoto,
+        prevMeterCropDataUrl: finalPrevCrop,
+        currMeterCropDataUrl: finalCurrCrop,
+        ocrConfidence: ocrConfidence ?? undefined,
+        baseRent: rentNum,
+        grossCharges: billBreakdown.grossTotal,
+        securityDepositRequired: selectedRoom.securityDeposit || rentNum,
+        securityDepositApplied: reqDepUsedNum,
+        securityDepositRemainingAfterBill: remainingDepositAfterBill,
+        advanceApplied: advUsedNum,
+        previousBalanceCarryOver: carryNum,
+        depositApplied: depNum,
+        totalAmountDue: totalDue,
+        amountPaid: paidAmount,
+        overpaymentToAdvance: overpaymentAddedToAdvance,
+        remainingBalance,
+        status: finalStatus,
+        idempotencyKey: billSessionKey || billId,
+        paymentMethod: paidAmount > 0 ? paymentMethod : undefined,
+        paidAt: finalStatus === 'paid' ? nowIso : undefined,
+        paymentHistory:
+          paidAmount > 0
+            ? [
+                {
+                  id: `tx-${Date.now()}`,
+                  amount: paidAmount,
+                  overpaymentCredited:
+                    overpaymentAddedToAdvance > 0
+                      ? overpaymentAddedToAdvance
+                      : undefined,
+                  method: paymentMethod,
+                  paidAt: nowIso,
+                  note:
+                    overpaymentAddedToAdvance > 0
+                      ? `Paid ${formatPeso(paidAmount)} (Excess ${formatPeso(
+                          overpaymentAddedToAdvance
+                        )} credited to Advance)`
+                      : finalStatus === 'paid'
+                      ? 'Full payment upon billing'
+                      : 'Initial partial payment',
+                },
+              ]
+            : [],
+        notes: isRolloverActive
+          ? isReset
+            ? `[Meter Reset Baseline Verified] Current reading ${formatKwhReading(currNum)} kWh recorded after sub-meter replacement/zero-reset. Delta: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh.`
+            : `[Dial Rollover Verified] Meter mechanical rollover processed (${dialDigits}-digit dial capacity). Previous: ${formatKwhReading(prevNum)} kWh, Current: ${formatKwhReading(currNum)} kWh, Delta: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh.`
+          : undefined,
+        updatedAt: nowIso,
+      };
+
+      const generated = await onGenerateBill(newBill);
+      if (generated !== false) {
+        onClose();
+      }
+    } finally {
+      isSubmittingBillRef.current = false;
     }
-
-    const overpaymentAddedToAdvance =
-      toCentavos(paidAmount) > toCentavos(totalDue)
-        ? fromCentavos(toCentavos(paidAmount) - toCentavos(totalDue))
-        : 0;
-
-    const remainingBalance = Math.max(
-      0,
-      Math.round((totalDue - paidAmount) * 100) / 100
-    );
-    const finalStatus: 'paid' | 'partial' | 'unpaid' =
-      remainingBalance <= 0.009
-        ? 'paid'
-        : paidAmount > 0
-        ? 'partial'
-        : 'unpaid';
-
-    const receiptCode = `4R-${new Date()
-      .toISOString()
-      .slice(0, 7)
-      .replace('-', '')}-${selectedRoom.name.replace(/\D/g, '') || '101'}`;
-
-    const finalPrevPhoto =
-      prevMeterSnapshotUrl || generateSimulatedSubMeterDataUrl(prevNum);
-    const finalCurrPhoto =
-      currMeterSnapshotUrl || generateSimulatedSubMeterDataUrl(currNum);
-    const finalPrevCrop =
-      prevMeterCropUrl || generateSimulatedValueCropDataUrl(prevNum);
-    const finalCurrCrop =
-      currMeterCropUrl || generateSimulatedValueCropDataUrl(currNum);
-
-    const billId = `bill-${Date.now()}`;
-    if (finalPrevPhoto) {
-      saveMeterMasterImage(`${billId}_prev`, finalPrevPhoto).catch(() => {});
-    }
-    if (finalCurrPhoto) {
-      saveMeterMasterImage(`${billId}_curr`, finalCurrPhoto).catch(() => {});
-    }
-
-    const newBill: BillRecord = {
-      id: billId,
-      receiptNo: receiptCode,
-      roomId: selectedRoom.id,
-      roomName: selectedRoom.name,
-      tenantName: selectedRoom.tenant?.fullName || 'Current Room Tenant',
-      tenantPhone: selectedRoom.tenant?.phone,
-      tenantMessenger: selectedRoom.tenant?.messengerUsername,
-      billingPeriod,
-      createdAt: nowIso,
-      dueDate: new Date(computedDueDateIso).toISOString(),
-      paymentWindowLabel: `Every 1st to 10th of the Month (Day ${safeDueDay})`,
-      prevReading: prevNum,
-      currReading: currNum,
-      consumptionKwh: billBreakdown.consumptionKwh,
-      electricRate: rateNum,
-      electricTotal: billBreakdown.electricTotal,
-      prevMeterPhotoDataUrl: finalPrevPhoto,
-      meterPhotoDataUrl: finalCurrPhoto,
-      prevMeterCropDataUrl: finalPrevCrop,
-      currMeterCropDataUrl: finalCurrCrop,
-      ocrConfidence: ocrConfidence ?? undefined,
-      baseRent: rentNum,
-      grossCharges: billBreakdown.grossTotal,
-      securityDepositRequired: selectedRoom.securityDeposit || rentNum,
-      securityDepositApplied: reqDepUsedNum,
-      securityDepositRemainingAfterBill: remainingDepositAfterBill,
-      advanceApplied: advUsedNum,
-      previousBalanceCarryOver: carryNum,
-      depositApplied: depNum,
-      totalAmountDue: totalDue,
-      amountPaid: paidAmount,
-      overpaymentToAdvance: overpaymentAddedToAdvance,
-      remainingBalance,
-      status: finalStatus,
-      idempotencyKey: billSessionKey || billId,
-      paymentMethod: paidAmount > 0 ? paymentMethod : undefined,
-      paidAt: finalStatus === 'paid' ? nowIso : undefined,
-      paymentHistory:
-        paidAmount > 0
-          ? [
-              {
-                id: `tx-${Date.now()}`,
-                amount: paidAmount,
-                overpaymentCredited:
-                  overpaymentAddedToAdvance > 0
-                    ? overpaymentAddedToAdvance
-                    : undefined,
-                method: paymentMethod,
-                paidAt: nowIso,
-                note:
-                  overpaymentAddedToAdvance > 0
-                    ? `Paid ${formatPeso(paidAmount)} (Excess ${formatPeso(
-                        overpaymentAddedToAdvance
-                      )} credited to Advance)`
-                    : finalStatus === 'paid'
-                    ? 'Full payment upon billing'
-                    : 'Initial partial payment',
-              },
-            ]
-          : [],
-      notes: isRolloverActive
-        ? isReset
-          ? `[Meter Reset Baseline Verified] Current reading ${currNum.toFixed(1)} kWh recorded after sub-meter replacement/zero-reset. Delta: ${billBreakdown.consumptionKwh.toFixed(1)} kWh.`
-          : `[Dial Rollover Verified] Meter mechanical rollover processed (${dialDigits}-digit dial capacity). Previous: ${prevNum.toFixed(1)} kWh, Current: ${currNum.toFixed(1)} kWh, Delta: ${billBreakdown.consumptionKwh.toFixed(1)} kWh.`
-        : undefined,
-      updatedAt: nowIso,
-    };
-
-    onGenerateBill(
-      newBill,
-      currNum,
-      finalCurrPhoto,
-      remainingBalance,
-      overpaymentAddedToAdvance,
-      advUsedNum,
-      finalCurrCrop
-    );
-    onClose();
   };
 
   return (
@@ -1429,14 +1602,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 {isMobileApp && scanTab === 'camera' ? (
                   isCameraActive ? (
                     <div className="relative w-full space-y-2.5">
-                      {/* Steady 2D Canvas Snapshot Viewfinder (no <video> layer in modal = zero flicker) */}
-                      <div className="relative w-full h-52 sm:h-60 bg-black rounded-xl overflow-hidden border border-amber-500/40">
+                      {/* Steady 16:9 Landscape Canvas Snapshot Viewfinder (no <video> layer in modal = zero flicker) */}
+                      <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-amber-500/40">
                         <canvas
                           ref={viewfinderCanvasRef}
-                          width={640}
-                          height={480}
-                          className="w-full h-full object-contain block"
+                          width={800}
+                          height={450}
+                          className="w-full h-full object-cover block"
                         />
+                        <div className="absolute top-2 left-2 z-10 pointer-events-none px-2 py-0.5 rounded-md bg-slate-950/85 border border-amber-500/40 text-[9px] font-extrabold uppercase tracking-wider text-amber-300">
+                          Landscape 16:9
+                        </div>
 
                         {/* Brief Still-Capture Shutter Cue */}
                         {showShutterFlash && (
@@ -1533,7 +1709,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                           )}
                         </button>
 
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           <button
                             type="button"
                             onClick={() => setAutoSnapEnabled((prev) => !prev)}
@@ -1545,6 +1721,20 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                             title="Automatically take a snapshot once sub-meter locks steady"
                           >
                             Auto-Snap: {autoSnapEnabled ? 'ON' : 'OFF'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => void toggleLandscapeOrientationLock()}
+                            className={`py-2 px-2 rounded-xl border text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition whitespace-nowrap ${
+                              isLandscapeLocked
+                                ? 'bg-amber-500/15 border-amber-500/50 text-amber-300'
+                                : 'bg-[#141A25] border-[#28364F] text-slate-300 hover:text-white'
+                            }`}
+                            title="Rotate screen to landscape mode on supported mobile devices"
+                          >
+                            <RotateCw className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>{isLandscapeLocked ? 'Unlock View' : 'Landscape'}</span>
                           </button>
 
                           <button
@@ -2008,7 +2198,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
                     <div>
                       <p className="font-bold text-amber-300">
-                        Current reading ({currNum.toFixed(1)} kWh) is lower than previous ({prevNum.toFixed(1)} kWh).
+                        Current reading ({formatKwhReading(currNum)} kWh) is lower than previous ({formatKwhReading(prevNum)} kWh).
                       </p>
                       <p className="text-slate-300 mt-0.5">
                         Enable rollover if meter completed its dial cycle or was replaced/reset.
@@ -2091,7 +2281,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   )}
 
                   <div className="text-[11px] text-emerald-300/90 bg-emerald-950/40 rounded-lg p-2 font-mono-num">
-                    Calculated Delta: <strong className="text-emerald-200">{billBreakdown.consumptionKwh.toFixed(1)} kWh</strong>
+                    Calculated Delta: <strong className="text-emerald-200">{formatKwhReading(billBreakdown.consumptionKwh)} kWh</strong>
                   </div>
                 </div>
               )}
@@ -2113,7 +2303,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   Receipt Breakdown
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-mono-num font-bold text-xs">
-                  Δ {billBreakdown.consumptionKwh.toFixed(1)} kWh
+                  Δ {formatKwhReading(billBreakdown.consumptionKwh)} kWh
                 </span>
               </div>
 
@@ -2121,19 +2311,19 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 <div className="flex justify-between text-slate-400">
                   <span>Current Reading</span>
                   <span className="font-mono-num font-bold text-white">
-                    {currNum.toFixed(1)} kWh
+                    {formatKwhReading(currNum)} kWh
                   </span>
                 </div>
                 <div className="flex justify-between text-slate-400">
                   <span>Less Previous Reading</span>
                   <span className="font-mono-num font-bold text-slate-300">
-                    - {prevNum.toFixed(1)} kWh
+                    - {formatKwhReading(prevNum)} kWh
                   </span>
                 </div>
                 <div className="pt-1.5 border-t border-[#263248] flex justify-between text-amber-400 font-bold">
                   <span>Consumption × Rate</span>
                   <span className="font-mono-num">
-                    {billBreakdown.consumptionKwh.toFixed(1)} kWh × {formatPeso(rateNum)}
+                    {formatKwhReading(billBreakdown.consumptionKwh)} kWh × {formatPeso(rateNum)}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm font-extrabold text-white pt-0.5">
@@ -2204,10 +2394,98 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
               </div>
 
+              <div className="rounded-2xl bg-[#111724] border border-[#263248] p-3.5 space-y-2.5 text-xs">
+                <div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-300 mb-1.5">
+                    1. Charges Breakdown (What Is Billed)
+                  </div>
+                  <div className="space-y-1 text-slate-300">
+                    <div className="flex justify-between">
+                      <span>Monthly Base Rent</span>
+                      <span className="font-mono-num font-bold text-white">
+                        {formatPeso(Math.max(0, rentNum))}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>
+                        Electricity ({formatKwhReading(billBreakdown.consumptionKwh)} kWh x {formatPeso(rateNum)}/kWh)
+                      </span>
+                      <span className="font-mono-num font-bold text-white">
+                        {formatPeso(billBreakdown.electricTotal)}
+                      </span>
+                    </div>
+                    {carryNum > 0 && (
+                      <div className="flex justify-between text-red-300">
+                        <span>Previous Unpaid Balance Carry-Over</span>
+                        <span className="font-mono-num font-bold">
+                          +{formatPeso(carryNum)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="pt-1 border-t border-[#263248] flex justify-between font-extrabold text-white">
+                      <span>Total Monthly Charges (Gross)</span>
+                      <span className="font-mono-num">{formatPeso(grossBeforeCredit)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-[#1E293D]">
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 mb-1.5">
+                    2. Credits &amp; Deductions Applied (What Reduces This Bill)
+                  </div>
+                  <div className="space-y-1 text-slate-300">
+                    <div className="flex justify-between gap-2">
+                      <div>
+                        <span>Required Security Deposit Deducted</span>
+                        <p className="text-[10px] text-slate-400">
+                          {availablePaidDeposit > 0
+                            ? `From ${formatPeso(availablePaidDeposit)} paid deposit (${formatPeso(remainingDepositAfterBill)} left after this bill)`
+                            : 'No paid security deposit balance on account'}
+                        </p>
+                      </div>
+                      <span className="font-mono-num font-bold text-emerald-300 shrink-0">
+                        -{formatPeso(reqDepUsedNum)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <div>
+                        <span>Advance Rent Credit Applied</span>
+                        <p className="text-[10px] text-slate-400">
+                          {availableAdvance > 0
+                            ? `From ${formatPeso(availableAdvance)} advance credit (${formatPeso(Math.max(0, roundCurrency(availableAdvance - advUsedNum)))} left after this bill)`
+                            : 'No advance payment credit on account'}
+                        </p>
+                      </div>
+                      <span className="font-mono-num font-bold text-emerald-300 shrink-0">
+                        -{formatPeso(advUsedNum)}
+                      </span>
+                    </div>
+                    <div className="pt-1 border-t border-[#263248] flex justify-between font-extrabold text-emerald-300">
+                      <span>Total Deductions Applied</span>
+                      <span className="font-mono-num">-{formatPeso(depNum)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-[#1E293D] text-[11px] text-slate-300">
+                  <div className="flex items-center justify-between gap-2 font-semibold">
+                    <span>Net Calculation:</span>
+                    <span className="font-mono-num text-white">
+                      {formatPeso(grossBeforeCredit)} - {formatPeso(depNum)} = {formatPeso(billBreakdown.totalAmountDue)}
+                    </span>
+                  </div>
+                  {depNum > 0 && billBreakdown.totalAmountDue === 0 && (
+                    <p className="text-[10px] text-emerald-300 mt-0.5">
+                      Credits cover 100% of this month&apos;s charges. Zero cash payment is needed.
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <div className="rounded-2xl bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-transparent border border-amber-500/40 p-3.5 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 block">
-                    Total Amount Due
+                    Net Total Amount Due
                   </span>
                   <span className="text-[11px] text-slate-400">
                     Due: Day {safeDueDay} ({computedDueDateLabel})

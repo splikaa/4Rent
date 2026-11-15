@@ -101,7 +101,7 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
+        settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
@@ -479,6 +479,11 @@ public class MainActivity extends Activity {
                             startActivity(chooser);
                         } catch (Exception e) {
                             Log.e("4Rent", "PDF receipt share failed", e);
+                            android.widget.Toast.makeText(
+                                    MainActivity.this,
+                                    "Unable to open share sheet for PDF receipt.",
+                                    android.widget.Toast.LENGTH_SHORT
+                            ).show();
                         }
                     }
                 });
@@ -513,16 +518,31 @@ public class MainActivity extends Activity {
 
                     Uri itemUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
                     if (itemUri != null) {
+                        boolean wroteOk = false;
                         try (OutputStream out = getContentResolver().openOutputStream(itemUri)) {
                             if (out != null) {
                                 out.write(pdfBytes);
                                 out.flush();
+                                wroteOk = true;
                             }
+                        } catch (Exception writeErr) {
+                            try {
+                                getContentResolver().delete(itemUri, null, null);
+                            } catch (Exception ignored) {
+                            }
+                            throw writeErr;
                         }
-                        values.clear();
-                        values.put(MediaStore.Downloads.IS_PENDING, 0);
-                        getContentResolver().update(itemUri, values, null, null);
-                        return true;
+                        if (!wroteOk) {
+                            try {
+                                getContentResolver().delete(itemUri, null, null);
+                            } catch (Exception ignored) {
+                            }
+                        } else {
+                            values.clear();
+                            values.put(MediaStore.Downloads.IS_PENDING, 0);
+                            getContentResolver().update(itemUri, values, null, null);
+                            return true;
+                        }
                     }
                 }
                 return sharePdfReceipt(pdfBase64, safeName, "", false);
@@ -923,6 +943,17 @@ public class MainActivity extends Activity {
                 File dir = new File(ctx.getCacheDir(), SUBDIR);
                 if (!dir.exists()) {
                     dir.mkdirs();
+                } else {
+                    File[] existing = dir.listFiles();
+                    if (existing != null) {
+                        long cutoffMs = System.currentTimeMillis() - 60L * 60L * 1000L;
+                        for (File oldFile : existing) {
+                            if (oldFile.isFile() && oldFile.lastModified() < cutoffMs) {
+                                //noinspection ResultOfMethodCallIgnored
+                                oldFile.delete();
+                            }
+                        }
+                    }
                 }
                 File outFile = new File(dir, safeName);
                 try (FileOutputStream fos = new FileOutputStream(outFile)) {

@@ -878,18 +878,34 @@ export function executeAdvanceDepositTransaction(
   }
 
   const nowIso = input.nowIso || new Date().toISOString();
-  const targetActiveBill = activeBills.find(
-    (b) =>
-      (room.activeReceiptId && b.id === room.activeReceiptId && !b.isArchived && b.remainingBalance > 0) ||
-      (b.roomId === room.id && !b.isArchived && b.remainingBalance > 0)
-  );
+  const baseTimeMs = Number.isNaN(new Date(nowIso).getTime())
+    ? Date.now()
+    : new Date(nowIso).getTime();
 
-  const unpaidCents = Math.max(
-    0,
-    targetActiveBill
-      ? toCentavos(targetActiveBill.remainingBalance)
-      : toCentavos(room.unpaidBalance)
+  const activeUnpaidBills = activeBills
+    .filter(
+      (b) =>
+        b.roomId === room.id &&
+        !b.isArchived &&
+        toCentavos(b.remainingBalance) > 0
+    )
+    .sort((a, b) =>
+      a.id === room.activeReceiptId
+        ? -1
+        : b.id === room.activeReceiptId
+          ? 1
+          : 0
+    );
+
+  const totalBillUnpaidCents = activeUnpaidBills.reduce(
+    (sum, b) => sum + toCentavos(b.remainingBalance),
+    0
   );
+  const unpaidCents =
+    activeUnpaidBills.length > 0
+      ? totalBillUnpaidCents
+      : Math.max(0, toCentavos(room.unpaidBalance));
+
   const autoAppliedCents = Math.min(depositCents, unpaidCents);
   const netIncreaseToWalletCents = depositCents - autoAppliedCents;
 
@@ -938,68 +954,104 @@ export function executeAdvanceDepositTransaction(
   let updatedBills = activeBills;
 
   if (autoAppliedCents > 0) {
-    const applyTimestamp = new Date(new Date(nowIso).getTime() + 1).toISOString();
-    const appliedEntry: AdvanceBalanceTransaction = {
-      id: createUniqueId('adv-apply'),
-      type: 'applied_to_bill',
-      category: 'rent',
-      amount: fromCentavos(autoAppliedCents),
-      createdAt: applyTimestamp,
-      description: targetActiveBill
-        ? `${targetActiveBill.billingPeriod} Bill Settlement (Auto-Applied)`
-        : 'Applied to Outstanding Room Balance',
-      note: targetActiveBill
-        ? `Auto-applied toward Receipt #${targetActiveBill.receiptNo}`
-        : 'Automatically applied toward active unpaid balance',
-      referenceNo: generateFinancialRefNo('BILL', nowIso, targetActiveBill?.receiptNo.slice(-4)),
-      balanceBefore: fromCentavos(afterDepositCents),
-      balanceAfter: fromCentavos(finalWalletCents),
-      status: 'completed',
-      billingPeriod: targetActiveBill?.billingPeriod || billingPeriod,
-      billId: targetActiveBill?.id,
-      receiptNo: targetActiveBill?.receiptNo,
-      idempotencyKey: idempotencyKey ? `${idempotencyKey}:autoapply` : undefined,
-    };
-    newEntriesNewestFirst.unshift(appliedEntry);
+    if (activeUnpaidBills.length > 0) {
+      let remainingAutoApplyCents = autoAppliedCents;
+      let walletCursorCents = afterDepositCents;
+      const billUpdatesById = new Map<string, BillRecord>();
+      let applySeq = 0;
 
-    if (targetActiveBill) {
-      updatedBills = activeBills.map((b) => {
-        if (b.id !== targetActiveBill.id) return b;
+      for (const targetBill of activeUnpaidBills) {
+        if (remainingAutoApplyCents <= 0) break;
+        const billRemCents = Math.max(0, toCentavos(targetBill.remainingBalance));
+        const deductCents = Math.min(remainingAutoApplyCents, billRemCents);
+        if (deductCents <= 0) continue;
+
+        remainingAutoApplyCents -= deductCents;
+        const beforeBillApplyCents = walletCursorCents;
+        walletCursorCents = Math.max(0, walletCursorCents - deductCents);
+
+        const applyTimestamp = new Date(baseTimeMs + 1 + applySeq).toISOString();
+        const appliedEntry: AdvanceBalanceTransaction = {
+          id: createUniqueId('adv-apply'),
+          type: 'applied_to_bill',
+          category: 'rent',
+          amount: fromCentavos(deductCents),
+          createdAt: applyTimestamp,
+          description: `${targetBill.billingPeriod} Bill Settlement (Auto-Applied)`,
+          note: `Auto-applied toward Receipt #${targetBill.receiptNo}`,
+          referenceNo: generateFinancialRefNo('BILL', nowIso, targetBill.receiptNo.slice(-4)),
+          balanceBefore: fromCentavos(beforeBillApplyCents),
+          balanceAfter: fromCentavos(walletCursorCents),
+          status: 'completed',
+          billingPeriod: targetBill.billingPeriod || billingPeriod,
+          billId: targetBill.id,
+          receiptNo: targetBill.receiptNo,
+          idempotencyKey: idempotencyKey
+            ? applySeq === 0
+              ? `${idempotencyKey}:autoapply`
+              : `${idempotencyKey}:autoapply:${applySeq}`
+            : undefined,
+        };
+        newEntriesNewestFirst.unshift(appliedEntry);
+        applySeq += 1;
+
         const nextAdvApplied = fromCentavos(
-          toCentavos(b.advanceApplied) + autoAppliedCents
+          toCentavos(targetBill.advanceApplied) + deductCents
         );
         const nextDepApplied = fromCentavos(
           Math.max(
-            toCentavos(b.securityDepositApplied) + toCentavos(nextAdvApplied),
-            toCentavos(b.depositApplied) + autoAppliedCents
+            toCentavos(targetBill.securityDepositApplied) + toCentavos(nextAdvApplied),
+            toCentavos(targetBill.depositApplied) + deductCents
           )
         );
         const nextTotalDue = fromCentavos(
-          Math.max(0, toCentavos(b.totalAmountDue) - autoAppliedCents)
+          Math.max(0, toCentavos(targetBill.totalAmountDue) - deductCents)
         );
         const nextRemaining = fromCentavos(
-          Math.max(0, toCentavos(b.remainingBalance) - autoAppliedCents)
+          Math.max(0, billRemCents - deductCents)
         );
         const nextStatus: BillRecord['status'] =
           nextRemaining <= 0
             ? 'paid'
-            : b.amountPaid > 0 || nextDepApplied > 0
+            : targetBill.amountPaid > 0 || nextDepApplied > 0
               ? 'partial'
               : 'unpaid';
 
-        return {
-          ...b,
+        billUpdatesById.set(targetBill.id, {
+          ...targetBill,
           advanceApplied: nextAdvApplied,
           depositApplied: nextDepApplied,
           advanceBalanceAfter: fromCentavos(finalWalletCents),
           totalAmountDue: nextTotalDue,
           remainingBalance: nextRemaining,
           status: nextStatus,
-          paidAt: nextStatus === 'paid' ? b.paidAt || nowIso : b.paidAt,
-          isLocked: nextStatus === 'paid' ? true : b.isLocked,
+          paidAt: nextStatus === 'paid' ? targetBill.paidAt || nowIso : targetBill.paidAt,
+          isLocked: nextStatus === 'paid' ? true : targetBill.isLocked,
           updatedAt: nowIso,
-        };
-      });
+        });
+      }
+
+      if (billUpdatesById.size > 0) {
+        updatedBills = activeBills.map((b) => billUpdatesById.get(b.id) ?? b);
+      }
+    } else {
+      const applyTimestamp = new Date(baseTimeMs + 1).toISOString();
+      const appliedEntry: AdvanceBalanceTransaction = {
+        id: createUniqueId('adv-apply'),
+        type: 'applied_to_bill',
+        category: 'rent',
+        amount: fromCentavos(autoAppliedCents),
+        createdAt: applyTimestamp,
+        description: 'Applied to Outstanding Room Balance',
+        note: 'Automatically applied toward active unpaid balance',
+        referenceNo: generateFinancialRefNo('BILL', nowIso),
+        balanceBefore: fromCentavos(afterDepositCents),
+        balanceAfter: fromCentavos(finalWalletCents),
+        status: 'completed',
+        billingPeriod,
+        idempotencyKey: idempotencyKey ? `${idempotencyKey}:autoapply` : undefined,
+      };
+      newEntriesNewestFirst.unshift(appliedEntry);
     }
   }
 
@@ -1315,4 +1367,211 @@ export function recalculateUnlockedBillsForRates(
         });
 
   return { bills: updatedBills, rooms: updatedRooms, updatedCount, roomUnpaidMap };
+}
+
+export interface RoomSaveAdvanceHistoryInput {
+  roomName: string;
+  nextStatus: 'occupied' | 'vacant';
+  previousStatus?: 'occupied' | 'vacant';
+  previousAdvanceRent?: number;
+  nextBaseAdvance: number;
+  excessDepositToAdvance?: number;
+  paidSecurityDeposit?: number;
+  requiredSecurityDeposit?: number;
+  previousHistory?: AdvanceBalanceTransaction[];
+  nowIso?: string;
+}
+
+/**
+ * Computes the updated newest-first advance wallet ledger when saving a room,
+ * covering new occupancy, vacant-to-occupied move-in, occupied edits, and excess deposits.
+ */
+export function buildRoomSaveAdvanceHistory(
+  input: RoomSaveAdvanceHistoryInput
+): AdvanceBalanceTransaction[] {
+  if (input.nextStatus !== 'occupied') {
+    return [];
+  }
+
+  const nowIso = input.nowIso || new Date().toISOString();
+  const baseMs = Number.isNaN(new Date(nowIso).getTime())
+    ? Date.now()
+    : new Date(nowIso).getTime();
+
+  const prevHistory = Array.isArray(input.previousHistory) ? input.previousHistory : [];
+  const prevAdvCents = Math.max(0, toCentavos(input.previousAdvanceRent));
+  const nextBaseCents = Math.max(0, toCentavos(input.nextBaseAdvance));
+  const excessCents = Math.max(0, toCentavos(input.excessDepositToAdvance));
+
+  const entriesToPrepend: AdvanceBalanceTransaction[] = [];
+
+  if (!input.previousStatus || input.previousStatus === 'vacant') {
+    if (nextBaseCents > 0) {
+      entriesToPrepend.unshift({
+        id: createUniqueId('adv-init'),
+        type: 'manual_deposit',
+        category: 'advance_credit',
+        amount: fromCentavos(nextBaseCents),
+        createdAt: nowIso,
+        description: 'Opening Advance Credit Balance',
+        note: `Opening Advance Balance on ${input.roomName} move-in`,
+        referenceNo: generateFinancialRefNo('ADV', nowIso),
+        balanceBefore: 0,
+        balanceAfter: fromCentavos(nextBaseCents),
+        status: 'completed',
+      });
+    }
+  } else if (nextBaseCents !== prevAdvCents) {
+    const diffCents = nextBaseCents - prevAdvCents;
+    const isIncrease = diffCents > 0;
+    entriesToPrepend.unshift({
+      id: createUniqueId('adv-adj'),
+      type: 'adjustment',
+      category: 'adjustment',
+      amount: fromCentavos(Math.abs(diffCents)),
+      createdAt: nowIso,
+      description: isIncrease
+        ? 'Manual Advance Credit Adjustment (Added)'
+        : 'Manual Advance Balance Adjustment (Reduced)',
+      note: `${input.roomName} advance balance updated via Room Settings (₱${fromCentavos(prevAdvCents).toFixed(2)} -> ₱${fromCentavos(nextBaseCents).toFixed(2)})`,
+      referenceNo: generateFinancialRefNo('ADJ', nowIso),
+      balanceBefore: fromCentavos(prevAdvCents),
+      balanceAfter: fromCentavos(nextBaseCents),
+      status: 'completed',
+    });
+  }
+
+  if (excessCents > 0) {
+    const paidSec = roundCurrencyCentavos(input.paidSecurityDeposit || 0);
+    const reqSec = roundCurrencyCentavos(input.requiredSecurityDeposit || 0);
+    const afterCents = nextBaseCents + excessCents;
+    entriesToPrepend.unshift({
+      id: createUniqueId('adv-exdep'),
+      type: 'overpayment_credit',
+      category: 'advance_credit',
+      amount: fromCentavos(excessCents),
+      createdAt: new Date(baseMs + 1).toISOString(),
+      description: 'Excess Security Deposit Credited to Advance',
+      note: `Tenant paid ₱${paidSec.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} for required deposit ₱${reqSec.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (+₱${fromCentavos(excessCents).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} to Advance Balance)`,
+      referenceNo: generateFinancialRefNo('ADV', nowIso),
+      balanceBefore: fromCentavos(nextBaseCents),
+      balanceAfter: fromCentavos(afterCents),
+      status: 'completed',
+    });
+  }
+
+  return entriesToPrepend.length > 0
+    ? [...entriesToPrepend, ...prevHistory]
+    : prevHistory;
+}
+
+export interface RoomSecurityDepositApplicationInput {
+  roomId: string;
+  status: 'occupied' | 'vacant';
+  activeReceiptId?: string;
+  availableSecurityDepositPaid: number;
+  roomUnpaidBalance: number;
+  bills: BillRecord[];
+  nowIso?: string;
+}
+
+export interface RoomSecurityDepositApplicationResult {
+  bills: BillRecord[];
+  updatedCount: number;
+  depositUsedOnActiveBills: number;
+  remainingSecurityDepositPaid: number;
+  finalRoomUnpaidBalance: number;
+}
+
+/**
+ * Synchronously deducts an occupied room's paid security deposit across active unpaid bills
+ * in integer centavos, prioritizing `activeReceiptId` so room and bill balances stay aligned.
+ */
+export function applyRoomSecurityDepositToActiveBills(
+  input: RoomSecurityDepositApplicationInput
+): RoomSecurityDepositApplicationResult {
+  const nowIso = input.nowIso || new Date().toISOString();
+  const initialCreditCents =
+    input.status === 'occupied'
+      ? Math.max(0, toCentavos(input.availableSecurityDepositPaid))
+      : 0;
+  let remainingCreditCents = initialCreditCents;
+  let usedCents = 0;
+  const billUpdatesById = new Map<string, BillRecord>();
+
+  if (remainingCreditCents > 0) {
+    const activeUnpaidBills = input.bills
+      .filter(
+        (b) =>
+          !b.isArchived &&
+          b.roomId === input.roomId &&
+          toCentavos(b.remainingBalance) > 0
+      )
+      .sort((a, b) =>
+        a.id === input.activeReceiptId
+          ? -1
+          : b.id === input.activeReceiptId
+            ? 1
+            : 0
+      );
+
+    for (const targetBill of activeUnpaidBills) {
+      if (remainingCreditCents <= 0) break;
+      const billRemCents = Math.max(0, toCentavos(targetBill.remainingBalance));
+      const deductCents = Math.min(remainingCreditCents, billRemCents);
+      if (deductCents <= 0) continue;
+
+      remainingCreditCents -= deductCents;
+      usedCents += deductCents;
+
+      const nextSecDepAppliedCents =
+        Math.max(0, toCentavos(targetBill.securityDepositApplied)) + deductCents;
+      const nextTotalAppliedCents = Math.max(
+        nextSecDepAppliedCents + Math.max(0, toCentavos(targetBill.advanceApplied)),
+        Math.max(0, toCentavos(targetBill.depositApplied)) + deductCents
+      );
+      const nextTotalDueCents = Math.max(
+        0,
+        toCentavos(targetBill.totalAmountDue) - deductCents
+      );
+      const nextRemainingCents = Math.max(0, billRemCents - deductCents);
+      const nextStatus: BillRecord['status'] =
+        nextRemainingCents === 0
+          ? 'paid'
+          : toCentavos(targetBill.amountPaid) > 0 || nextTotalAppliedCents > 0
+            ? 'partial'
+            : 'unpaid';
+
+      billUpdatesById.set(targetBill.id, {
+        ...targetBill,
+        securityDepositApplied: fromCentavos(nextSecDepAppliedCents),
+        securityDepositRemainingAfterBill: fromCentavos(remainingCreditCents),
+        depositApplied: fromCentavos(nextTotalAppliedCents),
+        totalAmountDue: fromCentavos(nextTotalDueCents),
+        remainingBalance: fromCentavos(nextRemainingCents),
+        status: nextStatus,
+        paidAt: nextStatus === 'paid' ? targetBill.paidAt || nowIso : targetBill.paidAt,
+        updatedAt: nowIso,
+      });
+    }
+  }
+
+  const nextBills =
+    billUpdatesById.size > 0
+      ? input.bills.map((b) => billUpdatesById.get(b.id) ?? b)
+      : input.bills;
+
+  const baseRoomUnpaidCents = Math.max(0, toCentavos(input.roomUnpaidBalance));
+  const finalRoomUnpaidBalance =
+    usedCents > 0
+      ? fromCentavos(Math.max(0, baseRoomUnpaidCents - usedCents))
+      : fromCentavos(baseRoomUnpaidCents);
+
+  return {
+    bills: nextBills,
+    updatedCount: billUpdatesById.size,
+    depositUsedOnActiveBills: fromCentavos(usedCents),
+    remainingSecurityDepositPaid: fromCentavos(remainingCreditCents),
+    finalRoomUnpaidBalance,
+  };
 }

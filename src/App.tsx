@@ -54,12 +54,15 @@ import {
   roundCurrency,
 } from './utils/billingCalculator';
 import {
+  applyRoomSecurityDepositToActiveBills,
   executeAdvanceDepositTransaction,
   executeAdvanceRefundTransaction,
   executeGenerateBillTransaction,
   executeRecordPaymentTransaction,
+  formatKwhReading,
   getAdvancePolicyAllowance,
 } from './utils/financialEngine';
+import { resolveConfiguredPropertyCode } from './utils/propertyCode';
 import { requestAndVerifyNotifications } from './services/notificationService';
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
 import { LockScreen } from './components/security/LockScreen';
@@ -768,98 +771,21 @@ export function App() {
 
         // If room is occupied and has available paid Required Deposit credit with active unpaid bills,
         // auto-deduct deposit synchronously before queuing state updates so room & bill balances stay aligned.
-        const availablePaidDeposit =
-          roomData.status === 'occupied'
-            ? Math.max(0, roomData.securityDepositPaid || 0)
-            : 0;
-        let remainingDepositCredit = availablePaidDeposit;
-        let depositUsedOnActiveBills = 0;
-        const billUpdatesById = new Map<string, BillRecord>();
+        const depositRes = applyRoomSecurityDepositToActiveBills({
+          roomId: existingId,
+          status: roomData.status,
+          activeReceiptId: roomData.activeReceiptId,
+          availableSecurityDepositPaid: roomData.securityDepositPaid || 0,
+          roomUnpaidBalance: roomData.unpaidBalance || 0,
+          bills,
+          nowIso,
+        });
 
-        if (remainingDepositCredit > 0) {
-          const activeUnpaidBills = bills
-            .filter(
-              (b) =>
-                !b.isArchived &&
-                b.roomId === existingId &&
-                b.remainingBalance > 0
-            )
-            .sort((a, b) =>
-              a.id === roomData.activeReceiptId
-                ? -1
-                : b.id === roomData.activeReceiptId
-                ? 1
-                : 0
-            );
+        const remainingRoomPaidDeposit = depositRes.remainingSecurityDepositPaid;
+        const finalRoomUnpaidBalance = depositRes.finalRoomUnpaidBalance;
 
-          for (const targetBill of activeUnpaidBills) {
-            if (remainingDepositCredit <= 0) break;
-            const deductAmount = roundCurrency(
-              Math.min(remainingDepositCredit, targetBill.remainingBalance)
-            );
-            if (deductAmount <= 0) continue;
-
-            remainingDepositCredit = Math.max(
-              0,
-              roundCurrency(remainingDepositCredit - deductAmount)
-            );
-            depositUsedOnActiveBills = roundCurrency(
-              depositUsedOnActiveBills + deductAmount
-            );
-
-            const nextSecDepApplied = roundCurrency(
-              (targetBill.securityDepositApplied || 0) + deductAmount
-            );
-            const nextTotalApplied = roundCurrency(
-              (targetBill.depositApplied || 0) + deductAmount
-            );
-            const nextTotalDue = Math.max(
-              0,
-              roundCurrency(targetBill.totalAmountDue - deductAmount)
-            );
-            const nextRemaining = Math.max(
-              0,
-              roundCurrency(targetBill.remainingBalance - deductAmount)
-            );
-            const nextStatus: BillRecord['status'] =
-              nextRemaining <= 0.009
-                ? 'paid'
-                : targetBill.amountPaid > 0 || nextTotalApplied > 0
-                ? 'partial'
-                : 'unpaid';
-
-            billUpdatesById.set(targetBill.id, {
-              ...targetBill,
-              securityDepositApplied: nextSecDepApplied,
-              securityDepositRemainingAfterBill: remainingDepositCredit,
-              depositApplied: nextTotalApplied,
-              totalAmountDue: nextTotalDue,
-              remainingBalance: nextRemaining,
-              status: nextStatus,
-              paidAt: nextStatus === 'paid' ? targetBill.paidAt || nowIso : targetBill.paidAt,
-              updatedAt: nowIso,
-            });
-          }
-        }
-
-        const remainingRoomPaidDeposit = Math.max(
-          0,
-          roundCurrency(availablePaidDeposit - depositUsedOnActiveBills)
-        );
-        const finalRoomUnpaidBalance =
-          depositUsedOnActiveBills > 0
-            ? Math.max(
-                0,
-                roundCurrency(
-                  (roomData.unpaidBalance || 0) - depositUsedOnActiveBills
-                )
-              )
-            : roomData.unpaidBalance;
-
-        if (billUpdatesById.size > 0) {
-          setBills((prev) =>
-            prev.map((b) => billUpdatesById.get(b.id) ?? b)
-          );
+        if (depositRes.updatedCount > 0) {
+          setBills(depositRes.bills);
         }
 
         setRooms((prev) =>
@@ -882,7 +808,7 @@ export function App() {
         );
         triggerFeedback(
           `${roomData.name} Updated`,
-          `Status: ${roomData.status.toUpperCase()} • Sub-meter baseline: ${roomData.lastMeterReading.toFixed(1)} kWh.`,
+          `Status: ${roomData.status.toUpperCase()} • Sub-meter baseline: ${formatKwhReading(roomData.lastMeterReading)} kWh.`,
           'success',
           'Open Room Details',
           () => setSelectedRoomDetailsId(existingId)
@@ -902,7 +828,7 @@ export function App() {
         );
         triggerFeedback(
           `${roomData.name} Added`,
-          `Ready for dual sub-meter billing (${roomData.lastMeterReading.toFixed(1)} kWh baseline).`,
+          `Ready for dual sub-meter billing (${formatKwhReading(roomData.lastMeterReading)} kWh baseline).`,
           'success',
           'Scan Sub-Meter',
           () => {
@@ -1188,7 +1114,7 @@ export function App() {
       );
       triggerFeedback(
         `${tenantName} Moved Out`,
-        `${room.name} is now Vacant (Sub-Meter preserved at ${room.lastMeterReading.toFixed(1)} kWh).`,
+        `${room.name} is now Vacant (Sub-Meter preserved at ${formatKwhReading(room.lastMeterReading)} kWh).`,
         'info',
         'View Tenant History',
         () => setActiveTab('archive')
@@ -1204,20 +1130,12 @@ export function App() {
   };
 
   // Generate Bill -> Atomic centavo transaction, enforces 1 Active Receipt per Room, idempotency, and prepaid wallet math
-  const handleGenerateBill = (
-    newBill: BillRecord,
-    _updatedRoomLastReading: number,
-    _updatedRoomLastPhotoUrl: string,
-    _updatedRoomUnpaidBalance: number,
-    _overpaymentAddedToAdvance: number,
-    _advanceDeductedFromRoom: number,
-    _updatedRoomLastCropUrl?: string
-  ) => {
+  const handleGenerateBill = (newBill: BillRecord): boolean => {
     try {
       const targetRoom = rooms.find((r) => r.id === newBill.roomId);
       if (!targetRoom) {
         triggerFeedback('Bill Generation Error', 'Selected room not found.', 'error');
-        return;
+        return false;
       }
 
       const txResult = executeGenerateBillTransaction({
@@ -1236,8 +1154,9 @@ export function App() {
         );
         if (txResult.duplicate && txResult.createdBill) {
           setActiveReceiptBill(txResult.createdBill);
+          return true;
         }
-        return;
+        return false;
       }
 
       const issuedBill = txResult.createdBill;
@@ -1273,7 +1192,7 @@ export function App() {
       setActiveReceiptBill(issuedBill);
       triggerFeedback(
         `Receipt #${issuedBill.receiptNo} Generated`,
-        `${issuedBill.roomName}: ${issuedBill.consumptionKwh.toFixed(1)} kWh used • Net Due ₱${issuedBill.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}${
+        `${issuedBill.roomName}: ${formatKwhReading(issuedBill.consumptionKwh)} kWh used • Net Due ₱${issuedBill.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}${
           (issuedBill.advanceBalanceAfter ?? 0) > 0
             ? ` • Advance Rem: ₱${(issuedBill.advanceBalanceAfter || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
             : ''
@@ -1283,12 +1202,14 @@ export function App() {
         () => setActiveReceiptBill(issuedBill)
       );
       triggerOptionalCloudSync();
+      return true;
     } catch (err) {
       triggerFeedback(
         'Bill Generation Error',
         String(err instanceof Error ? err.message : 'Unable to generate receipt.'),
         'error'
       );
+      return false;
     }
   };
 
@@ -1972,7 +1893,7 @@ export function App() {
     if (pendingConfirmAction.type === 'vacate') {
       const room = pendingConfirmAction.room;
       const details = [
-        `Sub-meter reading preserved at ${room.lastMeterReading.toFixed(1)} kWh`,
+        `Sub-meter reading preserved at ${formatKwhReading(room.lastMeterReading)} kWh`,
         `Held Security Deposit: ₱${(room.securityDeposit || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
       ];
       if (room.advanceRent > 0) {
@@ -2019,7 +1940,7 @@ export function App() {
       description:
         'Permanent removal deletes the room card after security verification. Historical tenant & bill records stay archived.',
       details: [
-        `Final meter reading: ${pendingConfirmAction.room.lastMeterReading.toFixed(1)} kWh`,
+        `Final meter reading: ${formatKwhReading(pendingConfirmAction.room.lastMeterReading)} kWh`,
         'Next step requires Biometrics or 4-Digit PIN verification.',
       ],
       variant: 'danger' as const,
@@ -2032,7 +1953,7 @@ export function App() {
 
   // 3. Main Adaptive Application Shell (Desktop + Mobile App)
   return (
-    <div className="min-h-screen w-full bg-transparent text-slate-100 flex">
+    <div className="app-print-root min-h-screen w-full bg-transparent text-slate-100 flex">
       <NavigationDrawer
         activeTab={activeTab}
         isOpenMobile={isDrawerOpen}
@@ -2389,7 +2310,7 @@ export function App() {
       <DownloadAppsModal
         isOpen={isDownloadModalOpen}
         onClose={() => setIsDownloadModalOpen(false)}
-        propertyCode={settings.cloudSync.propertyCode || '4RENT-MAIN'}
+        propertyCode={resolveConfiguredPropertyCode(settings.cloudSync.propertyCode)}
         canInstallPwa={Boolean(deferredInstallPrompt)}
         onInstallPwa={async () => {
           if (deferredInstallPrompt) {

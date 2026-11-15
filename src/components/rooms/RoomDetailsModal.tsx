@@ -40,7 +40,29 @@ import {
 } from '../../utils/billingCalculator';
 import { formatKwhReading } from '../../utils/financialEngine';
 import { loadReadingLogs } from '../../services/storageService';
+import { useResolvedMeterImage } from '../../utils/resolveMeterImage';
 import { AdvanceLedgerList } from '../advance/AdvanceLedgerList';
+
+const MeterLogThumbnail: React.FC<{ cropUrl?: string; photoUrl?: string }> = ({
+  cropUrl,
+  photoUrl,
+}) => {
+  const src = useResolvedMeterImage(cropUrl, photoUrl);
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt="Meter Proof"
+        className="w-10 h-10 object-cover rounded-lg border border-[#2B3B59] shrink-0"
+      />
+    );
+  }
+  return (
+    <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+      <Zap className="w-4 h-4 text-amber-400" />
+    </div>
+  );
+};
 
 interface RoomDetailsModalProps {
   room: Room | null;
@@ -463,17 +485,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-[#111724] border border-[#1E293D] text-xs hover:border-amber-500/40 transition"
                   >
                     <div className="flex items-center gap-3">
-                      {log.cropDataUrl || log.photoDataUrl ? (
-                        <img
-                          src={log.cropDataUrl || log.photoDataUrl}
-                          alt="Meter Proof"
-                          className="w-10 h-10 object-cover rounded-lg border border-[#2B3B59] shrink-0"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-                          <Zap className="w-4 h-4 text-amber-400" />
-                        </div>
-                      )}
+                      <MeterLogThumbnail cropUrl={log.cropDataUrl} photoUrl={log.photoDataUrl} />
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-mono-num font-black text-amber-400 text-sm">

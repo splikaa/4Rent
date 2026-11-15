@@ -384,6 +384,12 @@ textarea:focus {
     display: none !important;
   }
 
+  .app-print-root {
+    display: block !important;
+    min-height: 0 !important;
+    background: #ffffff !important;
+  }
+
   .receipt-print-backdrop {
     position: static !important;
     display: block !important;
@@ -396,6 +402,7 @@ textarea:focus {
   }
 
   .receipt-print-shell {
+    display: block !important;
     width: 100% !important;
     max-width: 100% !important;
     max-height: none !important;

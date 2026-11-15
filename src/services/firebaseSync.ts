@@ -5,28 +5,15 @@ import {
   normalizeMonthKey,
 } from '../utils/billingCalculator';
 import { getStoredMobileAppliedMonth } from './storageService';
+import { getMeterMasterImage } from './idbDatabase';
 import { reconcileRoomAdvanceLedger } from '../utils/financialEngine';
+import {
+  generatePropertyCode,
+  normalizePropertyCode,
+  resolveConfiguredPropertyCode,
+} from '../utils/propertyCode';
 
-export function normalizePropertyCode(raw: string): string {
-  return (raw || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
-}
-
-export function generatePropertyCode(): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = new Uint8Array(6);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  let suffix = '';
-  for (const b of bytes) {
-    suffix += alphabet[b % alphabet.length];
-  }
-  return `4R-${suffix}`;
-}
+export { generatePropertyCode, normalizePropertyCode };
 
 export interface MobileCodeMonthlyLockState {
   isLockedThisMonth: boolean;
@@ -127,30 +114,63 @@ function appendFirebaseAuthParam(url: string, config: CloudSyncConfig): string {
 // Firebase Realtime Database REST & SSE Sync Engine
 // ---------------------------------------------------------------------------
 
+async function resolveCloudImageField(val?: string): Promise<string | undefined> {
+  if (!val || !val.startsWith('idb:meter:')) return val;
+  return (await getMeterMasterImage(val)) || val;
+}
+
+async function resolveSnapshotMediaForCloud(
+  snapshot: AppDatabaseSnapshot
+): Promise<AppDatabaseSnapshot> {
+  const rooms = await Promise.all(
+    (snapshot.rooms || []).map(async (r) => ({
+      ...r,
+      lastMeterPhotoDataUrl: await resolveCloudImageField(r.lastMeterPhotoDataUrl),
+      lastMeterCropDataUrl: await resolveCloudImageField(r.lastMeterCropDataUrl),
+    }))
+  );
+  const bills = await Promise.all(
+    (snapshot.bills || []).map(async (b) => ({
+      ...b,
+      prevMeterPhotoDataUrl: await resolveCloudImageField(b.prevMeterPhotoDataUrl),
+      prevMeterCropDataUrl: await resolveCloudImageField(b.prevMeterCropDataUrl),
+      meterPhotoDataUrl: await resolveCloudImageField(b.meterPhotoDataUrl),
+      currMeterCropDataUrl: await resolveCloudImageField(b.currMeterCropDataUrl),
+    }))
+  );
+  return {
+    ...snapshot,
+    rooms,
+    bills,
+  };
+}
+
 export async function pushSnapshotToFirebase(
   config: CloudSyncConfig,
   snapshot: AppDatabaseSnapshot
 ): Promise<{ ok: boolean; message: string; syncedAt?: string }> {
   const baseUrl = getFirebaseDatabaseUrl(config);
-  const propCode = config.propertyCode || '4RENT-MAIN';
+  const propCode = resolveConfiguredPropertyCode(config.propertyCode);
   const syncedAt = new Date().toISOString();
+  const resolvedMediaSnap = await resolveSnapshotMediaForCloud(snapshot);
   // Never upload local PIN, WebAuthn identifiers, or API tokens to cloud snapshots
-  const sanitizedSettings = snapshot.settings
+  const sanitizedSettings = resolvedMediaSnap.settings
     ? {
-        ...snapshot.settings,
+        ...resolvedMediaSnap.settings,
         security: {
-          ...snapshot.settings.security,
+          ...resolvedMediaSnap.settings.security,
           pinCode: '',
           webAuthnCredentialId: undefined,
         },
         cloudSync: {
-          ...snapshot.settings.cloudSync,
+          ...resolvedMediaSnap.settings.cloudSync,
+          propertyCode: propCode,
           firebaseApiKey: '',
         },
       }
-    : snapshot.settings;
+    : resolvedMediaSnap.settings;
   const payloadSnapshot = {
-    ...snapshot,
+    ...resolvedMediaSnap,
     settings: sanitizedSettings,
     exportedAt: syncedAt,
   };
@@ -236,7 +256,7 @@ export async function pullSnapshotFromFirebase(
   updatedAt?: string;
 }> {
   const baseUrl = getFirebaseDatabaseUrl(config);
-  const propCode = config.propertyCode || '4RENT-MAIN';
+  const propCode = resolveConfiguredPropertyCode(config.propertyCode);
   const url = appendFirebaseAuthParam(
     `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`,
     config
@@ -290,7 +310,7 @@ export function subscribeToFirebaseRealtime(
   if (typeof EventSource === 'undefined') return () => {};
 
   const baseUrl = getFirebaseDatabaseUrl(config);
-  const propCode = config.propertyCode || '4RENT-MAIN';
+  const propCode = resolveConfiguredPropertyCode(config.propertyCode);
   const url = appendFirebaseAuthParam(
     `${baseUrl}/properties/${encodeURIComponent(propCode)}.json`,
     config

@@ -8,6 +8,7 @@
     "dev": "vite",
     "electron": "electron .",
     "build": "tsc -b && vite build",
+    "test": "node scripts/run_tests.mjs",
     "build:apk": "node scripts/build_signed_apk.mjs",
     "preview": "vite preview"
   },

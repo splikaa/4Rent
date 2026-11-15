@@ -47,6 +47,10 @@ export async function saveMeterMasterImage(
   // Always keep in memory fallback
   memoryMasterImageStore.set(meterKey, imageBlobOrDataUrl);
 
+  if (typeof indexedDB === 'undefined') {
+    return meterKey;
+  }
+
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
@@ -63,6 +67,28 @@ export async function saveMeterMasterImage(
   }
 
   return meterKey;
+}
+
+/**
+ * Synchronously peeks an inline URL or in-memory cached IndexedDB image.
+ */
+export function peekCachedMeterImage(meterKey?: string | null): string | null {
+  if (!meterKey) return null;
+
+  if (
+    meterKey.startsWith('data:') ||
+    meterKey.startsWith('blob:') ||
+    meterKey.startsWith('http://') ||
+    meterKey.startsWith('https://')
+  ) {
+    return meterKey;
+  }
+
+  if (memoryMasterImageStore.has(meterKey)) {
+    return memoryMasterImageStore.get(meterKey) || null;
+  }
+
+  return null;
 }
 
 /**

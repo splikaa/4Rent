@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   allocateChargesAndCredits,
+  applyRoomSecurityDepositToActiveBills,
+  buildRoomSaveAdvanceHistory,
   executeAdvanceDepositTransaction,
   executeAdvanceRefundTransaction,
   executeGenerateBillTransaction,
@@ -15,7 +17,6 @@ import {
   toCentavos,
 } from '../src/utils/financialEngine';
 import {
-  applyPaymentWithOverpayment,
   calculateBillBreakdown,
   getElectricRateForPeriod,
   recalculateActiveBillsForRates,
@@ -30,6 +31,7 @@ function makeRoom(overrides: Partial<Room> = {}): Room {
     lastMeterReading: 3312.0,
     status: 'occupied',
     tenant: {
+      id: 'ten-3',
       fullName: 'Mikel Santos',
       phone: '0917-555-0103',
       moveInDate: '2026-10-01',
@@ -624,4 +626,208 @@ test('Rate Recalculation updates advanceBalanceAfter, credits excess cash overpa
   assert.equal(res2.bills[0].advanceApplied, 5500);
   assert.equal(res2.bills[0].advanceBalanceAfter, 1000); // 500 + 500 restored
   assert.equal(res2.rooms[0].advanceRent, 1000);
+});
+
+test('Advance Deposit prioritizes activeReceiptId, spans multiple unpaid bills, and falls back to room.unpaidBalance', () => {
+  const olderBill = makeBillDraft({
+    id: 'bill-old',
+    roomId: 'room-multi',
+    receiptNo: '4R-202610-001',
+    billingPeriod: 'Oct 2026',
+    totalAmountDue: 1000,
+    remainingBalance: 1000,
+    status: 'unpaid',
+    isArchived: false,
+  });
+  const primaryActiveBill = makeBillDraft({
+    id: 'bill-active',
+    roomId: 'room-multi',
+    receiptNo: '4R-202611-001',
+    billingPeriod: 'Nov 2026',
+    totalAmountDue: 1500,
+    remainingBalance: 1500,
+    status: 'unpaid',
+    isArchived: false,
+  });
+
+  const room = makeRoom({
+    id: 'room-multi',
+    activeReceiptId: 'bill-active',
+    unpaidBalance: 2500,
+    advanceRent: 0,
+  });
+
+  // olderBill sits first in array, but activeReceiptId ('bill-active') must settle before olderBill
+  const res = executeAdvanceDepositTransaction({
+    room,
+    activeBills: [olderBill, primaryActiveBill],
+    amount: 2000,
+    note: 'Multi-bill settlement deposit',
+    nowIso: '2026-11-12T10:00:00.000Z',
+    idempotencyKey: 'multi-dep-1',
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.autoAppliedToBill, 2000);
+  const updatedOld = res.updatedBills.find((b) => b.id === 'bill-old')!;
+  const updatedPrimary = res.updatedBills.find((b) => b.id === 'bill-active')!;
+  assert.equal(updatedPrimary.remainingBalance, 0);
+  assert.equal(updatedPrimary.status, 'paid');
+  assert.equal(updatedOld.remainingBalance, 500);
+  assert.equal(updatedOld.status, 'partial');
+  assert.equal(res.updatedRoom!.unpaidBalance, 500);
+  assert.equal(res.updatedRoom!.advanceRent, 0);
+
+  // Fallback when activeBills has no matching bill records for the room
+  const roomFallback = makeRoom({
+    id: 'room-fallback',
+    unpaidBalance: 1200,
+    advanceRent: 0,
+  });
+  const fallbackRes = executeAdvanceDepositTransaction({
+    room: roomFallback,
+    activeBills: [],
+    amount: 2000,
+    note: 'Deposit against room unpaid fallback',
+    nowIso: '2026-11-12T10:05:00.000Z',
+    idempotencyKey: 'fallback-dep-1',
+  });
+  assert.equal(fallbackRes.ok, true);
+  assert.equal(fallbackRes.autoAppliedToBill, 1200);
+  assert.equal(fallbackRes.updatedRoom!.unpaidBalance, 0);
+  assert.equal(fallbackRes.updatedRoom!.advanceRent, 800);
+});
+
+test('buildRoomSaveAdvanceHistory records opening, vacant-to-occupied move-in, occupied edits, and vacating', () => {
+  const nowIso = '2026-11-15T10:00:00.000Z';
+
+  // Case 1: Existing vacant room moves in an occupied tenant with ₱3,000 advance
+  const vacantToOccupied = buildRoomSaveAdvanceHistory({
+    roomName: 'Room 2',
+    nextStatus: 'occupied',
+    previousStatus: 'vacant',
+    previousAdvanceRent: 0,
+    nextBaseAdvance: 3000,
+    excessDepositToAdvance: 0,
+    paidSecurityDeposit: 4500,
+    requiredSecurityDeposit: 4500,
+    previousHistory: [],
+    nowIso,
+  });
+  assert.equal(vacantToOccupied.length, 1);
+  assert.equal(vacantToOccupied[0].type, 'manual_deposit');
+  assert.equal(vacantToOccupied[0].balanceBefore, 0);
+  assert.equal(vacantToOccupied[0].balanceAfter, 3000);
+
+  // Case 2: Occupied room edited upward (+1500 manual edit + 500 excess deposit)
+  const editedUp = buildRoomSaveAdvanceHistory({
+    roomName: 'Room 2',
+    nextStatus: 'occupied',
+    previousStatus: 'occupied',
+    previousAdvanceRent: 2000,
+    nextBaseAdvance: 3500,
+    excessDepositToAdvance: 500,
+    paidSecurityDeposit: 5000,
+    requiredSecurityDeposit: 4500,
+    previousHistory: vacantToOccupied,
+    nowIso,
+  });
+  assert.equal(editedUp.length, vacantToOccupied.length + 2);
+  assert.equal(editedUp[0].type, 'overpayment_credit');
+  assert.equal(editedUp[0].balanceBefore, 3500);
+  assert.equal(editedUp[0].balanceAfter, 4000);
+  assert.equal(editedUp[1].type, 'adjustment');
+  assert.equal(editedUp[1].amount, 1500);
+  assert.equal(editedUp[1].balanceBefore, 2000);
+  assert.equal(editedUp[1].balanceAfter, 3500);
+
+  // Case 3: Occupied room edited downward (2000 -> 1200) and reconciled
+  const editedDown = buildRoomSaveAdvanceHistory({
+    roomName: 'Room 2',
+    nextStatus: 'occupied',
+    previousStatus: 'occupied',
+    previousAdvanceRent: 2000,
+    nextBaseAdvance: 1200,
+    excessDepositToAdvance: 0,
+    paidSecurityDeposit: 4500,
+    requiredSecurityDeposit: 4500,
+    previousHistory: [
+      {
+        id: 'adv-prev-1',
+        type: 'manual_deposit',
+        amount: 2000,
+        createdAt: '2026-10-01T00:00:00.000Z',
+        note: 'Initial deposit',
+      },
+    ],
+    nowIso,
+  });
+  assert.equal(editedDown[0].type, 'adjustment');
+  assert.equal(editedDown[0].amount, 800);
+  assert.equal(editedDown[0].balanceBefore, 2000);
+  assert.equal(editedDown[0].balanceAfter, 1200);
+  const reconciled = reconcileRoomAdvanceLedger(
+    makeRoom({ advanceRent: 1200, advanceHistory: editedDown })
+  );
+  assert.equal(reconciled.advanceRent, 1200);
+  assert.equal(reconciled.advanceHistory![1].balanceAfter, 2000);
+
+  // Case 4: Setting status to vacant clears advance ledger
+  const vacated = buildRoomSaveAdvanceHistory({
+    roomName: 'Room 2',
+    nextStatus: 'vacant',
+    previousStatus: 'occupied',
+    previousAdvanceRent: 1200,
+    nextBaseAdvance: 0,
+    excessDepositToAdvance: 0,
+    paidSecurityDeposit: 0,
+    requiredSecurityDeposit: 4500,
+    previousHistory: editedDown,
+    nowIso,
+  });
+  assert.deepEqual(vacated, []);
+});
+
+test('applyRoomSecurityDepositToActiveBills deducts paid deposit across active bills in centavos', () => {
+  const bOther = makeBillDraft({
+    id: 'b-sec-other',
+    roomId: 'room-sec',
+    receiptNo: '4R-202610-001',
+    totalAmountDue: 1000,
+    remainingBalance: 1000,
+    status: 'unpaid',
+    isArchived: false,
+  });
+  const bActive = makeBillDraft({
+    id: 'b-sec-active',
+    roomId: 'room-sec',
+    receiptNo: '4R-202611-001',
+    totalAmountDue: 2500,
+    remainingBalance: 2500,
+    status: 'unpaid',
+    isArchived: false,
+  });
+
+  const res = applyRoomSecurityDepositToActiveBills({
+    roomId: 'room-sec',
+    status: 'occupied',
+    activeReceiptId: 'b-sec-active',
+    availableSecurityDepositPaid: 3000,
+    roomUnpaidBalance: 3500,
+    bills: [bOther, bActive],
+    nowIso: '2026-11-15T10:00:00.000Z',
+  });
+
+  assert.equal(res.depositUsedOnActiveBills, 3000);
+  assert.equal(res.remainingSecurityDepositPaid, 0);
+  assert.equal(res.finalRoomUnpaidBalance, 500);
+  const updatedActive = res.bills.find((b) => b.id === 'b-sec-active')!;
+  const updatedOther = res.bills.find((b) => b.id === 'b-sec-other')!;
+  assert.equal(updatedActive.remainingBalance, 0);
+  assert.equal(updatedActive.status, 'paid');
+  assert.equal(updatedActive.securityDepositApplied, 2500);
+  assert.ok(updatedActive.paidAt);
+  assert.equal(updatedOther.remainingBalance, 500);
+  assert.equal(updatedOther.status, 'partial');
+  assert.equal(updatedOther.securityDepositApplied, 500);
 });

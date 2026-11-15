@@ -363,7 +363,7 @@ export function generateSimulatedValueCropDataUrl(readingValue: number): string 
   ctx.lineWidth = 4;
   ctx.strokeRect(4, 68, 1032, 268);
 
-  return canvas.toDataURL('image/png');
+  return canvas.toDataURL('image/jpeg', 0.88);
 }
 
 interface OfflineWindowAnalysis {
@@ -1535,7 +1535,7 @@ export function generateSimulatedSubMeterDataUrl(readingValue: number): string {
   ctx.textAlign = 'center';
   ctx.fillText(`${safeVal.toFixed(1)} kWh`, 640, 550);
 
-  return canvas.toDataURL('image/png');
+  return canvas.toDataURL('image/jpeg', 0.85);
 }
 
 // Re-export extracted auth & notification services for backwards compatibility

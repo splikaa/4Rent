@@ -446,23 +446,6 @@ export function getScheduledMonthKeys(
 }
 
 /**
- * Returns the maximum additional advance rent credit allowed under the active advance policy.
- * Defaults to 1-month cap when policyMode is omitted for direct helper compatibility;
- * pass settings.advanceCapMode ('unlimited' for Prepaid Rental Wallet) from app callers.
- */
-export function getRemainingAdvanceAllowance(
-  monthlyRent: number,
-  currentAdvance: number,
-  policyMode: AdvanceCapPolicyMode = '1_month'
-): number {
-  return getAdvancePolicyAllowance(
-    monthlyRent,
-    currentAdvance,
-    policyMode
-  ).remainingAllowance;
-}
-
-/**
  * Resolves the landlord's electric rate (₱/kWh) for a given billing period or month key,
  * falling back to `settings.defaultElectricRate`.
  */

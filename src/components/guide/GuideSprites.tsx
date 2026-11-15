@@ -650,7 +650,7 @@ const CloudSyncScene: React.FC<SceneProps> = ({ activeSubStep, isPlaying }) => {
           <Laptop className="w-3.5 h-3.5" />
         </div>
         <div className="mt-2 font-mono-num text-xs font-black text-white">
-          4RENT-MAIN
+          4R-7K2M9A
         </div>
         <div className="text-[10px] text-amber-300/90 mt-0.5">
           Keep Code Private

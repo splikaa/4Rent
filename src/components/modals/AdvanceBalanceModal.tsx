@@ -28,7 +28,6 @@ interface AdvanceBalanceModalProps {
   onClose: () => void;
   onWithdrawAdvance: (roomId: string, amount: number, note: string) => void;
   onAddAdvanceDeposit: (roomId: string, amount: number, note: string) => void;
-  onApplyAdvanceToUnpaid?: (roomId: string, amount: number) => void;
 }
 
 export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({

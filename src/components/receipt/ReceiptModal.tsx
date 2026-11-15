@@ -15,27 +15,20 @@ import {
   MessageCircle,
   Printer,
   Share2,
-  ShieldCheck,
   X,
   Zap,
-  ZoomIn,
 } from 'lucide-react';
 import { AppSettings, BillRecord } from '../../types/rental';
 import {
-  clampDueDayOneToTen,
   formatMessengerBillSummary,
   formatMonthKeyLabel,
   formatPeso,
-  generateReceiptVerificationCode,
-  getAdjacentMonthKey,
   getElectricRateForPeriod,
   getScheduledMonthKeys,
   isMobileDevice,
   isRunningInMobileApp,
-  maskPhoneNumber,
   normalizeMonthKey,
 } from '../../utils/billingCalculator';
-import { formatKwhReading } from '../../utils/financialEngine';
 import {
   buildA4ReceiptPdfFromElement,
   buildReceiptDocumentMeta,
@@ -44,6 +37,7 @@ import {
   generateSimulatedSubMeterDataUrl,
   generateSimulatedValueCropDataUrl,
 } from '../../services/ocrService';
+import { useResolvedMeterImage } from '../../utils/resolveMeterImage';
 import { shareReceiptDocument } from '../../services/notificationService';
 import { MeterPhotoLightboxModal } from '../ocr/MeterPhotoLightboxModal';
 import { PrintableA4Receipt } from './PrintableA4Receipt';
@@ -54,54 +48,6 @@ interface ReceiptModalProps {
   settings: AppSettings;
   onApplyMonthlyRate?: (monthKeyOrPeriod: string, rate: number) => void;
   onClose: () => void;
-}
-
-/**
- * Derives clean current-month and next-month cycle ranges & due dates from a BillRecord.
- */
-function buildMonthlyScheduleBreakdown(billingPeriod: string, dueDateIso: string) {
-  const parsedDue = new Date(dueDateIso);
-  const validDue = Number.isNaN(parsedDue.getTime()) ? new Date() : parsedDue;
-
-  // Attempt to parse billingPeriod ("Nov 2026"); fall back to created/due month
-  const parsedPeriod = new Date(`1 ${billingPeriod}`);
-  const startDate = Number.isNaN(parsedPeriod.getTime())
-    ? new Date(validDue.getFullYear(), validDue.getMonth(), 1)
-    : new Date(parsedPeriod.getFullYear(), parsedPeriod.getMonth(), 1);
-
-  const curYear = startDate.getFullYear();
-  const curMonth = startDate.getMonth();
-  const curLastDay = new Date(curYear, curMonth + 1, 0).getDate();
-  const curMonthShort = startDate.toLocaleDateString('en-US', { month: 'short' });
-
-  const nextStart = new Date(curYear, curMonth + 1, 1);
-  const nextYear = nextStart.getFullYear();
-  const nextMonth = nextStart.getMonth();
-  const nextLastDay = new Date(nextYear, nextMonth + 1, 0).getDate();
-  const nextMonthShort = nextStart.toLocaleDateString('en-US', { month: 'short' });
-
-  // Advance the bill's due date by +1 month inside the 1st-10th payment window
-  const safeDueDay = clampDueDayOneToTen(validDue.getDate());
-  let nextDueYear = validDue.getFullYear();
-  let nextDueMonth = validDue.getMonth() + 1;
-  if (nextDueMonth > 11) {
-    nextDueMonth = 0;
-    nextDueYear += 1;
-  }
-  const nextDueDateObj = new Date(nextDueYear, nextDueMonth, safeDueDay, 12, 0, 0);
-
-  return {
-    currentLabel: `${curMonthShort} ${curYear}`,
-    currentRange: `${curMonthShort} 1 - ${curLastDay}, ${curYear}`,
-    nextLabel: `${nextMonthShort} ${nextYear}`,
-    nextRange: `${nextMonthShort} 1 - ${nextLastDay}, ${nextYear}`,
-    dueDayNumber: safeDueDay,
-    nextDueLabel: nextDueDateObj.toLocaleDateString('en-PH', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }),
-  };
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({
@@ -172,51 +118,33 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     });
   };
 
-  // Sub-meter photos and zoomed register value crops
+  // Sub-meter photos and zoomed register value crops (async-resolved from IndexedDB when offloaded)
+  const resolvedPrevPhoto = useResolvedMeterImage(bill?.prevMeterPhotoDataUrl);
+  const resolvedPrevCrop = useResolvedMeterImage(bill?.prevMeterCropDataUrl);
+  const resolvedCurrPhoto = useResolvedMeterImage(bill?.meterPhotoDataUrl);
+  const resolvedCurrCrop = useResolvedMeterImage(bill?.currMeterCropDataUrl);
+
   const prevMeterProofImg = useMemo(() => {
     if (!bill) return '';
-    return (
-      bill.prevMeterPhotoDataUrl ||
-      generateSimulatedSubMeterDataUrl(bill.prevReading)
-    );
-  }, [bill?.prevMeterPhotoDataUrl, bill?.prevReading]);
+    return resolvedPrevPhoto || generateSimulatedSubMeterDataUrl(bill.prevReading);
+  }, [bill?.prevReading, resolvedPrevPhoto]);
 
   const prevMeterCropImg = useMemo(() => {
     if (!bill) return '';
-    return (
-      bill.prevMeterCropDataUrl ||
-      generateSimulatedValueCropDataUrl(bill.prevReading)
-    );
-  }, [bill?.prevMeterCropDataUrl, bill?.prevReading]);
+    return resolvedPrevCrop || generateSimulatedValueCropDataUrl(bill.prevReading);
+  }, [bill?.prevReading, resolvedPrevCrop]);
 
   const currMeterProofImg = useMemo(() => {
     if (!bill) return '';
-    return (
-      bill.meterPhotoDataUrl ||
-      generateSimulatedSubMeterDataUrl(bill.currReading)
-    );
-  }, [bill?.meterPhotoDataUrl, bill?.currReading]);
+    return resolvedCurrPhoto || generateSimulatedSubMeterDataUrl(bill.currReading);
+  }, [bill?.currReading, resolvedCurrPhoto]);
 
   const currMeterCropImg = useMemo(() => {
     if (!bill) return '';
-    return (
-      bill.currMeterCropDataUrl ||
-      generateSimulatedValueCropDataUrl(bill.currReading)
-    );
-  }, [bill?.currMeterCropDataUrl, bill?.currReading]);
+    return resolvedCurrCrop || generateSimulatedValueCropDataUrl(bill.currReading);
+  }, [bill?.currReading, resolvedCurrCrop]);
 
   if (!bill) return null;
-
-  const verificationSeal = generateReceiptVerificationCode(
-    bill.receiptNo,
-    bill.roomName,
-    bill.totalAmountDue
-  );
-
-  const cycleSchedule = buildMonthlyScheduleBreakdown(
-    bill.billingPeriod,
-    bill.dueDate
-  );
 
   const receiptMeta = buildReceiptDocumentMeta(bill);
   const resolvedRemainingAdvance = Math.max(
@@ -502,37 +430,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }, 5500);
   };
 
-  const formattedIssueDate = new Date(bill.createdAt).toLocaleDateString(
-    'en-PH',
-    {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }
-  );
-
-  const formattedDueDate = new Date(bill.dueDate).toLocaleDateString('en-PH', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-
-  const displayLandlordName =
-    settings.landlordName && settings.landlordName !== 'Property Administrator'
-      ? settings.landlordName
-      : 'Authorized Landlord';
-
   const isRateLockedReceipt = Boolean(bill.isArchived || bill.status === 'paid');
   const billMonthKey = normalizeMonthKey(bill.billingPeriod);
-  const currentCalendarKey = normalizeMonthKey(new Date());
-  const nextMonthKey = getAdjacentMonthKey(billMonthKey, 1);
-  const hasReachedNextMonth = nextMonthKey <= currentCalendarKey;
   const scheduledRateMonthKeys = getScheduledMonthKeys(
     billMonthKey,
     0,
     settings.monthlyElectricRates
   );
-  const nextMonthRate = getElectricRateForPeriod(settings, nextMonthKey);
 
   return (
     <div
@@ -658,557 +562,83 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         )}
 
-        {/* Mobile-First Interactive Receipt View (Hidden during A4 Print/PDF) */}
-        <div className="receipt-mobile-interactive receipt-sheet-container flex-1 overflow-y-auto p-2.5 sm:p-5 bg-[#090D15]">
-          <div
-            id="receipt-printable-sheet"
-            className="receipt-white-sheet mx-auto w-full max-w-[660px] bg-white text-slate-900 rounded-2xl p-4 sm:p-6 shadow-2xl font-sans border border-slate-200 relative space-y-3.5"
-          >
-            {/* 1. Clean Text-Only Centered Letterhead (No System Logo) */}
-            <div className="text-center border-b-2 border-slate-900 pb-4 space-y-1.5">
-              <h1 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-950 leading-snug break-words">
-                {settings.apartmentName || 'Rental Property Statement'}
-              </h1>
-              <p className="text-[11px] sm:text-xs font-bold text-slate-600 uppercase tracking-widest">
-                Official Statement of Account &amp; Sub-Meter Receipt
-              </p>
-              <p className="text-xs text-slate-600">
-                {displayLandlordName}
-                {settings.landlordPhone && (
-                  <>
-                    {' • '}
-                    {maskPhoneNumber(
-                      settings.landlordPhone,
-                      maskContactsOnReceipt
-                    )}
-                  </>
-                )}
-              </p>
-
-              {/* Status & Receipt Metadata Bar */}
-              <div className="pt-2 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 text-xs">
-                <span
-                  className={`inline-block px-3 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider border ${
-                    bill.status === 'paid'
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-600'
-                      : bill.status === 'partial'
-                      ? 'bg-amber-50 text-amber-800 border-amber-600'
-                      : 'bg-red-50 text-red-800 border-red-600'
-                  }`}
-                >
-                  {bill.status === 'paid'
-                    ? `PAID FOR ${bill.billingPeriod.toUpperCase()}`
-                    : bill.status === 'partial'
-                    ? `PARTIAL • ${bill.billingPeriod.toUpperCase()}`
-                    : `DUE • ${bill.billingPeriod.toUpperCase()}`}
-                </span>
-                <span className="font-mono-num font-extrabold text-slate-950">
-                  OR #{bill.receiptNo}
-                </span>
-                <span className="text-slate-400">•</span>
-                <span className="font-mono-num text-slate-600">
-                  Issued {formattedIssueDate}
-                </span>
+        {/* Canonical Interactive Receipt Preview (Identical to Exported PDF/PNG/Print Document) */}
+        <div className="receipt-mobile-interactive receipt-sheet-container flex-1 overflow-y-auto p-2.5 sm:p-5 bg-[#090D15] space-y-3">
+          {/* Optional Non-Print YTD Monthly Electric Rate Lookup Drawer */}
+          <div className="no-print max-w-[794px] mx-auto rounded-xl border border-[#243148] bg-[#141C2B] p-2.5 sm:px-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-300">
+                <CalendarClock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Monthly Electric Rate Schedule ({billMonthKey.split('-')[0]})</span>
               </div>
-            </div>
-
-            {/* 2. Aligned Unit & Tenant Summary Grid (Flush Mobile 2x2 & Desktop 4x1) */}
-            <div className="border border-slate-300 rounded-xl overflow-hidden bg-slate-200">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-px text-center">
-                <div className="bg-slate-50 p-3 flex flex-col justify-center">
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Unit / Room
-                  </span>
-                  <strong className="text-xs sm:text-sm font-black text-slate-950 block mt-1 break-words">
-                    {bill.roomName}
-                  </strong>
-                </div>
-                <div className="bg-slate-50 p-3 flex flex-col justify-center">
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Tenant
-                  </span>
-                  <strong className="text-xs sm:text-sm font-black text-slate-900 block mt-1 break-words leading-snug">
-                    {bill.tenantName}
-                  </strong>
-                  {bill.tenantPhone && (
-                    <span className="text-[11px] font-mono-num text-slate-600 block mt-0.5">
-                      {maskPhoneNumber(bill.tenantPhone, maskContactsOnReceipt)}
-                    </span>
-                  )}
-                </div>
-                <div className="bg-slate-50 p-3 flex flex-col justify-center">
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Billing Month
-                  </span>
-                  <strong className="text-xs sm:text-sm font-extrabold text-slate-900 block mt-1">
-                    {bill.billingPeriod}
-                  </strong>
-                </div>
-                <div className="bg-slate-50 p-3 flex flex-col justify-center">
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Due Date (1st-10th)
-                  </span>
-                  <strong className="text-xs sm:text-sm font-black font-mono-num text-slate-950 block mt-1">
-                    {formattedDueDate}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Monthly Electric Rate Breakdown & Billing Schedule */}
-            <div className="border border-slate-300 rounded-xl p-3 sm:p-4 bg-slate-50/70 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <CalendarClock className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span className="text-xs font-black uppercase tracking-wider text-slate-900">
-                    Monthly Electric Rate ({billMonthKey.split('-')[0]})
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowYtdSchedule((prev) => !prev)}
-                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer"
-                >
-                  <span>
-                    {isRateLockedReceipt ? 'Locked Rate' : 'YTD Rate Table'}
-                  </span>
-                  {showYtdSchedule ? (
-                    <ChevronUp className="w-3 h-3" />
-                  ) : (
-                    <ChevronDown className="w-3 h-3" />
-                  )}
-                </button>
-              </div>
-
-              {/* Collapsible Year-to-Date Monthly Electric Rate Table */}
-              {showYtdSchedule && (
-                <div className="rounded-lg border border-slate-200 bg-white overflow-hidden p-2">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
-                    {scheduledRateMonthKeys.map((mk) => {
-                      const isBillMonth = mk === billMonthKey;
-                      const hasCustomOverride =
-                        settings.monthlyElectricRates?.[mk] !== undefined;
-                      const displayRate = isBillMonth
-                        ? bill.electricRate
-                        : getElectricRateForPeriod(settings, mk);
-                      return (
-                        <div
-                          key={mk}
-                          className={`rounded-md border px-2.5 py-1.5 flex flex-col justify-between gap-0.5 text-xs ${
-                            isBillMonth
-                              ? 'bg-amber-50 border-amber-300'
-                              : 'bg-slate-50/70 border-slate-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1 min-w-0">
-                            <span className="font-bold text-slate-900 truncate">
-                              {formatMonthKeyLabel(mk, 'short')}
-                            </span>
-                            {isBillMonth ? (
-                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200/80 text-amber-950 shrink-0">
-                                Applied
-                              </span>
-                            ) : hasCustomOverride ? (
-                              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 text-blue-800 shrink-0">
-                                Custom
-                              </span>
-                            ) : null}
-                          </div>
-                          <span className="font-mono-num font-black text-slate-950 text-[11px] sm:text-xs">
-                            {formatPeso(displayRate)}/kWh
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* This Cycle vs Next Cycle Alignment Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
-                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
-                      This Cycle ({cycleSchedule.currentLabel})
-                    </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                      Active
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-slate-600">Coverage</span>
-                    <span className="font-mono-num font-semibold text-slate-900">
-                      {cycleSchedule.currentRange}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-slate-600">Rent Rate</span>
-                    <span className="font-mono-num font-bold text-slate-950">
-                      {formatPeso(bill.baseRent)} / mo
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-slate-600">
-                      Electric ({formatKwhReading(bill.consumptionKwh)} kWh)
-                    </span>
-                    <span className="font-mono-num font-bold text-slate-950 text-right">
-                      {formatPeso(bill.electricRate)}/kWh = {formatPeso(bill.electricTotal)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-slate-600">Due Date</span>
-                    <span className="font-mono-num font-bold text-slate-900">
-                      {formattedDueDate}
-                    </span>
-                  </div>
-                </div>
-
-                {hasReachedNextMonth ? (
-                  <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
-                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
-                        Next Cycle ({cycleSchedule.nextLabel})
-                      </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                        Follow-on
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-600">Coverage</span>
-                      <span className="font-mono-num font-semibold text-slate-900">
-                        {cycleSchedule.nextRange}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-600">Rent Rate</span>
-                      <span className="font-mono-num font-bold text-slate-950">
-                        {formatPeso(bill.baseRent)} / mo
-                      </span>
-                    </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-slate-600">Start Meter &amp; Rate</span>
-                      <span className="font-mono-num font-bold text-slate-950 text-right">
-                        {formatKwhReading(bill.currReading)} kWh (@{formatPeso(nextMonthRate)})
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-600">
-                        Next Due (Day {cycleSchedule.dueDayNumber})
-                      </span>
-                      <span className="font-mono-num font-bold text-slate-900">
-                        {cycleSchedule.nextDueLabel}
-                      </span>
-                    </div>
-                  </div>
+              <button
+                type="button"
+                onClick={() => setShowYtdSchedule((prev) => !prev)}
+                className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-lg bg-[#0F1522] border border-[#2B3B56] text-slate-200 hover:border-amber-500/40 cursor-pointer transition"
+              >
+                <span>{showYtdSchedule ? 'Hide YTD Table' : 'View YTD Rate Table'}</span>
+                {showYtdSchedule ? (
+                  <ChevronUp className="w-3 h-3" />
                 ) : (
-                  <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
-                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-900">
-                        Payment Window &amp; Meter Basis
-                      </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
-                        Verified
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-600">Payment Window</span>
-                      <span className="font-mono-num font-semibold text-slate-900">
-                        1st-10th Monthly (Day {cycleSchedule.dueDayNumber})
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-600">Rate Basis</span>
-                      <span className="font-mono-num font-bold text-slate-950">
-                        Jan - {formatMonthKeyLabel(currentCalendarKey, 'short')} YTD
-                      </span>
-                    </div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-slate-600">Closing Meter Carry</span>
-                      <span className="font-mono-num font-bold text-slate-950 text-right">
-                        {formatKwhReading(bill.currReading)} kWh
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-600">Advance Policy</span>
-                      <span className="font-mono-num font-bold text-slate-900 text-right">
-                        {settings.advanceCapMode === '1_month'
-                          ? `1 Month (${formatPeso(bill.baseRent)})`
-                          : 'Prepaid Wallet'}
-                      </span>
-                    </div>
-                  </div>
+                  <ChevronDown className="w-3 h-3" />
                 )}
-              </div>
+              </button>
             </div>
 
-            {/* 4. Section I: Sub-Meter Readings & Proof */}
-            <div className="border border-slate-300 rounded-xl p-3.5 sm:p-4 bg-slate-50/70 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
-                <div className="flex items-center gap-1.5">
-                  <Zap className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span className="text-xs font-black uppercase tracking-wider text-slate-900">
-                    Section I • Electric Sub-Meter Proof
-                  </span>
-                </div>
-                <span className="text-xs font-mono-num font-extrabold text-slate-900 bg-white px-2.5 py-0.5 rounded border border-slate-300">
-                  Rate ({bill.billingPeriod}): {formatPeso(bill.electricRate)}/kWh
-                </span>
-              </div>
-
-              {/* Dual Sub-Meter Columns */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Previous Reading */}
-                <div className="rounded-lg border border-slate-200 bg-white p-2.5 flex flex-col justify-between gap-2">
-                  <div className="flex items-center justify-between gap-2 text-xs pb-1.5 border-b border-slate-200">
-                    <span className="font-bold uppercase text-slate-600">
-                      1. Previous Meter
-                    </span>
-                    <span className="font-mono-num font-black text-slate-950">
-                      {formatKwhReading(bill.prevReading)} kWh
-                    </span>
-                  </div>
-                  {prevMeterProofImg && (
+            {showYtdSchedule && (
+              <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-1.5">
+                {scheduledRateMonthKeys.map((mk) => {
+                  const isBillMonth = mk === billMonthKey;
+                  const hasCustomOverride =
+                    settings.monthlyElectricRates?.[mk] !== undefined;
+                  const displayRate = isBillMonth
+                    ? bill.electricRate
+                    : getElectricRateForPeriod(settings, mk);
+                  return (
                     <div
-                      onClick={() =>
-                        openLightbox(
-                          prevMeterProofImg,
-                          `Previous Sub-Meter | ${bill.roomName}`,
-                          prevMeterCropImg,
-                          `${formatKwhReading(bill.prevReading)} kWh`
-                        )
-                      }
-                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 p-1"
-                      title="Click to inspect full 1:1 sub-meter proof"
+                      key={mk}
+                      className={`rounded-lg border px-2 py-1.5 text-xs ${
+                        isBillMonth
+                          ? 'bg-amber-500/15 border-amber-500/50 text-amber-200'
+                          : 'bg-[#0F1522] border-[#25324A] text-slate-300'
+                      }`}
                     >
-                      <img
-                        src={prevMeterProofImg}
-                        alt="Previous Sub-Meter Proof"
-                        className="w-full h-full object-contain group-hover:scale-105 transition duration-150"
-                      />
+                      <div className="flex items-center justify-between gap-1 text-[10px]">
+                        <span className="font-bold truncate">
+                          {formatMonthKeyLabel(mk, 'short')}
+                        </span>
+                        {isBillMonth ? (
+                          <span className="text-[8.5px] font-extrabold text-amber-400">
+                            Applied
+                          </span>
+                        ) : hasCustomOverride ? (
+                          <span className="text-[8.5px] font-bold text-sky-400">
+                            Custom
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="font-mono-num font-extrabold text-[11px] text-white mt-0.5">
+                        {formatPeso(displayRate)}/kWh
+                      </div>
                     </div>
-                  )}
-                  {prevMeterProofImg && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openLightbox(
-                          prevMeterProofImg,
-                          `Previous Sub-Meter | ${bill.roomName}`,
-                          prevMeterCropImg,
-                          `${formatKwhReading(bill.prevReading)} kWh`
-                        )
-                      }
-                      className="no-print w-full py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
-                    >
-                      <ZoomIn className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Inspect Photo</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Current Reading */}
-                <div className="rounded-lg border border-slate-200 bg-white p-2.5 flex flex-col justify-between gap-2">
-                  <div className="flex items-center justify-between gap-2 text-xs pb-1.5 border-b border-slate-200">
-                    <span className="font-bold uppercase text-slate-600">
-                      2. Current Meter
-                    </span>
-                    <span className="font-mono-num font-black text-slate-950">
-                      {formatKwhReading(bill.currReading)} kWh
-                    </span>
-                  </div>
-                  {currMeterProofImg && (
-                    <div
-                      onClick={() =>
-                        openLightbox(
-                          currMeterProofImg,
-                          `Current Sub-Meter | ${bill.roomName}`,
-                          currMeterCropImg,
-                          `${formatKwhReading(bill.currReading)} kWh`
-                        )
-                      }
-                      className="relative group cursor-zoom-in overflow-hidden rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center h-24 p-1"
-                      title="Click to inspect full 1:1 sub-meter proof"
-                    >
-                      <img
-                        src={currMeterProofImg}
-                        alt="Current Sub-Meter Proof"
-                        className="w-full h-full object-contain group-hover:scale-105 transition duration-150"
-                      />
-                    </div>
-                  )}
-                  {currMeterProofImg && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openLightbox(
-                          currMeterProofImg,
-                          `Current Sub-Meter | ${bill.roomName}`,
-                          currMeterCropImg,
-                          `${formatKwhReading(bill.currReading)} kWh`
-                        )
-                      }
-                      className="no-print w-full py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer transition"
-                    >
-                      <ZoomIn className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Inspect Photo</span>
-                    </button>
-                  )}
-                </div>
+                  );
+                })}
               </div>
-
-              {/* Centered Computation Strip */}
-              <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-center text-xs text-slate-800 leading-relaxed">
-                <span className="font-semibold">Usage: </span>
-                <strong className="font-mono-num text-slate-950">
-                  {formatKwhReading(bill.currReading)} - {formatKwhReading(bill.prevReading)} ={' '}
-                  {formatKwhReading(bill.consumptionKwh)} kWh
-                </strong>{' '}
-                x {formatPeso(bill.electricRate)}/kWh ={' '}
-                <strong className="font-mono-num text-slate-950 font-black">
-                  {formatPeso(bill.electricTotal)}
-                </strong>
-              </div>
-            </div>
-
-            {/* 5. Section II: Itemized Statement of Charges & Deposit Deductions */}
-            <div className="border border-slate-300 rounded-xl overflow-hidden bg-white">
-              <div className="bg-slate-100 px-3.5 sm:px-4 py-2.5 border-b border-slate-200 flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-800">
-                <span>Section II • Statement of Charges</span>
-                <span>Amount (PHP)</span>
-              </div>
-              <div className="divide-y divide-slate-200 text-xs sm:text-[13px]">
-                <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-slate-800">
-                  <span>1. Monthly Base Rent ({bill.billingPeriod})</span>
-                  <span className="font-mono-num font-bold text-slate-950 shrink-0 text-right">
-                    {formatPeso(bill.baseRent)}
-                  </span>
-                </div>
-
-                <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-slate-800">
-                  <span>
-                    2. Sub-Meter Electricity ({formatKwhReading(bill.consumptionKwh)} kWh @{' '}
-                    {formatPeso(bill.electricRate)}/kWh)
-                  </span>
-                  <span className="font-mono-num font-bold text-slate-950 shrink-0 text-right">
-                    {formatPeso(bill.electricTotal)}
-                  </span>
-                </div>
-
-                {bill.previousBalanceCarryOver > 0 && (
-                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-red-700 font-bold bg-red-50/50">
-                    <span>3. Unpaid Balance Carried Over</span>
-                    <span className="font-mono-num shrink-0 text-right">
-                      {formatPeso(bill.previousBalanceCarryOver)}
-                    </span>
-                  </div>
-                )}
-
-                {(bill.securityDepositApplied || 0) > 0 && (
-                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-emerald-800 font-bold bg-emerald-50/60">
-                    <span>
-                      Required Deposit Paid Deducted
-                      {(bill.securityDepositRemainingAfterBill || 0) > 0
-                        ? ` (${formatPeso(bill.securityDepositRemainingAfterBill || 0)} carries to further months)`
-                        : ''}
-                    </span>
-                    <span className="font-mono-num shrink-0 text-right">
-                      −{formatPeso(bill.securityDepositApplied || 0)}
-                    </span>
-                  </div>
-                )}
-
-                {(bill.advanceApplied || 0) > 0 && (
-                  <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-emerald-800 font-bold bg-emerald-50/40">
-                    <span>Advance Credit Applied</span>
-                    <span className="font-mono-num shrink-0 text-right">
-                      −{formatPeso(bill.advanceApplied || 0)}
-                    </span>
-                  </div>
-                )}
-
-                {bill.depositApplied > 0 &&
-                  !(bill.securityDepositApplied || 0) &&
-                  !(bill.advanceApplied || 0) && (
-                    <div className="px-3.5 sm:px-4 py-2.5 flex items-start justify-between gap-3 text-emerald-800 font-bold bg-emerald-50/50">
-                      <span>Deposit / Advance Credit Applied</span>
-                      <span className="font-mono-num shrink-0 text-right">
-                        −{formatPeso(bill.depositApplied)}
-                      </span>
-                    </div>
-                  )}
-
-                {/* Security Deposit note intentionally omitted from recurring statement */}
-              </div>
-
-              {/* Settlement Summary Box */}
-              <div className="bg-slate-50 border-t-2 border-slate-900 px-3.5 sm:px-4 py-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs sm:text-sm font-black uppercase text-slate-950">
-                    Net Total Amount Due
-                  </span>
-                  <span className="text-lg sm:text-xl font-black font-mono-num text-slate-950">
-                    {formatPeso(bill.totalAmountDue)}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-2 text-xs text-slate-700">
-                  <span>
-                    Cash / Transfer Paid{bill.paymentMethod ? ` (${bill.paymentMethod})` : ''}
-                  </span>
-                  <span className="font-mono-num font-bold text-emerald-700">
-                    {formatPeso(bill.amountPaid)}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-2 text-xs font-black text-slate-900">
-                  <span>Remaining Balance ({bill.billingPeriod})</span>
-                  <span
-                    className={`font-mono-num font-black ${
-                      bill.remainingBalance > 0
-                        ? 'text-red-700'
-                        : 'text-emerald-700'
-                    }`}
-                  >
-                    {formatPeso(bill.remainingBalance)}
-                  </span>
-                </div>
-                {bill.overpaymentToAdvance > 0 && (
-                  <div className="flex justify-between gap-2 text-xs font-bold text-emerald-700 pt-0.5">
-                    <span>
-                      Excess Credited to Advance Balance
-                    </span>
-                    <span className="font-mono-num">
-                      +{formatPeso(bill.overpaymentToAdvance)}
-                    </span>
-                  </div>
-                )}
-                {(resolvedRemainingAdvance > 0 ||
-                  (bill.advanceApplied || 0) > 0 ||
-                  bill.overpaymentToAdvance > 0) && (
-                  <div className="flex justify-between gap-2 text-xs font-extrabold text-emerald-800 pt-1 border-t border-slate-200">
-                    <span>Remaining Advance Credit</span>
-                    <span className="font-mono-num">
-                      {formatPeso(resolvedRemainingAdvance)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* 6. Clean Verification Seal & Official Footer */}
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-1.5">
-              <div className="inline-flex items-center justify-center gap-1.5 text-[11px] text-slate-600 font-medium">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>
-                  Payment Window: 1st-10th Monthly • Statement Verification
-                </span>
-              </div>
-              <div>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-mono-num font-black text-emerald-700 tracking-wider">
-                  <span className="text-slate-500 uppercase font-bold">Seal:</span>
-                  <span>{verificationSeal}</span>
-                </span>
-              </div>
-            </div>
+            )}
           </div>
+
+          <PrintableA4Receipt
+            interactiveMode
+            bill={bill}
+            settings={settings}
+            maskContactsOnReceipt={maskContactsOnReceipt}
+            prevMeterProofImg={prevMeterProofImg}
+            prevMeterCropImg={prevMeterCropImg}
+            currMeterProofImg={currMeterProofImg}
+            currMeterCropImg={currMeterCropImg}
+            remainingAdvanceCredit={resolvedRemainingAdvance}
+            onInspectPhoto={openLightbox}
+          />
         </div>
 
         {/* Dedicated Offscreen A4 Portrait Document Used for PDF Export, PNG Export, Sharing & Print */}
@@ -1222,7 +652,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             settings={settings}
             maskContactsOnReceipt={maskContactsOnReceipt}
             prevMeterProofImg={prevMeterProofImg}
+            prevMeterCropImg={prevMeterCropImg}
             currMeterProofImg={currMeterProofImg}
+            currMeterCropImg={currMeterCropImg}
             remainingAdvanceCredit={resolvedRemainingAdvance}
           />
         </div>

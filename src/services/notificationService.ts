@@ -2,6 +2,8 @@
  * Notification Verification & Messenger Receipt Forwarding Service.
  */
 
+import { buildReceiptDocumentMeta } from '../utils/pdfReceiptGenerator';
+
 export async function requestAndVerifyNotifications(): Promise<{
   granted: boolean;
   verified: boolean;
@@ -152,42 +154,22 @@ export function buildReceiptShareDescriptor(options: {
   roomName?: string;
   messengerHandle?: string;
 }): ReceiptShareDescriptor {
-  const cleanHandle = (options.messengerHandle || '')
-    .trim()
-    .replace(/^https?:\/\/(www\.)?(m\.me|messenger\.com\/t|facebook\.com)\//i, '')
-    .replace(/^@/, '')
-    .replace(/\/+$/, '');
-
-  const cleanReceiptNo = (options.receiptNo || 'Receipt').trim();
-  const cleanRoom = (options.roomName || 'Room').trim();
-  const rawTenant = (options.tenantName || '').trim();
-  const lowerTenant = rawTenant.toLowerCase();
-  const hasNamedTenant =
-    Boolean(rawTenant) &&
-    lowerTenant !== 'vacant' &&
-    lowerTenant !== 'no active tenant' &&
-    lowerTenant !== 'current room tenant';
-
-  const safeReceipt = cleanReceiptNo.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'Receipt';
-  const safeRoom = cleanRoom.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'Room';
-  const safeTenant = hasNamedTenant
-    ? rawTenant.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '')
-    : '';
-
-  const baseName = safeTenant
-    ? `4Rent_Receipt_${safeReceipt}_${safeRoom}_${safeTenant}`
-    : `4Rent_Receipt_${safeReceipt}_${safeRoom}`;
+  const meta = buildReceiptDocumentMeta({
+    receiptNo: options.receiptNo || 'Receipt',
+    roomName: options.roomName || 'Room',
+    tenantName: options.tenantName || '',
+    billingPeriod: '',
+    tenantMessenger: options.messengerHandle,
+  });
 
   return {
-    pdfFilename: `${baseName}.pdf`,
-    pngFilename: `${baseName}.png`,
-    shareTitle: hasNamedTenant
-      ? `4Rent Receipt ${cleanReceiptNo} | ${cleanRoom} | ${rawTenant}`
-      : `4Rent Receipt ${cleanReceiptNo} | ${cleanRoom}`,
-    messengerHandle: cleanHandle,
+    pdfFilename: meta.pdfFilename,
+    pngFilename: meta.pngFilename,
+    shareTitle: meta.shareTitle,
+    messengerHandle: meta.messengerHandle,
     requiresManualRecipient: false,
-    targetMessengerUrl: cleanHandle
-      ? `https://m.me/${encodeURIComponent(cleanHandle)}`
+    targetMessengerUrl: meta.messengerHandle
+      ? `https://m.me/${encodeURIComponent(meta.messengerHandle)}`
       : 'https://www.messenger.com/',
   };
 }

@@ -12,12 +12,12 @@ import {
   Zap,
 } from 'lucide-react';
 import {
-  AdvanceBalanceTransaction,
   AdvanceCapPolicyMode,
   Room,
 } from '../../types/rental';
 import {
-  generateFinancialRefNo,
+  buildRoomSaveAdvanceHistory,
+  fromCentavos,
   getAdvancePolicyAllowance,
   roundCurrencyCentavos,
   toCentavos,
@@ -143,8 +143,8 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   const reqDepNum = Math.max(0, parseFloat(requiredSecurityDeposit) || 0);
   const paidDepNum = Math.max(0, parseFloat(amountDepositPaidByTenant) || 0);
   const excessDepositToAdvance =
-    paidDepNum > reqDepNum
-      ? Math.round((paidDepNum - reqDepNum) * 100) / 100
+    toCentavos(paidDepNum) > toCentavos(reqDepNum)
+      ? fromCentavos(toCentavos(paidDepNum) - toCentavos(reqDepNum))
       : 0;
 
   const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOfMonth, 10) || 5);
@@ -242,59 +242,22 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
     }
 
     const nowIso = new Date().toISOString();
-    const prevAdvanceHistory: AdvanceBalanceTransaction[] = initialRoom?.advanceHistory || [];
-    let updatedAdvanceHistory = prevAdvanceHistory;
-    if (status === 'occupied') {
-      const entriesToPrepend: AdvanceBalanceTransaction[] = [];
-      const initialRoomAdv = roundCurrencyCentavos(initialRoom?.advanceRent || 0);
-      if (!initialRoom && baseAdvance > 0) {
-        entriesToPrepend.unshift({
-          id: `adv-init-${Date.now()}`,
-          type: 'manual_deposit',
-          category: 'advance_credit',
-          amount: baseAdvance,
-          createdAt: nowIso,
-          description: 'Opening Advance Credit Balance',
-          note: `Opening Advance Balance on ${cleanName} move-in`,
-          referenceNo: generateFinancialRefNo('ADV', nowIso),
-          balanceBefore: 0,
-          balanceAfter: baseAdvance,
-          status: 'completed',
-        });
-      }
-      if (excessDepositToAdvance > 0) {
-        const beforeCents = toCentavos(baseAdvance);
-        const afterCents = beforeCents + toCentavos(excessDepositToAdvance);
-        entriesToPrepend.unshift({
-          id: `adv-exdep-${Date.now() + 1}`,
-          type: 'overpayment_credit',
-          category: 'advance_credit',
-          amount: excessDepositToAdvance,
-          createdAt: nowIso,
-          description: 'Excess Security Deposit Credited to Advance',
-          note: `Tenant paid ${formatPeso(
-            paidDepNum
-          )} for required deposit ${formatPeso(
-            reqDepNum
-          )} (+${formatPeso(
-            excessDepositToAdvance
-          )} to Advance Balance)`,
-          referenceNo: generateFinancialRefNo('ADV', nowIso),
-          balanceBefore: beforeCents / 100,
-          balanceAfter: afterCents / 100,
-          status: 'completed',
-        });
-      }
-      if (entriesToPrepend.length > 0) {
-        updatedAdvanceHistory = [...entriesToPrepend, ...prevAdvanceHistory];
-      }
-    } else {
-      updatedAdvanceHistory = [];
-    }
+    const updatedAdvanceHistory = buildRoomSaveAdvanceHistory({
+      roomName: cleanName,
+      nextStatus: status,
+      previousStatus: initialRoom?.status,
+      previousAdvanceRent: initialRoom?.advanceRent || 0,
+      nextBaseAdvance: baseAdvance,
+      excessDepositToAdvance,
+      paidSecurityDeposit: paidDepNum,
+      requiredSecurityDeposit: reqDepNum,
+      previousHistory: initialRoom?.advanceHistory || [],
+      nowIso,
+    });
 
     const appliedSecurityDepositPaid =
       status === 'occupied'
-        ? Math.round(Math.min(paidDepNum, reqDepNum) * 100) / 100
+        ? fromCentavos(Math.min(toCentavos(paidDepNum), toCentavos(reqDepNum)))
         : 0;
 
     const roomPayload: Omit<Room, 'id' | 'updatedAt'> = {
@@ -567,7 +530,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                           onClick={() => setAmountDepositPaidByTenant(String(reqDepNum))}
                           className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 cursor-pointer"
                         >
-                          Mark Full Paid
+                          Full Paid
                         </button>
                       )}
                     </div>

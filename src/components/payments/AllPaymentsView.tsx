@@ -24,7 +24,10 @@ import {
   normalizeMonthKey,
   roundCurrency,
 } from '../../utils/billingCalculator';
-import { getAdvancePolicyAllowance } from '../../utils/financialEngine';
+import {
+  formatKwhReading,
+  getAdvancePolicyAllowance,
+} from '../../utils/financialEngine';
 
 interface AllPaymentsViewProps {
   bills: BillRecord[];
@@ -426,8 +429,8 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         2 Sub-Meters (Prev → Curr)
                       </span>
                       <span className="font-mono-num font-bold text-slate-200 mt-0.5 block">
-                        {bill.prevReading.toFixed(1)} →{' '}
-                        {bill.currReading.toFixed(1)} kWh
+                        {formatKwhReading(bill.prevReading)} →{' '}
+                        {formatKwhReading(bill.currReading)} kWh
                       </span>
                     </div>
                     <div className="rounded-2xl bg-[#0D121B] p-3 border border-[#202B40]">
@@ -436,7 +439,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                       </span>
                       <span className="font-mono-num font-bold text-amber-400 flex items-center gap-1 mt-0.5">
                         <Zap className="w-3 h-3" />
-                        {bill.consumptionKwh.toFixed(1)} kWh (
+                        {formatKwhReading(bill.consumptionKwh)} kWh (
                         {formatPeso(bill.electricTotal)})
                       </span>
                     </div>

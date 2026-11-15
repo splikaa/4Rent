@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
 import { isMobileDevice } from '../../utils/billingCalculator';
+import { resolveConfiguredPropertyCode } from '../../utils/propertyCode';
 
 interface DownloadAppsModalProps {
   isOpen: boolean;
@@ -29,10 +30,11 @@ interface DownloadAppsModalProps {
 export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   isOpen,
   onClose,
-  propertyCode = '4RENT-MAIN',
+  propertyCode,
   canInstallPwa = false,
   onInstallPwa,
 }) => {
+  const effectivePropertyCode = resolveConfiguredPropertyCode(propertyCode);
   const [copiedExeLink, setCopiedExeLink] = useState(false);
   const [copiedZipLink, setCopiedZipLink] = useState(false);
   const [copiedApkLink, setCopiedApkLink] = useState(false);
@@ -48,7 +50,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   const zipUrl = `${baseUrl}/4Rent-Desktop-Windows.zip`;
   const exeUrl = `${baseUrl}/4Rent-Launcher.exe`;
   const apkUrl = `${baseUrl}/4Rent-v1.0.0-release.apk`;
-  const pairUrl = `${baseUrl}/?prop=${encodeURIComponent(propertyCode)}`;
+  const pairUrl = `${baseUrl}/?prop=${encodeURIComponent(effectivePropertyCode)}`;
 
   const copyToClipboard = async (
     text: string,

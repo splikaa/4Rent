@@ -63,6 +63,7 @@ import {
   isMobileDevice,
   normalizeMonthKey,
 } from '../../utils/billingCalculator';
+import { resolveConfiguredPropertyCode } from '../../utils/propertyCode';
 
 interface SettingsViewProps {
   settings: AppSettings;
@@ -90,7 +91,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const [form, setForm] = useState<AppSettings>(settings);
   const [mobileCodeDraft, setMobileCodeDraft] = useState<string>(
-    () => settings.cloudSync.propertyCode || '4RENT-MAIN'
+    () => resolveConfiguredPropertyCode(settings.cloudSync.propertyCode)
   );
   const [isApplyingMobileCode, setIsApplyingMobileCode] = useState(false);
   const [customMonthInput, setCustomMonthInput] = useState(() =>
@@ -101,7 +102,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   useEffect(() => {
     setForm(settings);
-    setMobileCodeDraft(settings.cloudSync.propertyCode || '4RENT-MAIN');
+    setMobileCodeDraft(resolveConfiguredPropertyCode(settings.cloudSync.propertyCode));
   }, [settings]);
 
   const mobileLock = getMobileCodeMonthlyLock(form.cloudSync);
@@ -142,7 +143,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSaveGeneral = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateSettings(form);
+    const normalizedForm: AppSettings = {
+      ...form,
+      cloudSync: {
+        ...form.cloudSync,
+        propertyCode: resolveConfiguredPropertyCode(form.cloudSync?.propertyCode),
+      },
+    };
+    setForm(normalizedForm);
+    onUpdateSettings(normalizedForm);
     setStatusBanner('Settings saved successfully.');
     setTimeout(() => setStatusBanner(null), 3000);
   };
@@ -154,7 +163,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleSmartSync = async () => {
     setIsSyncing(true);
     setStatusBanner(null);
-    onUpdateSettings(form);
+    const normalizedForm: AppSettings = {
+      ...form,
+      cloudSync: {
+        ...form.cloudSync,
+        propertyCode: resolveConfiguredPropertyCode(form.cloudSync?.propertyCode),
+      },
+    };
+    setForm(normalizedForm);
+    onUpdateSettings(normalizedForm);
 
     const net = getNetworkStatus();
     if (!net.isOnline) {
@@ -339,7 +356,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return 'Generate a private code on Desktop/Web, sync your data, then enter it once per month on Mobile.';
     }
     if (mobileLock.isLockedThisMonth) {
-      return `Active code (${form.cloudSync.propertyCode || '4RENT-MAIN'}) applied for ${formatMonthKeyLabel(mobileLock.currentMonthKey, 'long')}. Code changes are limited to once per month on mobile.`;
+      return `Active code (${resolveConfiguredPropertyCode(form.cloudSync.propertyCode)}) applied for ${formatMonthKeyLabel(mobileLock.currentMonthKey, 'long')}. Code changes are limited to once per month on mobile.`;
     }
     return 'Paste the code from Desktop/Web and tap Apply Code & Refresh. Refreshes the app and loads all data inside that code (allowed once per month).';
   };
@@ -966,7 +983,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   value={
                     isMobile
                       ? mobileCodeDraft
-                      : form.cloudSync.propertyCode || '4RENT-MAIN'
+                      : form.cloudSync.propertyCode ?? ''
                   }
                   disabled={isMobile && (mobileLock.isLockedThisMonth || isApplyingMobileCode)}
                   onChange={(e) => {
@@ -1040,7 +1057,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     type="button"
                     onClick={async () => {
                       await navigator.clipboard.writeText(
-                        form.cloudSync.propertyCode || '4RENT-MAIN'
+                        resolveConfiguredPropertyCode(form.cloudSync.propertyCode)
                       );
                       setCopiedSyncCode(true);
                       setTimeout(() => setCopiedSyncCode(false), 2500);
@@ -1064,7 +1081,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     type="button"
                     onClick={async () => {
                       const prop = encodeURIComponent(
-                        form.cloudSync.propertyCode || '4RENT-MAIN'
+                        resolveConfiguredPropertyCode(form.cloudSync.propertyCode)
                       );
                       const proj = form.cloudSync.firebaseProjectId
                         ? `&proj=${encodeURIComponent(form.cloudSync.firebaseProjectId)}`
@@ -1323,7 +1340,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   </div>
                   <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-500/15 border border-amber-500/30 text-amber-400">
-                    {settings.cloudSync?.propertyCode || '4RENT-MAIN'}
+                    {resolveConfiguredPropertyCode(settings.cloudSync?.propertyCode)}
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
@@ -1345,7 +1362,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <button
                       type="button"
                       onClick={async () => {
-                        await navigator.clipboard.writeText(settings.cloudSync?.propertyCode || '4RENT-MAIN');
+                        await navigator.clipboard.writeText(
+                          resolveConfiguredPropertyCode(settings.cloudSync?.propertyCode)
+                        );
                         setCopiedExeDirect(true);
                         setTimeout(() => setCopiedExeDirect(false), 2400);
                       }}

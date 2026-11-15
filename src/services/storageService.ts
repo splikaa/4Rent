@@ -9,10 +9,15 @@ import {
   TenantHistoryEntry,
 } from '../types/rental';
 import {
+  saveMeterMasterImage,
   saveSnapshotToIndexedDb,
   loadSnapshotFromIndexedDb,
 } from './idbDatabase';
 import { reconcileRoomAdvanceLedger } from '../utils/financialEngine';
+import {
+  getOrCreateDevicePropertyCode,
+  normalizePropertyCode,
+} from '../utils/propertyCode';
 
 let _isAppHydrated = false;
 
@@ -45,49 +50,285 @@ const DEV_FIREBASE_DATABASE_URL =
   viteEnv.VITE_FIREBASE_DATABASE_URL ||
   'https://rent-41279-default-rtdb.asia-southeast1.firebasedatabase.app';
 const DEV_FIREBASE_API_KEY = viteEnv.VITE_FIREBASE_API_KEY || '';
-const DEV_PROPERTY_CODE = viteEnv.VITE_PROPERTY_CODE || '4RENT-MAIN';
+const DEV_PROPERTY_CODE = normalizePropertyCode(viteEnv.VITE_PROPERTY_CODE || '');
 
-export const DEFAULT_SETTINGS: AppSettings = {
-  apartmentName: '4Rent Management System',
-  landlordName: 'Property Administrator',
-  landlordPhone: '0917-000-0000',
-  landlordMessenger: '',
-  paymentInstructions: '',
-  defaultElectricRate: 15.0,
-  monthlyElectricRates: {},
-  defaultMonthlyRent: 4500.0,
-  defaultSecurityDeposit: 4500.0,
-  advanceCapMode: 'unlimited',
-  remindersPromptShown: false,
-  remindersEnabled: false,
-  receiptPrintFormat: 'standard',
-  privacyMaskEnabled: false,
-  maskReceiptContacts: true,
-  security: {
-    isSetupComplete: false,
-    lockEnabled: true,
-    authMethod: 'pin',
-    pinCode: '1234',
-    autoLockMinutes: 15,
-    requirePinForSensitiveActions: true,
-  },
-  cloudSync: {
-    enabled: true,
-    provider: 'firebase',
-    firebaseProjectId: DEV_FIREBASE_PROJECT_ID,
-    firebaseApiKey: DEV_FIREBASE_API_KEY,
-    firebaseDatabaseUrl: DEV_FIREBASE_DATABASE_URL,
-    propertyCode: DEV_PROPERTY_CODE,
-  },
-};
+function createDefaultSettings(): AppSettings {
+  return {
+    apartmentName: '4Rent Management System',
+    landlordName: 'Property Administrator',
+    landlordPhone: '0917-000-0000',
+    landlordMessenger: '',
+    paymentInstructions: '',
+    defaultElectricRate: 15.0,
+    monthlyElectricRates: {},
+    defaultMonthlyRent: 4500.0,
+    defaultSecurityDeposit: 4500.0,
+    advanceCapMode: 'unlimited',
+    remindersPromptShown: false,
+    remindersEnabled: false,
+    receiptPrintFormat: 'standard',
+    privacyMaskEnabled: false,
+    maskReceiptContacts: true,
+    security: {
+      isSetupComplete: false,
+      lockEnabled: true,
+      authMethod: 'pin',
+      pinCode: '1234',
+      autoLockMinutes: 15,
+      requirePinForSensitiveActions: true,
+    },
+    cloudSync: {
+      enabled: true,
+      provider: 'firebase',
+      firebaseProjectId: DEV_FIREBASE_PROJECT_ID,
+      firebaseApiKey: DEV_FIREBASE_API_KEY,
+      firebaseDatabaseUrl: DEV_FIREBASE_DATABASE_URL,
+      propertyCode: DEV_PROPERTY_CODE || getOrCreateDevicePropertyCode(),
+    },
+  };
+}
+
+export const DEFAULT_SETTINGS: AppSettings = createDefaultSettings();
+
+const INLINE_DATA_URL_THRESHOLD = 4000;
+
+function fastContentHash(input: string): string {
+  let hash = 0x811c9dc5;
+  const len = input.length;
+  const step = Math.max(1, Math.floor(len / 96));
+  for (let i = 0; i < len; i += step) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  hash ^= len;
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function offloadImageValue(
+  scopeId: string,
+  val: string | undefined,
+  maxInlineChars = INLINE_DATA_URL_THRESHOLD
+): string | undefined {
+  if (!val || !val.startsWith('data:') || val.length <= maxInlineChars) {
+    return val;
+  }
+  const safeScope = scopeId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const key = `idb:meter:${safeScope}_${fastContentHash(val)}`;
+  void saveMeterMasterImage(key, val);
+  return key;
+}
+
+function compactRoomsMedia(
+  rooms: Room[],
+  maxInlineChars = INLINE_DATA_URL_THRESHOLD
+): { compacted: Room[]; changed: boolean } {
+  let changed = false;
+  const compacted = rooms.map((r) => {
+    const nextPhoto = offloadImageValue(
+      `room_${r.id}_photo`,
+      r.lastMeterPhotoDataUrl,
+      maxInlineChars
+    );
+    const nextCrop = offloadImageValue(
+      `room_${r.id}_crop`,
+      r.lastMeterCropDataUrl,
+      maxInlineChars
+    );
+    if (nextPhoto !== r.lastMeterPhotoDataUrl || nextCrop !== r.lastMeterCropDataUrl) {
+      changed = true;
+      return {
+        ...r,
+        lastMeterPhotoDataUrl: nextPhoto,
+        lastMeterCropDataUrl: nextCrop,
+      };
+    }
+    return r;
+  });
+  return { compacted, changed };
+}
+
+function compactBillsMedia(
+  bills: BillRecord[],
+  maxInlineChars = INLINE_DATA_URL_THRESHOLD
+): { compacted: BillRecord[]; changed: boolean } {
+  let changed = false;
+  const compacted = bills.map((b) => {
+    const nextPrev = offloadImageValue(
+      `bill_${b.id}_prev`,
+      b.prevMeterPhotoDataUrl,
+      maxInlineChars
+    );
+    const nextPrevCrop = offloadImageValue(
+      `bill_${b.id}_prev_crop`,
+      b.prevMeterCropDataUrl,
+      maxInlineChars
+    );
+    const nextCurr = offloadImageValue(
+      `bill_${b.id}_curr`,
+      b.meterPhotoDataUrl,
+      maxInlineChars
+    );
+    const nextCurrCrop = offloadImageValue(
+      `bill_${b.id}_curr_crop`,
+      b.currMeterCropDataUrl,
+      maxInlineChars
+    );
+    if (
+      nextPrev !== b.prevMeterPhotoDataUrl ||
+      nextPrevCrop !== b.prevMeterCropDataUrl ||
+      nextCurr !== b.meterPhotoDataUrl ||
+      nextCurrCrop !== b.currMeterCropDataUrl
+    ) {
+      changed = true;
+      return {
+        ...b,
+        prevMeterPhotoDataUrl: nextPrev,
+        prevMeterCropDataUrl: nextPrevCrop,
+        meterPhotoDataUrl: nextCurr,
+        currMeterCropDataUrl: nextCurrCrop,
+      };
+    }
+    return b;
+  });
+  return { compacted, changed };
+}
+
+function compactLogsMedia(
+  logs: SubMeterReadingLog[],
+  maxInlineChars = INLINE_DATA_URL_THRESHOLD
+): { compacted: SubMeterReadingLog[]; changed: boolean } {
+  let changed = false;
+  const compacted = logs.map((l) => {
+    const nextPhoto = offloadImageValue(`log_${l.id}_photo`, l.photoDataUrl, maxInlineChars);
+    const nextCrop = offloadImageValue(`log_${l.id}_crop`, l.cropDataUrl, maxInlineChars);
+    if (nextPhoto !== l.photoDataUrl || nextCrop !== l.cropDataUrl) {
+      changed = true;
+      return {
+        ...l,
+        photoDataUrl: nextPhoto,
+        cropDataUrl: nextCrop,
+      };
+    }
+    return l;
+  });
+  return { compacted, changed };
+}
+
+function isQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const maybe = err as { name?: string; code?: number; message?: string };
+  return (
+    maybe.name === 'QuotaExceededError' ||
+    maybe.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+    maybe.code === 22 ||
+    maybe.code === 1014 ||
+    /quota/i.test(String(maybe.message || ''))
+  );
+}
+
+function reclaimLocalStorageSpace(): void {
+  try {
+    // 1. Drop redundant legacy v1/v2 keys ONLY when modern 4rent_db_* keys already exist
+    const legacyPairs: Array<[string, string]> = [
+      [STORAGE_KEYS.ROOMS, '4rent_rooms_v2'],
+      [STORAGE_KEYS.ROOMS, '4rent_rooms_v1'],
+      [STORAGE_KEYS.BILLS, '4rent_bills_v2'],
+      [STORAGE_KEYS.BILLS, '4rent_bills_v1'],
+      [STORAGE_KEYS.INQUIRIES, '4rent_inquiries_v2'],
+      [STORAGE_KEYS.HISTORY, '4rent_tenant_history_v2'],
+      [STORAGE_KEYS.HISTORY, '4rent_tenant_history_v1'],
+      [STORAGE_KEYS.SETTINGS, '4rent_settings_v2'],
+      [STORAGE_KEYS.SETTINGS, '4rent_settings_v1'],
+      [STORAGE_KEYS.METER_LOGS, '4rent_meter_logs_v1'],
+    ];
+    for (const [modernKey, legacyKey] of legacyPairs) {
+      if (localStorage.getItem(modernKey) && localStorage.getItem(legacyKey)) {
+        localStorage.removeItem(legacyKey);
+      }
+    }
+
+    // 2. Aggressively offload ANY inline base64 images inside rooms, bills, and logs
+    const rawRooms = localStorage.getItem(STORAGE_KEYS.ROOMS);
+    if (rawRooms) {
+      const parsedRooms = JSON.parse(rawRooms);
+      if (Array.isArray(parsedRooms)) {
+        const { compacted, changed } = compactRoomsMedia(parsedRooms, 0);
+        if (changed) {
+          localStorage.setItem(STORAGE_KEYS.ROOMS, JSON.stringify(compacted));
+        }
+      }
+    }
+
+    const rawBills = localStorage.getItem(STORAGE_KEYS.BILLS);
+    if (rawBills) {
+      const parsedBills = JSON.parse(rawBills);
+      if (Array.isArray(parsedBills)) {
+        const { compacted, changed } = compactBillsMedia(parsedBills, 0);
+        if (changed) {
+          localStorage.setItem(STORAGE_KEYS.BILLS, JSON.stringify(compacted));
+        }
+      }
+    }
+
+    const rawLogs = localStorage.getItem(STORAGE_KEYS.METER_LOGS);
+    if (rawLogs) {
+      const parsedLogs = JSON.parse(rawLogs);
+      if (Array.isArray(parsedLogs)) {
+        const { compacted, changed } = compactLogsMedia(parsedLogs.slice(0, 40), 0);
+        if (changed || parsedLogs.length > 40) {
+          localStorage.setItem(STORAGE_KEYS.METER_LOGS, JSON.stringify(compacted));
+        }
+      }
+    }
+
+    // 3. Trim audit log history
+    const rawAudit = localStorage.getItem(STORAGE_KEYS.AUDIT_LOG);
+    if (rawAudit) {
+      const parsedAudit = JSON.parse(rawAudit);
+      if (Array.isArray(parsedAudit) && parsedAudit.length > 15) {
+        localStorage.setItem(
+          STORAGE_KEYS.AUDIT_LOG,
+          JSON.stringify(parsedAudit.slice(0, 15))
+        );
+      }
+    }
+  } catch {
+    // Ignore errors during emergency cleanup
+  }
+}
+
+function safeLocalStorageSetItem(key: string, serialized: string): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    localStorage.setItem(key, serialized);
+    return true;
+  } catch (err) {
+    if (isQuotaError(err)) {
+      reclaimLocalStorageSpace();
+      try {
+        localStorage.setItem(key, serialized);
+        return true;
+      } catch (retryErr) {
+        console.warn(
+          `[4Rent Storage] localStorage quota pressure on "${key}"; preserved in IndexedDB backup.`,
+          retryErr
+        );
+        return false;
+      }
+    }
+    console.warn(`[4Rent Storage] Failed writing "${key}":`, err);
+    return false;
+  }
+}
 
 export function loadSettings(): AppSettings {
+  const defaults = createDefaultSettings();
   try {
     const raw =
       localStorage.getItem(STORAGE_KEYS.SETTINGS) ||
       localStorage.getItem('4rent_settings_v2') ||
       localStorage.getItem('4rent_settings_v1');
-    if (!raw) return DEFAULT_SETTINGS;
+    if (!raw) return defaults;
     const parsed = JSON.parse(raw);
     const normalizedName =
       !parsed.apartmentName || parsed.apartmentName === '4Rent'
@@ -98,8 +339,19 @@ export function loadSettings(): AppSettings {
       Boolean(parsed.security?.isSetupComplete) &&
       rawAuthMethod !== 'none';
 
+    const rawCode = normalizePropertyCode(parsed.cloudSync?.propertyCode || '');
+    const isUntouchedLegacyDefault =
+      rawCode === '4RENT-MAIN' &&
+      !parsed.cloudSync?.lastSyncedAt &&
+      !parsed.cloudSync?.mobileCodeAppliedAt &&
+      !DEV_PROPERTY_CODE;
+    const resolvedPropertyCode =
+      !rawCode || isUntouchedLegacyDefault
+        ? defaults.cloudSync.propertyCode
+        : rawCode;
+
     return {
-      ...DEFAULT_SETTINGS,
+      ...defaults,
       ...parsed,
       apartmentName: normalizedName,
       monthlyElectricRates:
@@ -108,7 +360,7 @@ export function loadSettings(): AppSettings {
           ? parsed.monthlyElectricRates
           : {},
       security: {
-        ...DEFAULT_SETTINGS.security,
+        ...defaults.security,
         ...(parsed.security || {}),
         isSetupComplete: hasValidAuth,
         lockEnabled: true,
@@ -123,7 +375,7 @@ export function loadSettings(): AppSettings {
           parsed.security?.requirePinForSensitiveActions ?? true,
       },
       cloudSync: {
-        ...DEFAULT_SETTINGS.cloudSync,
+        ...defaults.cloudSync,
         ...(parsed.cloudSync || {}),
         provider: parsed.cloudSync?.provider || 'firebase',
         firebaseProjectId:
@@ -132,18 +384,18 @@ export function loadSettings(): AppSettings {
           parsed.cloudSync?.firebaseApiKey || DEV_FIREBASE_API_KEY,
         firebaseDatabaseUrl:
           parsed.cloudSync?.firebaseDatabaseUrl || DEV_FIREBASE_DATABASE_URL,
-        propertyCode: parsed.cloudSync?.propertyCode || DEV_PROPERTY_CODE,
+        propertyCode: resolvedPropertyCode,
       },
     };
   } catch {
-    return DEFAULT_SETTINGS;
+    return defaults;
   }
 }
 
 export function saveSettings(settings: AppSettings): void {
   const nextRaw = JSON.stringify(settings);
   if (localStorage.getItem(STORAGE_KEYS.SETTINGS) !== nextRaw) {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, nextRaw);
+    safeLocalStorageSetItem(STORAGE_KEYS.SETTINGS, nextRaw);
     persistMasterIndexedDb();
     broadcastLocalChange(STORAGE_KEYS.SETTINGS);
   }
@@ -156,11 +408,15 @@ export function loadRooms(): Room[] {
       localStorage.getItem('4rent_rooms_v2') ||
       localStorage.getItem('4rent_rooms_v1');
     const rooms: Room[] = raw ? JSON.parse(raw) : [];
+    const { compacted, changed } = compactRoomsMedia(rooms);
+    if (changed) {
+      safeLocalStorageSetItem(STORAGE_KEYS.ROOMS, JSON.stringify(compacted));
+    }
 
     // Strictly enforce rules:
     // 1. Vacant rooms NEVER hold advance balance or unpaid dues.
     // 2. Deposit is required and defaults to monthly rent if 0.
-    return rooms.map((r) => {
+    return compacted.map((r) => {
       const isVacant = r.status === 'vacant';
       const safeDeposit =
         r.securityDeposit > 0 ? r.securityDeposit : r.monthlyRent || 4500;
@@ -189,9 +445,10 @@ export function saveRooms(rooms: Room[]): void {
     };
     return isVacant ? nextRoom : reconcileRoomAdvanceLedger(nextRoom);
   });
-  const nextRaw = JSON.stringify(sanitized);
+  const { compacted } = compactRoomsMedia(sanitized);
+  const nextRaw = JSON.stringify(compacted);
   if (localStorage.getItem(STORAGE_KEYS.ROOMS) !== nextRaw) {
-    localStorage.setItem(STORAGE_KEYS.ROOMS, nextRaw);
+    safeLocalStorageSetItem(STORAGE_KEYS.ROOMS, nextRaw);
     persistMasterIndexedDb();
     broadcastLocalChange(STORAGE_KEYS.ROOMS);
   }
@@ -203,16 +460,22 @@ export function loadBills(): BillRecord[] {
       localStorage.getItem(STORAGE_KEYS.BILLS) ||
       localStorage.getItem('4rent_bills_v2') ||
       localStorage.getItem('4rent_bills_v1');
-    return raw ? JSON.parse(raw) : [];
+    const bills: BillRecord[] = raw ? JSON.parse(raw) : [];
+    const { compacted, changed } = compactBillsMedia(bills);
+    if (changed) {
+      safeLocalStorageSetItem(STORAGE_KEYS.BILLS, JSON.stringify(compacted));
+    }
+    return compacted;
   } catch {
     return [];
   }
 }
 
 export function saveBills(bills: BillRecord[]): void {
-  const nextRaw = JSON.stringify(bills);
+  const { compacted } = compactBillsMedia(bills);
+  const nextRaw = JSON.stringify(compacted);
   if (localStorage.getItem(STORAGE_KEYS.BILLS) !== nextRaw) {
-    localStorage.setItem(STORAGE_KEYS.BILLS, nextRaw);
+    safeLocalStorageSetItem(STORAGE_KEYS.BILLS, nextRaw);
     persistMasterIndexedDb();
     broadcastLocalChange(STORAGE_KEYS.BILLS);
   }
@@ -232,7 +495,7 @@ export function loadInquiries(): RoomInquiryBooking[] {
 export function saveInquiries(inquiries: RoomInquiryBooking[]): void {
   const nextRaw = JSON.stringify(inquiries);
   if (localStorage.getItem(STORAGE_KEYS.INQUIRIES) !== nextRaw) {
-    localStorage.setItem(STORAGE_KEYS.INQUIRIES, nextRaw);
+    safeLocalStorageSetItem(STORAGE_KEYS.INQUIRIES, nextRaw);
     persistMasterIndexedDb();
     broadcastLocalChange(STORAGE_KEYS.INQUIRIES);
   }
@@ -253,7 +516,7 @@ export function loadTenantHistory(): TenantHistoryEntry[] {
 export function saveTenantHistory(history: TenantHistoryEntry[]): void {
   const nextRaw = JSON.stringify(history);
   if (localStorage.getItem(STORAGE_KEYS.HISTORY) !== nextRaw) {
-    localStorage.setItem(STORAGE_KEYS.HISTORY, nextRaw);
+    safeLocalStorageSetItem(STORAGE_KEYS.HISTORY, nextRaw);
     persistMasterIndexedDb();
     broadcastLocalChange(STORAGE_KEYS.HISTORY);
   }
@@ -284,7 +547,7 @@ export function appendAuditLog(
     },
     ...existing,
   ].slice(0, 60);
-  localStorage.setItem(STORAGE_KEYS.AUDIT_LOG, JSON.stringify(next));
+  safeLocalStorageSetItem(STORAGE_KEYS.AUDIT_LOG, JSON.stringify(next));
   return next;
 }
 
@@ -293,7 +556,11 @@ export function loadReadingLogs(roomId?: string): SubMeterReadingLog[] {
     const raw =
       localStorage.getItem(STORAGE_KEYS.METER_LOGS) ||
       localStorage.getItem('4rent_meter_logs_v1');
-    const logs: SubMeterReadingLog[] = raw ? JSON.parse(raw) : [];
+    const rawLogs: SubMeterReadingLog[] = raw ? JSON.parse(raw) : [];
+    const { compacted: logs, changed } = compactLogsMedia(rawLogs);
+    if (changed) {
+      safeLocalStorageSetItem(STORAGE_KEYS.METER_LOGS, JSON.stringify(logs));
+    }
     if (!roomId) {
       return [...logs].sort((a, b) => b.readingDate.localeCompare(a.readingDate));
     }
@@ -306,9 +573,10 @@ export function loadReadingLogs(roomId?: string): SubMeterReadingLog[] {
 }
 
 export function saveReadingLogs(logs: SubMeterReadingLog[]): void {
-  const nextRaw = JSON.stringify(logs);
+  const { compacted } = compactLogsMedia(logs);
+  const nextRaw = JSON.stringify(compacted);
   if (localStorage.getItem(STORAGE_KEYS.METER_LOGS) !== nextRaw) {
-    localStorage.setItem(STORAGE_KEYS.METER_LOGS, nextRaw);
+    safeLocalStorageSetItem(STORAGE_KEYS.METER_LOGS, nextRaw);
     persistMasterIndexedDb();
     broadcastLocalChange(STORAGE_KEYS.METER_LOGS);
   }
