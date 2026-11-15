@@ -1,4 +1,4 @@
-const CACHE_NAME = '4rent-management-system-v1.0.5-unified-receipt-ocr-quota';
+const CACHE_NAME = '4rent-management-system-v1.0.6-space-switch-reset';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
