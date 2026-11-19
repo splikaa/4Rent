@@ -246,7 +246,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </span>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 font-semibold">
             <Calendar className="w-3.5 h-3.5 text-blue-400" />
-            <span>Pay Window: Day 1–10</span>
+            <span>Schedule: 1st–10th (Late 11th+)</span>
           </span>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#141B29] border border-[#243047] text-slate-300">
             <span>{formattedDateTime}</span>
@@ -330,7 +330,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       )})`
                   )
                   .join(' • ')}{' '}
-                • Due Day 1–10.
+                • Payment Period: 1st–10th (Late starts 11th).
               </p>
             </div>
           </div>

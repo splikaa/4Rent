@@ -7,6 +7,7 @@ import {
 } from '../types/rental';
 import {
   allocateChargesAndCredits,
+  computeBillComponentBalances,
   executeRecordPaymentTransaction,
   fromCentavos,
   getAdvancePolicyAllowance,
@@ -15,6 +16,7 @@ import {
   roundKwh,
   toCentavos,
 } from './financialEngine';
+import { getBillingMonthSchedule } from './rentSchedule';
 
 export interface OcrVerificationResult {
   rawReading: number;
@@ -53,6 +55,7 @@ export interface SubMeterCalculationResult {
 
 export interface FullBillInput {
   baseRent: number;
+  latePenalty?: number;
   prevReading: number;
   currReading: number;
   electricRate: number;
@@ -67,6 +70,8 @@ export interface FullBillResult {
   consumptionKwh: number;
   electricTotal: number;
   baseRent: number;
+  latePenalty: number;
+  totalRentDue: number;
   previousBalanceCarryOver: number;
   depositApplied: number;
   grossTotal: number;
@@ -79,6 +84,34 @@ export interface ApplyPaymentOutcome {
 }
 
 /**
+ * Detects iOS / iPadOS devices (including iPadOS Safari reporting Macintosh with touch points).
+ */
+export function isIOSDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(ua)) return true;
+  const navAny = navigator as Navigator & { maxTouchPoints?: number; platform?: string };
+  return navAny.platform === 'MacIntel' && (navAny.maxTouchPoints || 0) > 1;
+}
+
+/**
+ * Detects whether the app was launched from the iOS Home Screen (Safari Add to Home Screen).
+ */
+export function isRunningInIosStandalone(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  if (!isIOSDevice()) return false;
+  const navAny = navigator as Navigator & { standalone?: boolean };
+  return (
+    navAny.standalone === true ||
+    Boolean(window.matchMedia?.('(display-mode: standalone)').matches)
+  );
+}
+
+/**
  * Detects whether the current device is a mobile/tablet touch device.
  * Desktop systems use PIN-only authentication (no biometric prompts).
  */
@@ -87,17 +120,19 @@ export function isMobileDevice(): boolean {
     return false;
   }
   const ua = navigator.userAgent || '';
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    ua
+  return (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ||
+    isIOSDevice()
   );
 }
 
 /**
  * Detects whether 4Rent Management System is currently running inside the installed
- * Desktop Launcher (Electron, Edge/Chrome --app window, standalone PWA, or already installed).
+ * Desktop Launcher (Electron, Edge/Chrome --app window, standalone desktop PWA).
  */
 export function isRunningInDesktopApp(): boolean {
   if (typeof window === 'undefined') return false;
+  if (isMobileDevice()) return false;
   try {
     const ua = navigator.userAgent || '';
     if (/Electron/i.test(ua)) return true;
@@ -145,11 +180,25 @@ export function isRunningInDesktopApp(): boolean {
 }
 
 /**
- * Detects whether 4Rent is running inside the standalone Android Mobile APK
+ * Detects whether 4Rent is running inside the standalone Android Mobile APK or iOS Home Screen PWA.
  */
 export function isRunningInMobileApp(): boolean {
   if (typeof window === 'undefined') return false;
   try {
+    if (isRunningInIosStandalone()) {
+      localStorage.setItem('4rent_mobile_installed', 'true');
+      return true;
+    }
+
+    if (
+      isMobileDevice() &&
+      (window.matchMedia?.('(display-mode: standalone)').matches ||
+        window.matchMedia?.('(display-mode: minimal-ui)').matches)
+    ) {
+      localStorage.setItem('4rent_mobile_installed', 'true');
+      return true;
+    }
+
     const params = new URLSearchParams(window.location.search);
     if (
       params.get('mobile') === '1' ||
@@ -165,7 +214,7 @@ export function isRunningInMobileApp(): boolean {
     const hostname = window.location.hostname || '';
     if (
       hostname === 'appassets.androidplatform.net' ||
-      window.location.protocol === 'file:'
+      (window.location.protocol === 'file:' && isMobileDevice())
     ) {
       localStorage.setItem('4rent_mobile_installed', 'true');
       return true;
@@ -186,7 +235,7 @@ export function isRunningInMobileApp(): boolean {
       localStorage.setItem('4rent_mobile_installed', 'true');
       return true;
     }
-    if (localStorage.getItem('4rent_mobile_installed') === 'true') {
+    if (localStorage.getItem('4rent_mobile_installed') === 'true' && isMobileDevice()) {
       return true;
     }
   } catch {
@@ -715,6 +764,7 @@ export function calculateBillBreakdown(input: FullBillInput): FullBillResult {
 
   const allocated = allocateChargesAndCredits({
     baseRent: input.baseRent,
+    latePenalty: input.latePenalty || 0,
     electricTotal: subMeter.electricTotal,
     previousBalanceCarryOver: input.previousBalanceCarryOver,
     availableAdvanceCredit: input.depositApplied || 0,
@@ -724,6 +774,10 @@ export function calculateBillBreakdown(input: FullBillInput): FullBillResult {
     consumptionKwh: subMeter.consumptionKwh,
     electricTotal: subMeter.electricTotal,
     baseRent: allocated.baseRent,
+    latePenalty: allocated.latePenalty,
+    totalRentDue: fromCentavos(
+      toCentavos(allocated.baseRent) + toCentavos(allocated.latePenalty)
+    ),
     previousBalanceCarryOver: allocated.previousBalanceCarryOver,
     depositApplied: allocated.totalCreditsApplied,
     grossTotal: allocated.grossCharges,
@@ -1093,10 +1147,14 @@ export function formatMessengerBillSummary(
     );
   }
 
+  const compBalances = computeBillComponentBalances(bill);
+  const schedule = getBillingMonthSchedule(bill.billingPeriod);
+
   const lines = [
     `🏠 *${apartmentName || 'Rental Management'} • Statement & Receipt*`,
     `Receipt #: ${bill.receiptNo} (${seal})`,
     `Unit: *${bill.roomName}* • Tenant: ${bill.tenantName}`,
+    `Billing Month: *${bill.billingPeriod}* • Due Date: *${schedule.dueDateLabel}* (Payment Period: 1st-10th; Late Penalty starts ${schedule.lateStartLabel})`,
     `────────────────────`,
     `⚡ *MONTHLY ELECTRIC RATE BREAKDOWN (${billMonthKey.split('-')[0]} YTD)*`,
     ...rateLines,
@@ -1109,7 +1167,12 @@ export function formatMessengerBillSummary(
     `• Usage: *${bill.consumptionKwh.toFixed(1)} kWh* × ${formatPeso(bill.electricRate)}/kWh = *${formatPeso(bill.electricTotal)}*`,
     `────────────────────`,
     `📋 *CHARGES & SETTLEMENT*`,
-    `• Base Rent (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}`,
+    bill.isProrated && typeof bill.monthlyRentFull === 'number'
+      ? `• Monthly Rent: ${formatPeso(bill.monthlyRentFull)} → Prorated (${bill.occupiedDays}/${bill.daysInBillingMonth} days): ${formatPeso(bill.baseRent)}`
+      : `• Monthly Rent (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}`,
+    ...(bill.latePenalty && bill.latePenalty > 0
+      ? [`• Late Payment Penalty: ${formatPeso(bill.latePenalty)}${bill.latePenaltyLabel ? ` (${bill.latePenaltyLabel})` : ''}`]
+      : []),
     `• Electricity (${bill.consumptionKwh.toFixed(1)} kWh): ${formatPeso(bill.electricTotal)}`,
   ];
 
@@ -1146,6 +1209,11 @@ export function formatMessengerBillSummary(
     lines.push(`• Cash / Transfer Paid: ${formatPeso(bill.amountPaid)}${bill.paymentMethod ? ` (${bill.paymentMethod})` : ''}`);
   }
   lines.push(`• Remaining Balance: *${formatPeso(bill.remainingBalance)}*`);
+  if (compBalances.rentRemaining > 0 || compBalances.electricityRemaining > 0 || compBalances.latePenaltyRemaining > 0) {
+    lines.push(
+      `• Breakdown Unpaid: Rent ${formatPeso(compBalances.rentRemaining)} | Electricity ${formatPeso(compBalances.electricityRemaining)}${compBalances.latePenaltyRemaining > 0 ? ` | Late Penalty ${formatPeso(compBalances.latePenaltyRemaining)}` : ''}`
+    );
+  }
   if ((bill.advanceBalanceAfter ?? 0) > 0) {
     lines.push(
       `• Remaining Advance Credit: *${formatPeso(bill.advanceBalanceAfter || 0)}*`
@@ -1160,21 +1228,22 @@ export function formatMessengerBillSummary(
   }
 
   lines.push(`• Status: ${statusLabel}`);
-  lines.push(`Payment Window: Every 1st-10th Monthly | 4Rent Management System`);
+  lines.push(`Payment Period: 1st-10th (Late Penalty starts 11th) | 4Rent Management System`);
   return lines.join('\n');
 }
 
 export interface CalendarMeterScanEligibility {
   canScan: boolean;
-  reason: 'allowed' | 'paid' | 'future_month' | 'outside_pay_window';
+  reason: 'allowed' | 'paid' | 'future_month' | 'late_period';
   buttonLabel: string;
   helperText: string;
 }
 
 /**
  * Determines whether a landlord can click Scan Meter on the Due Calendar.
- * Scan Meter is locked when already paid for the month, when browsing future months,
- * or outside Pay Time Days (Day 1–10); Room Details remains viewable anytime.
+ * Scan Meter is locked when already settled for the month or when browsing future months.
+ * For the current or past billing month, scanning remains open during Days 1-10 (On-Time Window)
+ * AND starting Day 11+ (Late Period, where applicable late penalties apply).
  */
 export function getCalendarMeterScanEligibility(
   calendarYear: number,
@@ -1201,27 +1270,28 @@ export function getCalendarMeterScanEligibility(
     return {
       canScan: false,
       reason: 'future_month',
-      buttonLabel: 'Pay Days Only (1–10)',
+      buttonLabel: 'Future Month (Locked)',
       helperText:
-        'Future billing month. Scan Meter unlocks during Pay Days (Day 1–10) of that month.',
+        'Future billing month. Meter billing unlocks when that billing month begins.',
     };
   }
 
-  const dayOfMonth = today.getDate();
-  if (dayOfMonth < 1 || dayOfMonth > 10) {
+  const monthKey = `${calendarYear}-${String(calendarMonthZeroIndexed + 1).padStart(2, '0')}`;
+  const schedule = getBillingMonthSchedule(monthKey, today);
+
+  if (schedule.isPastDue) {
     return {
-      canScan: false,
-      reason: 'outside_pay_window',
-      buttonLabel: 'Pay Days Only (1–10)',
-      helperText:
-        'Outside Pay Time Days (Day 1–10). Open Room Details until the next pay window.',
+      canScan: true,
+      reason: 'late_period',
+      buttonLabel: 'Scan Meter & Bill (Late)',
+      helperText: `Past ${schedule.dueDateLabel} (${schedule.daysPastDue}d late). Applicable late penalty starts ${schedule.lateStartLabel}.`,
     };
   }
 
   return {
     canScan: true,
     reason: 'allowed',
-    buttonLabel: 'Scan Meter',
-    helperText: 'Active Pay Window (Day 1–10). Ready to scan sub-meter.',
+    buttonLabel: 'Scan Meter & Bill',
+    helperText: `Active Payment Period (${schedule.paymentPeriodLabel}). Ready to verify sub-meter & bill.`,
   };
 }

@@ -10,9 +10,9 @@ import {
 } from 'lucide-react';
 import { Room } from '../../types/rental';
 import {
-  clampDueDayOneToTen,
-  getNextDueDateInOneToTenWindow,
-} from '../../utils/billingCalculator';
+  getBillingMonthSchedule,
+  getCurrentBillingMonthKey,
+} from '../../utils/rentSchedule';
 
 interface OccupiedArchiveGuardModalProps {
   room: Room | null;
@@ -38,18 +38,13 @@ export const OccupiedArchiveGuardModal: React.FC<
   if (!room) return null;
 
   const tenant = room.tenant;
-  const dueDay = clampDueDayOneToTen(tenant?.dueDayOfMonth || 5);
-  const nextDueIso = getNextDueDateInOneToTenWindow(dueDay, tenant?.moveInDate);
-  const nextDueDate = new Date(nextDueIso);
+  const currentSchedule = getBillingMonthSchedule(getCurrentBillingMonthKey());
+  const nextDueDate = new Date(`${currentSchedule.paymentDueDate}T12:00:00`);
   const now = new Date();
   const diffMs = nextDueDate.getTime() - now.getTime();
-  const remainingDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+  const remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
-  const formattedDue = nextDueDate.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const formattedDue = currentSchedule.dueDateLabel;
 
   const hasContractSigned = tenant?.privacyConsentSigned !== false;
   const hasValidId = tenant?.validIdVerified !== false;

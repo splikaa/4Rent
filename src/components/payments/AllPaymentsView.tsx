@@ -14,6 +14,8 @@ import {
 import {
   AdvanceCapPolicyMode,
   BillRecord,
+  ComponentPaymentAllocation,
+  PaymentAllocationTarget,
   Room,
 } from '../../types/rental';
 import {
@@ -25,6 +27,7 @@ import {
   roundCurrency,
 } from '../../utils/billingCalculator';
 import {
+  computeBillComponentBalances,
   formatKwhReading,
   getAdvancePolicyAllowance,
 } from '../../utils/financialEngine';
@@ -41,7 +44,11 @@ interface AllPaymentsViewProps {
     amount: number,
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
     referenceNo?: string,
-    onCommitted?: () => void
+    onCommitted?: () => void,
+    paymentOptions?: {
+      allocationTarget?: PaymentAllocationTarget;
+      customAllocation?: Partial<ComponentPaymentAllocation>;
+    }
   ) => void;
   onOpenAdvanceModal?: (room: Room) => void;
   onArchiveBill: (billId: string) => void;
@@ -65,6 +72,11 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   const [filter, setFilter] = useState<'all' | 'this_month' | 'paid' | 'unpaid'>('all');
   const [payingBill, setPayingBill] = useState<BillRecord | null>(null);
   const [payAmount, setPayAmount] = useState('');
+  const [payAllocationTarget, setPayAllocationTarget] =
+    useState<PaymentAllocationTarget>('auto');
+  const [customRentPay, setCustomRentPay] = useState('');
+  const [customElecPay, setCustomElecPay] = useState('');
+  const [customPenaltyPay, setCustomPenaltyPay] = useState('');
   const [payError, setPayError] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<
     'Cash' | 'GCash' | 'Maya' | 'Bank Transfer'
@@ -105,12 +117,21 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   );
 
   const openPaymentDialog = (bill: BillRecord) => {
+    const comp = computeBillComponentBalances(bill);
     setPayingBill(bill);
+    setPayAllocationTarget('auto');
     setPayAmount(String(bill.remainingBalance));
+    setCustomRentPay(String(comp.rentRemaining));
+    setCustomElecPay(String(comp.electricityRemaining));
+    setCustomPenaltyPay(String(comp.latePenaltyRemaining));
     setPayError(null);
     setPayMethod('GCash');
     setPayRef('');
   };
+
+  const payingBillComponents = payingBill
+    ? computeBillComponentBalances(payingBill)
+    : null;
 
   const payingRoom = payingBill
     ? rooms.find((r) => r.id === payingBill.roomId)
@@ -137,8 +158,25 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     e.preventDefault();
     if (!payingBill) return;
     setPayError(null);
-    const amt = parseFloat(payAmount) || 0;
-    if (amt <= 0) return;
+
+    let amt = parseFloat(payAmount) || 0;
+    let customAllocation: Partial<ComponentPaymentAllocation> | undefined;
+    if (payAllocationTarget === 'custom') {
+      const rAmt = Math.max(0, parseFloat(customRentPay) || 0);
+      const eAmt = Math.max(0, parseFloat(customElecPay) || 0);
+      const pAmt = Math.max(0, parseFloat(customPenaltyPay) || 0);
+      amt = roundCurrency(rAmt + eAmt + pAmt);
+      customAllocation = {
+        rentPaid: rAmt,
+        electricityPaid: eAmt,
+        latePenaltyPaid: pAmt,
+      };
+    }
+
+    if (amt <= 0) {
+      setPayError('Enter a payment amount greater than ₱0.00.');
+      return;
+    }
     const excess = roundCurrency(
       Math.max(0, amt - (payingBill.remainingBalance || 0))
     );
@@ -155,11 +193,22 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
       amt,
       payMethod,
       payRef.trim() || undefined,
-      () => setPayingBill(null)
+      () => setPayingBill(null),
+      {
+        allocationTarget: payAllocationTarget,
+        customAllocation,
+      }
     );
   };
 
-  const enteredPayNum = parseFloat(payAmount) || 0;
+  const enteredPayNum =
+    payAllocationTarget === 'custom'
+      ? roundCurrency(
+          Math.max(0, parseFloat(customRentPay) || 0) +
+            Math.max(0, parseFloat(customElecPay) || 0) +
+            Math.max(0, parseFloat(customPenaltyPay) || 0)
+        )
+      : parseFloat(payAmount) || 0;
   const excessOverpayment =
     payingBill && enteredPayNum > payingBill.remainingBalance
       ? Math.round((enteredPayNum - payingBill.remainingBalance) * 100) / 100
@@ -348,6 +397,9 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
             {filteredBills.map((bill) => {
               const isPaid = bill.status === 'paid';
               const isPartial = bill.status === 'partial';
+              const comp = computeBillComponentBalances(bill);
+              const rentPaidWhileElecUnpaid =
+                comp.rentRemaining <= 0.005 && comp.electricityRemaining > 0.005;
 
               return (
                 <div
@@ -384,15 +436,22 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         <strong className="text-slate-200">
                           {bill.tenantName}
                         </strong>{' '}
-                        • Period: {bill.billingPeriod} • Pay Window: Every
-                        1st–10th (Due:{' '}
-                        {new Date(bill.dueDate).toLocaleDateString('en-PH')})
+                        • Period: {bill.billingPeriod} • Payment Period: 1st-10th (Due:{' '}
+                        {new Date(bill.dueDate).toLocaleDateString('en-PH')} • Late from 11th)
                       </p>
+                      {rentPaidWhileElecUnpaid && (
+                        <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/40 text-[11px] font-bold text-amber-300">
+                          <Zap className="w-3.5 h-3.5 shrink-0" />
+                          <span>
+                            Rent Paid • Electricity Balance Still Unpaid ({formatPeso(comp.electricityRemaining)}) • Bill Not Completed
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="text-left sm:text-right">
                       <div className="text-xs text-slate-400">
-                        Total Bill Amount
+                        Total Amount Due
                       </div>
                       <div className="text-xl font-extrabold text-white font-mono-num">
                         {formatPesoPrivacy(
@@ -402,7 +461,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                       </div>
                       {bill.remainingBalance > 0 ? (
                         <div className="text-xs font-bold text-amber-400 font-mono-num mt-0.5">
-                          Balance Due:{' '}
+                          Outstanding Balance:{' '}
                           {formatPesoPrivacy(
                             bill.remainingBalance,
                             privacyMaskEnabled
@@ -422,45 +481,72 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Dual Sub-Meter & Breakdown Row */}
+                  {/* Dual Sub-Meter & Separate Payment Component Breakdown Row */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 py-4 text-xs">
                     <div className="rounded-2xl bg-[#0D121B] p-3 border border-[#202B40]">
                       <span className="text-slate-400 block text-[11px]">
-                        2 Sub-Meters (Prev → Curr)
+                        Sub-Meter (Prev → Curr)
                       </span>
                       <span className="font-mono-num font-bold text-slate-200 mt-0.5 block">
                         {formatKwhReading(bill.prevReading)} →{' '}
                         {formatKwhReading(bill.currReading)} kWh
                       </span>
+                      <span className="text-[10px] text-amber-400 font-mono-num block mt-0.5">
+                        Δ {formatKwhReading(bill.consumptionKwh)} kWh @ {formatPeso(bill.electricRate)}/kWh
+                      </span>
                     </div>
                     <div className="rounded-2xl bg-[#0D121B] p-3 border border-[#202B40]">
                       <span className="text-slate-400 block text-[11px]">
-                        Difference (Δ kWh)
+                        Rent Payment{bill.isProrated ? ` (${bill.occupiedDays}/${bill.daysInBillingMonth}d)` : ''}
+                      </span>
+                      <span className="font-mono-num font-bold text-white mt-0.5 block">
+                        {formatPesoPrivacy(bill.baseRent, privacyMaskEnabled)}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold block mt-0.5 ${
+                          comp.rentRemaining > 0 ? 'text-amber-300' : 'text-emerald-400'
+                        }`}
+                      >
+                        {comp.rentRemaining > 0
+                          ? `Paid ${formatPeso(comp.rentPaid)} • Due ${formatPeso(comp.rentRemaining)}`
+                          : 'Rent Paid ✓'}
+                      </span>
+                    </div>
+                    <div className="rounded-2xl bg-[#0D121B] p-3 border border-[#202B40]">
+                      <span className="text-slate-400 block text-[11px]">
+                        Electricity Payment
                       </span>
                       <span className="font-mono-num font-bold text-amber-400 flex items-center gap-1 mt-0.5">
                         <Zap className="w-3 h-3" />
-                        {formatKwhReading(bill.consumptionKwh)} kWh (
-                        {formatPeso(bill.electricTotal)})
+                        {formatPeso(bill.electricTotal)}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold block mt-0.5 ${
+                          comp.electricityRemaining > 0 ? 'text-rose-400' : 'text-emerald-400'
+                        }`}
+                      >
+                        {comp.electricityRemaining > 0
+                          ? `Paid ${formatPeso(comp.electricityPaid)} • Unpaid ${formatPeso(comp.electricityRemaining)}`
+                          : 'Electricity Paid ✓'}
                       </span>
                     </div>
                     <div className="rounded-2xl bg-[#0D121B] p-3 border border-[#202B40]">
                       <span className="text-slate-400 block text-[11px]">
-                        Base Rent + Carry-Over
-                      </span>
-                      <span className="font-mono-num font-bold text-white mt-0.5 block">
-                        {formatPesoPrivacy(
-                          bill.baseRent + bill.previousBalanceCarryOver,
-                          privacyMaskEnabled
-                        )}
-                      </span>
-                    </div>
-                    <div className="rounded-2xl bg-[#0D121B] p-3 border border-[#202B40]">
-                      <span className="text-slate-400 block text-[11px]">
-                        Amount Collected
+                        {(bill.latePenalty || 0) > 0
+                          ? 'Late Penalty / Collected'
+                          : 'Total Collected'}
                       </span>
                       <span className="font-mono-num font-bold text-emerald-400 mt-0.5 block">
                         {formatPesoPrivacy(bill.amountPaid, privacyMaskEnabled)}
                       </span>
+                      {(bill.latePenalty || 0) > 0 && (
+                        <span className="text-[10px] font-bold text-rose-300 block mt-0.5">
+                          Penalty: {formatPeso(bill.latePenalty || 0)}
+                          {comp.latePenaltyRemaining > 0
+                            ? ` (${formatPeso(comp.latePenaltyRemaining)} due)`
+                            : ' (Paid)'}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -511,7 +597,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         type="button"
                         onClick={() => onSelectBillForReceipt(bill)}
                         className="p-2.5 rounded-2xl bg-[#1A2334] hover:bg-blue-500/20 text-blue-400 transition cursor-pointer btn-fluid"
-                        title="Share via Messenger"
+                        title="Open Receipt (Copy PNG / Share)"
                       >
                         <MessageCircle className="w-4 h-4" />
                       </button>
@@ -557,70 +643,213 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                     {payingBill.tenantName}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Remaining Bill Due:</span>
-                  <span className="font-bold text-amber-400 font-mono-num">
+                {payingBillComponents && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Unpaid Rent Balance:</span>
+                      <span className="font-bold text-white font-mono-num">
+                        {formatPeso(payingBillComponents.rentRemaining)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Unpaid Electricity Balance:</span>
+                      <span className="font-bold text-amber-400 font-mono-num">
+                        {formatPeso(payingBillComponents.electricityRemaining)}
+                      </span>
+                    </div>
+                    {payingBillComponents.latePenaltyRemaining > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Unpaid Late Penalty:</span>
+                        <span className="font-bold text-rose-400 font-mono-num">
+                          {formatPeso(payingBillComponents.latePenaltyRemaining)}
+                        </span>
+                      </div>
+                    )}
+                    {payingBillComponents.carryOverRemaining > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Carry-Over Balance:</span>
+                        <span className="font-bold text-rose-300 font-mono-num">
+                          {formatPeso(payingBillComponents.carryOverRemaining)}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+                <div className="flex justify-between pt-1.5 border-t border-[#222C3F]">
+                  <span className="text-slate-300 font-semibold">Total Outstanding Balance:</span>
+                  <span className="font-extrabold text-amber-400 font-mono-num">
                     {formatPeso(payingBill.remainingBalance)}
                   </span>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Amount Paid by Tenant (₱) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={payAmount}
-                  onChange={(e) => {
-                    setPayError(null);
-                    setPayAmount(e.target.value);
-                  }}
-                  className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-base font-bold text-emerald-400 font-mono-num"
-                />
-                {payError && (
-                  <p className="mt-2 rounded-xl bg-red-500/15 border border-red-500/30 p-2.5 text-xs text-red-300">
-                    {payError}
-                  </p>
-                )}
-                {excessOverpayment > 0 ? (
-                  <div className="mt-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 space-y-1 text-xs">
-                    <p className="font-extrabold text-emerald-300">
-                      Overpayment Breakdown (Requires Biometrics / 4-Digit PIN)
-                    </p>
-                    {payingBill.remainingBalance > 0 && (
-                      <p className="text-slate-300">
-                        • Applied to Current Remaining Balance:{' '}
-                        <strong className="text-white font-mono-num">
-                          {formatPeso(payingBill.remainingBalance)}
-                        </strong>{' '}
-                        (Bill Remaining → ₱0.00)
+              {payingBill.remainingBalance > 0 && payingBillComponents && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Apply Payment Component
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {(
+                      [
+                        { id: 'auto', label: 'All Due', preset: payingBill.remainingBalance },
+                        { id: 'rent', label: 'Rent Only', preset: payingBillComponents.rentRemaining },
+                        { id: 'electricity', label: 'Electric Only', preset: payingBillComponents.electricityRemaining },
+                        { id: 'custom', label: 'Custom Split', preset: payingBill.remainingBalance },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setPayAllocationTarget(opt.id);
+                          setPayError(null);
+                          if (opt.id !== 'custom') {
+                            setPayAmount(String(opt.preset));
+                          }
+                        }}
+                        className={`py-2 px-2 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+                          payAllocationTarget === opt.id
+                            ? 'bg-amber-500 text-slate-950 border-amber-500'
+                            : 'bg-[#0D121B] text-slate-300 border-[#253148] hover:border-slate-500'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {payAllocationTarget === 'rent' &&
+                    payingBillComponents.electricityRemaining > 0 && (
+                      <p className="mt-2 rounded-xl bg-amber-500/15 border border-amber-500/35 px-3 py-2 text-[11px] text-amber-200">
+                        Paying Rent only keeps Electricity balance ({formatPeso(payingBillComponents.electricityRemaining)}) unpaid. This bill will remain <strong>PARTIAL</strong> (never marked completed) until electricity is paid.
                       </p>
                     )}
-                    <p className="text-emerald-300">
-                      • Credited to Advance Balance
-                      {isAdvanceCapped
-                        ? ` (1-Month Max Allowance: ${formatPeso(remainingAdvanceAllowance)})`
-                        : ' (Prepaid Wallet)'}
-                      :{' '}
-                      <strong className="font-mono-num">
-                        +{formatPeso(excessOverpayment)}
-                      </strong>
-                    </p>
-                    <p className="text-[11px] text-slate-400">
-                      Recorded as a tracked Advance Transaction | Refundable anytime via Advance / Refund if tenant moves out.
-                    </p>
+                </div>
+              )}
+
+              {payAllocationTarget === 'custom' && payingBillComponents ? (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Rent Payment (₱)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={customRentPay}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/,/g, '');
+                        if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                        setCustomRentPay(raw);
+                      }}
+                      className="w-full h-10 rounded-xl bg-[#0D121B] border border-[#253148] px-3 text-sm font-bold text-white font-mono-num"
+                    />
                   </div>
-                ) : (
-                  <p className="text-[11px] text-slate-400 mt-1.5">
-                    {isAdvanceCapped
-                      ? `Credits against Remaining Balance first. Excess up to 1 month's rent advance (${formatPeso(remainingAdvanceAllowance)} remaining allowance) stores in Advance Balance.`
-                      : 'Credits against Remaining Balance first. Any excess automatically rolls into Prepaid Advance Credit.'}
-                  </p>
-                )}
-              </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-amber-300 mb-1">
+                      Electricity Payment (₱)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={customElecPay}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/,/g, '');
+                        if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                        setCustomElecPay(raw);
+                      }}
+                      className="w-full h-10 rounded-xl bg-[#0D121B] border border-amber-500/40 px-3 text-sm font-bold text-amber-400 font-mono-num"
+                    />
+                  </div>
+                  {payingBillComponents.latePenaltyRemaining > 0 && (
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-rose-300 mb-1">
+                        Late Penalty Payment (₱)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={customPenaltyPay}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/,/g, '');
+                          if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                          setCustomPenaltyPay(raw);
+                        }}
+                        className="w-full h-10 rounded-xl bg-[#0D121B] border border-rose-500/40 px-3 text-sm font-bold text-rose-300 font-mono-num"
+                      />
+                    </div>
+                  )}
+                  <div className="col-span-2 flex items-center justify-between rounded-xl bg-[#0D121B] border border-[#253148] px-3 py-2 text-xs">
+                    <span className="text-slate-400">Combined Payment Total</span>
+                    <span className="font-mono-num font-extrabold text-emerald-400">
+                      {formatPeso(enteredPayNum)}
+                    </span>
+                  </div>
+                  {payError && (
+                    <p className="col-span-2 rounded-xl bg-red-500/15 border border-red-500/30 p-2.5 text-xs text-red-300">
+                      {payError}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Amount Paid by Tenant (₱) *
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    value={payAmount}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/,/g, '');
+                      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                      setPayError(null);
+                      setPayAmount(raw);
+                    }}
+                    className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-base font-bold text-emerald-400 font-mono-num"
+                  />
+                  {payError && (
+                    <p className="mt-2 rounded-xl bg-red-500/15 border border-red-500/30 p-2.5 text-xs text-red-300">
+                      {payError}
+                    </p>
+                  )}
+                  {excessOverpayment > 0 ? (
+                    <div className="mt-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 space-y-1 text-xs">
+                      <p className="font-extrabold text-emerald-300">
+                        Overpayment Breakdown (Requires Biometrics / 4-Digit PIN)
+                      </p>
+                      {payingBill.remainingBalance > 0 && (
+                        <p className="text-slate-300">
+                          • Applied to Current Remaining Balance:{' '}
+                          <strong className="text-white font-mono-num">
+                            {formatPeso(payingBill.remainingBalance)}
+                          </strong>{' '}
+                          (Bill Remaining → ₱0.00)
+                        </p>
+                      )}
+                      <p className="text-emerald-300">
+                        • Credited to Advance Balance
+                        {isAdvanceCapped
+                          ? ` (1-Month Max Allowance: ${formatPeso(remainingAdvanceAllowance)})`
+                          : ' (Prepaid Wallet)'}
+                        :{' '}
+                        <strong className="font-mono-num">
+                          +{formatPeso(excessOverpayment)}
+                        </strong>
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        Recorded as a tracked Advance Transaction | Refundable anytime via Advance / Refund if tenant moves out.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                      {isAdvanceCapped
+                        ? `Credits against Remaining Balance first. Excess up to 1 month's rent advance (${formatPeso(remainingAdvanceAllowance)} remaining allowance) stores in Advance Balance.`
+                        : 'Credits against Remaining Balance first. Any excess automatically rolls into Prepaid Advance Credit.'}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3.5">
                 <div>

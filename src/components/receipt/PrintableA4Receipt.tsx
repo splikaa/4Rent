@@ -7,7 +7,10 @@ import {
   generateReceiptVerificationCode,
   maskPhoneNumber,
 } from '../../utils/billingCalculator';
-import { formatKwhReading } from '../../utils/financialEngine';
+import {
+  computeBillComponentBalances,
+  formatKwhReading,
+} from '../../utils/financialEngine';
 
 interface PrintableA4ReceiptProps {
   bill: BillRecord;
@@ -130,13 +133,20 @@ export const PrintableA4Receipt = React.forwardRef(
     const totalDeductions =
       advanceApplied + securityDepositApplied + legacyDepositApplied;
     const otherCharges = Number(bill.otherCharges || 0);
+    const latePenalty = Number(bill.latePenalty || 0);
     const grossCharges =
       typeof bill.grossCharges === 'number'
         ? bill.grossCharges
         : bill.baseRent +
+          latePenalty +
           bill.electricTotal +
           bill.previousBalanceCarryOver +
           otherCharges;
+    const componentBalances = computeBillComponentBalances(bill);
+    const totalRentDue =
+      typeof bill.totalRentDue === 'number'
+        ? bill.totalRentDue
+        : bill.baseRent + latePenalty;
 
     const resolvedRemainingAdvance = Math.max(
       0,
@@ -540,16 +550,53 @@ export const PrintableA4Receipt = React.forwardRef(
               <tr>
                 <td className="px-3.5 py-1.5 text-slate-800">
                   <div className="font-semibold text-slate-900">
-                    Monthly Rent ({bill.billingPeriod})
+                    {bill.isProrated
+                      ? `Prorated Rent (${bill.billingPeriod})`
+                      : `Monthly Rent (${bill.billingPeriod})`}
                   </div>
                   <div className="text-[9.5px] text-slate-500">
-                    Regular monthly room rental rate for {bill.roomName}
+                    {bill.isProrated &&
+                    bill.monthlyRentFull &&
+                    bill.occupiedDays &&
+                    bill.daysInBillingMonth
+                      ? `Full Monthly Rate ${formatPeso(bill.monthlyRentFull)} / ${bill.daysInBillingMonth} days (${formatPeso(bill.dailyRentRate || 0)}/day) x ${bill.occupiedDays} occupied days`
+                      : `Regular monthly room rental rate for ${bill.roomName}`}
                   </div>
                 </td>
                 <td className="px-3.5 py-1.5 text-right font-mono-num font-bold text-slate-950 align-top">
                   {formatPeso(bill.baseRent)}
                 </td>
               </tr>
+
+              {latePenalty > 0 && (
+                <tr className="bg-amber-50/50">
+                  <td className="px-3.5 py-1.5 text-amber-950">
+                    <div className="font-semibold text-amber-900">
+                      Late Payment Penalty (Starting Day 11)
+                    </div>
+                    <div className="text-[9.5px] text-amber-800">
+                      {bill.latePenaltyLabel ||
+                        `Applied past the 1st-10th payment period (Due ${dueLabel})`}
+                    </div>
+                  </td>
+                  <td className="px-3.5 py-1.5 text-right font-mono-num font-bold text-amber-900 align-top">
+                    {formatPeso(latePenalty)}
+                  </td>
+                </tr>
+              )}
+
+              {(bill.isProrated || latePenalty > 0) && (
+                <tr className="bg-slate-50/80">
+                  <td className="px-3.5 py-1 text-slate-800">
+                    <div className="font-bold text-slate-900 text-[10.5px]">
+                      Total Rent Due (Rent{latePenalty > 0 ? ' + Late Penalty' : ''})
+                    </div>
+                  </td>
+                  <td className="px-3.5 py-1 text-right font-mono-num font-bold text-slate-950">
+                    {formatPeso(totalRentDue)}
+                  </td>
+                </tr>
+              )}
 
               <tr>
                 <td className="px-3.5 py-1.5 text-slate-800">
@@ -738,6 +785,47 @@ export const PrintableA4Receipt = React.forwardRef(
               >
                 {formatPeso(bill.remainingBalance)}
               </span>
+            </div>
+
+            {/* Separate Component Payment Tracking Summary */}
+            <div className="rounded bg-white border border-slate-200 px-2.5 py-2 space-y-1 text-[10px]">
+              <div className="font-extrabold uppercase tracking-wider text-slate-600 text-[9px]">
+                Component Payment Tracking (Rent vs. Electricity{latePenalty > 0 ? ' vs. Late Penalty' : ''})
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div>
+                  <span className="text-slate-500 block">Rent Payment:</span>
+                  <strong className="font-mono-num text-slate-900">
+                    Paid {formatPeso(componentBalances.rentPaid)} | Bal {formatPeso(componentBalances.rentRemaining)}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Electricity Payment:</span>
+                  <strong
+                    className={`font-mono-num ${
+                      componentBalances.electricityRemaining > 0
+                        ? 'text-red-700'
+                        : 'text-emerald-800'
+                    }`}
+                  >
+                    Paid {formatPeso(componentBalances.electricityPaid)} | Bal {formatPeso(componentBalances.electricityRemaining)}
+                  </strong>
+                </div>
+                {latePenalty > 0 && (
+                  <div>
+                    <span className="text-slate-500 block">Late Penalty:</span>
+                    <strong className="font-mono-num text-amber-800">
+                      Paid {formatPeso(componentBalances.latePenaltyPaid)} | Bal {formatPeso(componentBalances.latePenaltyRemaining)}
+                    </strong>
+                  </div>
+                )}
+              </div>
+              {componentBalances.rentRemaining <= 0.005 &&
+                componentBalances.electricityRemaining > 0.005 && (
+                  <div className="text-[9.5px] font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1 mt-1">
+                    Notice: Rent is settled, but Electricity balance ({formatPeso(componentBalances.electricityRemaining)}) remains unpaid. Statement is PARTIALLY PAID until electricity is cleared.
+                  </div>
+                )}
             </div>
 
             {bill.overpaymentToAdvance > 0 && (

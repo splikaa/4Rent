@@ -2,6 +2,7 @@ import {
   AppDatabaseSnapshot,
   AppSettings,
   BillRecord,
+  MonthlyMeterReading,
   Room,
   RoomInquiryBooking,
   SecurityAuditEntry,
@@ -12,8 +13,14 @@ import {
   saveMeterMasterImage,
   saveSnapshotToIndexedDb,
   loadSnapshotFromIndexedDb,
+  syncMonthlyReadingsToIndexedDb,
 } from './idbDatabase';
-import { reconcileRoomAdvanceLedger } from '../utils/financialEngine';
+import {
+  reconcileRoomAdvanceLedger,
+  roundCurrencyCentavos,
+  roundKwh,
+} from '../utils/financialEngine';
+import { normalizeBillingMonthKey } from '../utils/rentSchedule';
 import {
   getOrCreateDevicePropertyCode,
   normalizePropertyCode,
@@ -32,6 +39,8 @@ export function setAppHydrated(hydrated: boolean): void {
 /**
  * Stable, version-independent storage keys so app updates NEVER wipe existing data.
  */
+const CURRENT_SCHEMA_VERSION = 2;
+
 const STORAGE_KEYS = {
   ROOMS: '4rent_db_rooms',
   BILLS: '4rent_db_bills',
@@ -40,6 +49,8 @@ const STORAGE_KEYS = {
   SETTINGS: '4rent_db_settings',
   AUDIT_LOG: '4rent_db_audit_log',
   METER_LOGS: '4rent_db_meter_logs',
+  MONTHLY_READINGS: '4rent_db_monthly_readings',
+  SCHEMA_VERSION: '4rent_db_schema_version',
 };
 
 const viteEnv =
@@ -63,6 +74,12 @@ function createDefaultSettings(): AppSettings {
     monthlyElectricRates: {},
     defaultMonthlyRent: 4500.0,
     defaultSecurityDeposit: 4500.0,
+    latePenalty: {
+      enabled: false,
+      mode: 'fixed',
+      value: null,
+      applyPerDay: false,
+    },
     advanceCapMode: 'unlimited',
     remindersPromptShown: false,
     remindersEnabled: false,
@@ -214,6 +231,52 @@ function compactLogsMedia(
   return { compacted, changed };
 }
 
+function compactMonthlyReadingsMedia(
+  readings: MonthlyMeterReading[],
+  maxInlineChars = INLINE_DATA_URL_THRESHOLD
+): { compacted: MonthlyMeterReading[]; changed: boolean } {
+  let changed = false;
+  const compacted = readings.map((r) => {
+    const nextPrevPhoto = offloadImageValue(
+      `mread_${r.id}_prev_photo`,
+      r.prevPhotoDataUrl,
+      maxInlineChars
+    );
+    const nextPrevCrop = offloadImageValue(
+      `mread_${r.id}_prev_crop`,
+      r.prevCropDataUrl,
+      maxInlineChars
+    );
+    const nextCurrPhoto = offloadImageValue(
+      `mread_${r.id}_curr_photo`,
+      r.currPhotoDataUrl,
+      maxInlineChars
+    );
+    const nextCurrCrop = offloadImageValue(
+      `mread_${r.id}_curr_crop`,
+      r.currCropDataUrl,
+      maxInlineChars
+    );
+    if (
+      nextPrevPhoto !== r.prevPhotoDataUrl ||
+      nextPrevCrop !== r.prevCropDataUrl ||
+      nextCurrPhoto !== r.currPhotoDataUrl ||
+      nextCurrCrop !== r.currCropDataUrl
+    ) {
+      changed = true;
+      return {
+        ...r,
+        prevPhotoDataUrl: nextPrevPhoto,
+        prevCropDataUrl: nextPrevCrop,
+        currPhotoDataUrl: nextCurrPhoto,
+        currCropDataUrl: nextCurrCrop,
+      };
+    }
+    return r;
+  });
+  return { compacted, changed };
+}
+
 function isQuotaError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const maybe = err as { name?: string; code?: number; message?: string };
@@ -277,6 +340,20 @@ function reclaimLocalStorageSpace(): void {
         const { compacted, changed } = compactLogsMedia(parsedLogs.slice(0, 40), 0);
         if (changed || parsedLogs.length > 40) {
           localStorage.setItem(STORAGE_KEYS.METER_LOGS, JSON.stringify(compacted));
+        }
+      }
+    }
+
+    const rawMonthlyReadings = localStorage.getItem(STORAGE_KEYS.MONTHLY_READINGS);
+    if (rawMonthlyReadings) {
+      const parsedReadings = JSON.parse(rawMonthlyReadings);
+      if (Array.isArray(parsedReadings)) {
+        const { compacted, changed } = compactMonthlyReadingsMedia(parsedReadings, 0);
+        if (changed) {
+          localStorage.setItem(
+            STORAGE_KEYS.MONTHLY_READINGS,
+            JSON.stringify(compacted)
+          );
         }
       }
     }
@@ -350,6 +427,25 @@ export function loadSettings(): AppSettings {
         ? defaults.cloudSync.propertyCode
         : rawCode;
 
+    const rawPenalty = parsed.latePenalty;
+    const normalizedLatePenalty =
+      rawPenalty && typeof rawPenalty === 'object'
+        ? {
+            enabled: Boolean(rawPenalty.enabled),
+            mode:
+              rawPenalty.mode === 'percentage'
+                ? ('percentage' as const)
+                : ('fixed' as const),
+            value:
+              typeof rawPenalty.value === 'number' &&
+              Number.isFinite(rawPenalty.value) &&
+              rawPenalty.value >= 0
+                ? rawPenalty.value
+                : null,
+            applyPerDay: Boolean(rawPenalty.applyPerDay),
+          }
+        : defaults.latePenalty;
+
     return {
       ...defaults,
       ...parsed,
@@ -359,6 +455,7 @@ export function loadSettings(): AppSettings {
         typeof parsed.monthlyElectricRates === 'object'
           ? parsed.monthlyElectricRates
           : {},
+      latePenalty: normalizedLatePenalty,
       security: {
         ...defaults.security,
         ...(parsed.security || {}),
@@ -589,9 +686,427 @@ export function appendReadingLog(log: SubMeterReadingLog): SubMeterReadingLog[] 
   return next;
 }
 
+// ---------------------------------------------------------------------------
+// Monthly Sub-Meter Readings (Unique per roomId + billingMonthKey)
+// ---------------------------------------------------------------------------
+
+function normalizeMonthlyReadingRecord(
+  r: MonthlyMeterReading
+): MonthlyMeterReading {
+  const monthKey = normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod);
+  const consumptionKwh = roundKwh(
+    Math.max(
+      0,
+      Number.isFinite(r.consumptionKwh)
+        ? r.consumptionKwh
+        : r.currentReadingKwh - r.previousReadingKwh
+    )
+  );
+  const electricRate = Number.isFinite(r.electricRate)
+    ? Math.max(0, r.electricRate)
+    : 0;
+  const electricCharge = roundCurrencyCentavos(
+    Number.isFinite(r.electricCharge)
+      ? r.electricCharge
+      : consumptionKwh * electricRate
+  );
+
+  return {
+    ...r,
+    billingMonthKey: monthKey,
+    consumptionKwh,
+    electricRate,
+    electricCharge,
+  };
+}
+
+function deduplicateMonthlyReadings(
+  readings: MonthlyMeterReading[]
+): MonthlyMeterReading[] {
+  const byRoomMonth = new Map<string, MonthlyMeterReading>();
+  for (const raw of readings) {
+    if (!raw || !raw.roomId) continue;
+    const normalized = normalizeMonthlyReadingRecord(raw);
+    const key = `${normalized.roomId}::${normalized.billingMonthKey}`;
+    const existing = byRoomMonth.get(key);
+    if (!existing) {
+      byRoomMonth.set(key, normalized);
+      continue;
+    }
+    const existingTs = new Date(
+      existing.updatedAt || existing.verifiedAt || existing.createdAt || 0
+    ).getTime();
+    const candidateTs = new Date(
+      normalized.updatedAt || normalized.verifiedAt || normalized.createdAt || 0
+    ).getTime();
+    if (candidateTs >= existingTs) {
+      byRoomMonth.set(key, normalized);
+    }
+  }
+  return Array.from(byRoomMonth.values()).sort((a, b) =>
+    b.billingMonthKey.localeCompare(a.billingMonthKey)
+  );
+}
+
+export function loadMonthlyReadings(roomId?: string): MonthlyMeterReading[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.MONTHLY_READINGS);
+    const parsed: MonthlyMeterReading[] = raw ? JSON.parse(raw) : [];
+    const deduped = deduplicateMonthlyReadings(Array.isArray(parsed) ? parsed : []);
+    const { compacted, changed } = compactMonthlyReadingsMedia(deduped);
+    if (changed) {
+      safeLocalStorageSetItem(
+        STORAGE_KEYS.MONTHLY_READINGS,
+        JSON.stringify(compacted)
+      );
+    }
+    if (!roomId) return compacted;
+    return compacted.filter((r) => r.roomId === roomId);
+  } catch {
+    return [];
+  }
+}
+
+export function saveMonthlyReadings(readings: MonthlyMeterReading[]): void {
+  const deduped = deduplicateMonthlyReadings(readings);
+  const { compacted } = compactMonthlyReadingsMedia(deduped);
+  const nextRaw = JSON.stringify(compacted);
+  if (localStorage.getItem(STORAGE_KEYS.MONTHLY_READINGS) !== nextRaw) {
+    safeLocalStorageSetItem(STORAGE_KEYS.MONTHLY_READINGS, nextRaw);
+    void syncMonthlyReadingsToIndexedDb(compacted);
+    persistMasterIndexedDb();
+    broadcastLocalChange(STORAGE_KEYS.MONTHLY_READINGS);
+  }
+}
+
+export function getMonthlyMeterReading(
+  roomId: string,
+  monthKeyOrPeriod: string
+): MonthlyMeterReading | undefined {
+  const targetKey = normalizeBillingMonthKey(monthKeyOrPeriod);
+  return loadMonthlyReadings(roomId).find(
+    (r) => normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod) === targetKey
+  );
+}
+
+export function upsertMonthlyMeterReading(
+  reading: MonthlyMeterReading,
+  options?: { allowReplaceExisting?: boolean }
+): { ok: true; readings: MonthlyMeterReading[]; saved: MonthlyMeterReading } | { ok: false; error: string } {
+  const normalized = normalizeMonthlyReadingRecord(reading);
+  const existing = loadMonthlyReadings();
+  const conflict = existing.find(
+    (r) =>
+      r.roomId === normalized.roomId &&
+      normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod) ===
+        normalized.billingMonthKey &&
+      r.id !== normalized.id
+  );
+
+  if (conflict && !options?.allowReplaceExisting) {
+    if (conflict.billId && normalized.billId && conflict.billId !== normalized.billId) {
+      return {
+        ok: false,
+        error: `A finalized meter reading already exists for ${normalized.billingPeriod} (Receipt ${conflict.billId}).`,
+      };
+    }
+    if (
+      conflict.billId &&
+      !normalized.billId &&
+      Math.abs(conflict.currentReadingKwh - normalized.currentReadingKwh) > 0.001
+    ) {
+      return {
+        ok: false,
+        error: `Conflicting monthly meter reading detected for ${normalized.billingPeriod}. Existing billed reading is ${conflict.currentReadingKwh} kWh.`,
+      };
+    }
+  }
+
+  const saved: MonthlyMeterReading = conflict
+    ? {
+        ...conflict,
+        ...normalized,
+        id: conflict.id,
+        createdAt: conflict.createdAt || normalized.createdAt,
+        updatedAt: new Date().toISOString(),
+      }
+    : {
+        ...normalized,
+        updatedAt: normalized.updatedAt || new Date().toISOString(),
+      };
+
+  const next = deduplicateMonthlyReadings([
+    saved,
+    ...existing.filter(
+      (r) =>
+        !(
+          r.roomId === saved.roomId &&
+          normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod) ===
+            saved.billingMonthKey
+        ) && r.id !== saved.id
+    ),
+  ]);
+
+  saveMonthlyReadings(next);
+  return { ok: true, readings: next, saved };
+}
+
+/**
+ * Atomic billing persistence transaction:
+ * Writes related collections (rooms, bills, monthlyReadings, meterLogs) together.
+ * If ANY localStorage write fails, rolls back every touched key to its exact prior value.
+ */
+export interface BillingTransactionPayload {
+  rooms?: Room[];
+  bills?: BillRecord[];
+  monthlyReadings?: MonthlyMeterReading[];
+  meterLogs?: SubMeterReadingLog[];
+}
+
+export function commitBillingTransaction(
+  payload: BillingTransactionPayload
+): { ok: true } | { ok: false; error: string } {
+  if (typeof localStorage === 'undefined') {
+    return { ok: true };
+  }
+
+  const writes: Array<{ key: string; nextRaw: string }> = [];
+
+  if (payload.rooms) {
+    const sanitized = payload.rooms.map((r) => {
+      const isVacant = r.status === 'vacant';
+      const nextRoom: Room = {
+        ...r,
+        advanceRent: isVacant ? 0 : Math.max(0, r.advanceRent || 0),
+        unpaidBalance: isVacant ? 0 : Math.max(0, r.unpaidBalance || 0),
+        activeReceiptId: isVacant ? undefined : r.activeReceiptId,
+      };
+      return isVacant ? nextRoom : reconcileRoomAdvanceLedger(nextRoom);
+    });
+    const { compacted } = compactRoomsMedia(sanitized);
+    writes.push({ key: STORAGE_KEYS.ROOMS, nextRaw: JSON.stringify(compacted) });
+  }
+
+  if (payload.bills) {
+    const { compacted } = compactBillsMedia(payload.bills);
+    writes.push({ key: STORAGE_KEYS.BILLS, nextRaw: JSON.stringify(compacted) });
+  }
+
+  let compactedReadings: MonthlyMeterReading[] | null = null;
+  if (payload.monthlyReadings) {
+    const deduped = deduplicateMonthlyReadings(payload.monthlyReadings);
+    const { compacted } = compactMonthlyReadingsMedia(deduped);
+    compactedReadings = compacted;
+    writes.push({
+      key: STORAGE_KEYS.MONTHLY_READINGS,
+      nextRaw: JSON.stringify(compacted),
+    });
+  }
+
+  if (payload.meterLogs) {
+    const { compacted } = compactLogsMedia(payload.meterLogs);
+    writes.push({
+      key: STORAGE_KEYS.METER_LOGS,
+      nextRaw: JSON.stringify(compacted),
+    });
+  }
+
+  // Snapshot prior values for atomic rollback
+  const priorValues = new Map<string, string | null>();
+  for (const w of writes) {
+    priorValues.set(w.key, localStorage.getItem(w.key));
+  }
+
+  const changedKeys: string[] = [];
+  try {
+    for (const w of writes) {
+      if (priorValues.get(w.key) !== w.nextRaw) {
+        const wrote = safeLocalStorageSetItem(w.key, w.nextRaw);
+        if (!wrote) {
+          throw new Error(`Storage write failed for ${w.key}`);
+        }
+        changedKeys.push(w.key);
+      }
+    }
+  } catch (err) {
+    // Roll back every key touched in this transaction
+    for (const [key, prev] of priorValues.entries()) {
+      try {
+        if (prev === null) {
+          localStorage.removeItem(key);
+        } else {
+          localStorage.setItem(key, prev);
+        }
+      } catch {
+        // best-effort rollback
+      }
+    }
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Failed to commit billing transaction atomically.',
+    };
+  }
+
+  if (compactedReadings) {
+    void syncMonthlyReadingsToIndexedDb(compactedReadings);
+  }
+  if (changedKeys.length > 0) {
+    persistMasterIndexedDb();
+    for (const k of changedKeys) {
+      broadcastLocalChange(k);
+    }
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Non-destructive, idempotent database migration (Schema v1 -> v2).
+ * - Preserves all existing rooms, tenants, payments, bills, rates, and logs.
+ * - Backfills historical MonthlyMeterReading records from existing bills when not already recorded.
+ * - Normalizes missing billingMonthKey on existing bills without mutating amounts or rates.
+ */
+export function migrateDatabaseIfNeeded(): {
+  migrated: boolean;
+  fromVersion: number;
+  toVersion: number;
+  backfilledReadingsCount: number;
+} {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return {
+        migrated: false,
+        fromVersion: CURRENT_SCHEMA_VERSION,
+        toVersion: CURRENT_SCHEMA_VERSION,
+        backfilledReadingsCount: 0,
+      };
+    }
+
+    const storedVersion = Number(
+      localStorage.getItem(STORAGE_KEYS.SCHEMA_VERSION) || '1'
+    );
+    const existingBills = loadBills();
+    const existingReadings = loadMonthlyReadings();
+
+    if (
+      Number.isFinite(storedVersion) &&
+      storedVersion >= CURRENT_SCHEMA_VERSION &&
+      (existingBills.length === 0 || existingReadings.length > 0)
+    ) {
+      return {
+        migrated: false,
+        fromVersion: storedVersion,
+        toVersion: CURRENT_SCHEMA_VERSION,
+        backfilledReadingsCount: 0,
+      };
+    }
+
+    const existingKeys = new Set(
+      existingReadings.map(
+        (r) =>
+          `${r.roomId}::${normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod)}`
+      )
+    );
+    const backfilled: MonthlyMeterReading[] = [...existingReadings];
+    let backfilledCount = 0;
+
+    let billsChanged = false;
+    const migratedBills = existingBills.map((bill) => {
+      const monthKey = normalizeBillingMonthKey(
+        bill.billingMonthKey || bill.billingPeriod || bill.createdAt
+      );
+      const roomMonthKey = `${bill.roomId}::${monthKey}`;
+
+      if (!bill.isArchived && !existingKeys.has(roomMonthKey)) {
+        const readingId = bill.meterReadingId || `mread-hist-${bill.id}`;
+        const prevKwh = Number.isFinite(bill.prevReading) ? bill.prevReading : 0;
+        const currKwh = Number.isFinite(bill.currReading) ? bill.currReading : prevKwh;
+        const kwhUsed = Number.isFinite(bill.consumptionKwh)
+          ? bill.consumptionKwh
+          : roundKwh(Math.max(0, currKwh - prevKwh));
+        const rate = Number.isFinite(bill.electricRate) ? bill.electricRate : 0;
+        const charge = Number.isFinite(bill.electricTotal)
+          ? bill.electricTotal
+          : roundCurrencyCentavos(kwhUsed * rate);
+
+        backfilled.push({
+          id: readingId,
+          roomId: bill.roomId,
+          roomName: bill.roomName,
+          tenantName: bill.tenantName,
+          billingMonthKey: monthKey,
+          billingPeriod: bill.billingPeriod,
+          previousReadingKwh: prevKwh,
+          currentReadingKwh: currKwh,
+          consumptionKwh: kwhUsed,
+          electricRate: rate,
+          electricCharge: charge,
+          ocrExtractedReadingKwh:
+            bill.ocrConfidence !== undefined ? currKwh : null,
+          ocrConfidence: bill.ocrConfidence,
+          source:
+            bill.ocrConfidence !== undefined
+              ? 'ocr_verified'
+              : 'manual_authorized',
+          isVerified: true,
+          verifiedAt: bill.createdAt,
+          prevPhotoDataUrl: bill.prevMeterPhotoDataUrl,
+          prevCropDataUrl: bill.prevMeterCropDataUrl,
+          currPhotoDataUrl: bill.meterPhotoDataUrl,
+          currCropDataUrl: bill.currMeterCropDataUrl,
+          billId: bill.id,
+          createdAt: bill.createdAt,
+          updatedAt: bill.updatedAt || bill.createdAt,
+        });
+        existingKeys.add(roomMonthKey);
+        backfilledCount += 1;
+      }
+
+      if (!bill.billingMonthKey) {
+        billsChanged = true;
+        return {
+          ...bill,
+          billingMonthKey: monthKey,
+        };
+      }
+      return bill;
+    });
+
+    if (backfilledCount > 0) {
+      saveMonthlyReadings(backfilled);
+    }
+    if (billsChanged) {
+      saveBills(migratedBills);
+    }
+    safeLocalStorageSetItem(
+      STORAGE_KEYS.SCHEMA_VERSION,
+      String(CURRENT_SCHEMA_VERSION)
+    );
+
+    return {
+      migrated: true,
+      fromVersion: Number.isFinite(storedVersion) ? storedVersion : 1,
+      toVersion: CURRENT_SCHEMA_VERSION,
+      backfilledReadingsCount: backfilledCount,
+    };
+  } catch (err) {
+    console.warn('[4Rent Migration] Non-fatal migration warning:', err);
+    return {
+      migrated: false,
+      fromVersion: 1,
+      toVersion: CURRENT_SCHEMA_VERSION,
+      backfilledReadingsCount: 0,
+    };
+  }
+}
+
 export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
   return {
-    version: '1.0.0',
+    version: '1.1.0',
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     rooms: loadRooms(),
     bills: loadBills(),
@@ -599,6 +1114,7 @@ export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
     tenantHistory: loadTenantHistory(),
     settings: loadSettings(),
     meterLogs: loadReadingLogs(),
+    monthlyReadings: loadMonthlyReadings(),
   };
 }
 
@@ -639,6 +1155,9 @@ function persistMasterIndexedDb(): void {
         }
 
         await saveSnapshotToIndexedDb(snap);
+        if (Array.isArray(snap.monthlyReadings)) {
+          await syncMonthlyReadingsToIndexedDb(snap.monthlyReadings);
+        }
       })
       .catch(() => {
         // Ignore chained IDB write errors
@@ -676,6 +1195,12 @@ export function importDatabaseSnapshot(
   }
   if (Array.isArray(snapshot.meterLogs)) {
     saveReadingLogs(snapshot.meterLogs);
+  }
+  if (Array.isArray(snapshot.monthlyReadings)) {
+    saveMonthlyReadings(snapshot.monthlyReadings);
+  } else if (Array.isArray(snapshot.bills) && snapshot.bills.length > 0) {
+    // Non-destructively backfill monthly readings if importing a v1 backup
+    migrateDatabaseIfNeeded();
   }
 }
 
@@ -755,7 +1280,11 @@ export async function flushMasterIndexedDbNow(): Promise<void> {
     clearTimeout(_idbPersistTimer);
     _idbPersistTimer = null;
   }
-  await saveSnapshotToIndexedDb(exportDatabaseSnapshot());
+  const snap = exportDatabaseSnapshot();
+  await saveSnapshotToIndexedDb(snap);
+  if (Array.isArray(snap.monthlyReadings)) {
+    await syncMonthlyReadingsToIndexedDb(snap.monthlyReadings);
+  }
 }
 
 /**
@@ -773,6 +1302,12 @@ export async function applyCloudSnapshotCleanly(
     Array.isArray(snapshot.tenantHistory) ? snapshot.tenantHistory : []
   );
   saveReadingLogs(Array.isArray(snapshot.meterLogs) ? snapshot.meterLogs : []);
+  if (Array.isArray(snapshot.monthlyReadings)) {
+    saveMonthlyReadings(snapshot.monthlyReadings);
+  } else {
+    saveMonthlyReadings([]);
+    migrateDatabaseIfNeeded();
+  }
 
   const localSettings = loadSettings();
   const baseSettings = snapshot.settings || localSettings;
@@ -819,6 +1354,7 @@ export async function resetWorkspaceForPropertyCode(
   saveInquiries([]);
   saveTenantHistory([]);
   saveReadingLogs([]);
+  saveMonthlyReadings([]);
 
   const localSettings = loadSettings();
   const cleanDefaults = createDefaultSettings();

@@ -55,9 +55,55 @@ import {
   getScheduledMonthKeys,
   isMobileDevice,
   normalizeMonthKey,
+  roundCurrency,
 } from '../../utils/billingCalculator';
+import {
+  getBillingMonthSchedule,
+  getCurrentBillingMonthKey,
+  updateIndependentMonthlyElectricRate,
+} from '../../utils/rentSchedule';
 import { resolveConfiguredPropertyCode } from '../../utils/propertyCode';
 import { applyPropertyCodeAndSync } from '../../services/propertySpaceSwitch';
+
+const DECIMAL_INPUT_REGEX = /^\d*\.?\d*$/;
+
+function sanitizeDecimalInput(raw: string): string | null {
+  const cleaned = raw.replace(/,/g, '').trim();
+  if (cleaned === '') return '';
+  if (!DECIMAL_INPUT_REGEX.test(cleaned)) return null;
+  return cleaned;
+}
+
+function buildVisibleMonthKeys(
+  monthlyRates?: Record<string, number>
+): string[] {
+  const ytdKeys = getScheduledMonthKeys(new Date(), 0, monthlyRates);
+  const currentKey = normalizeMonthKey();
+  const keySet = new Set<string>(ytdKeys);
+  if (monthlyRates) {
+    Object.keys(monthlyRates).forEach((k) => {
+      if (/^\d{4}-\d{2}$/.test(k) && k <= currentKey) {
+        keySet.add(k);
+      }
+    });
+  }
+  return Array.from(keySet).sort();
+}
+
+function buildInitialMonthlyDrafts(
+  settings: AppSettings,
+  monthKeys: string[]
+): Record<string, string> {
+  const drafts: Record<string, string> = {};
+  for (const mk of monthKeys) {
+    const explicit = settings.monthlyElectricRates?.[mk];
+    drafts[mk] =
+      typeof explicit === 'number' && Number.isFinite(explicit)
+        ? String(explicit)
+        : String(settings.defaultElectricRate);
+  }
+  return drafts;
+}
 
 export interface ReloadAllDataOptions {
   switchToDashboard?: boolean;
@@ -90,6 +136,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isMobile = isMobileDevice(),
 }) => {
   const [form, setForm] = useState<AppSettings>(settings);
+  const [defaultRateDraft, setDefaultRateDraft] = useState<string>(() =>
+    String(settings.defaultElectricRate)
+  );
+  const [defaultRentDraft, setDefaultRentDraft] = useState<string>(() =>
+    String(settings.defaultMonthlyRent)
+  );
+  const [monthlyRateDrafts, setMonthlyRateDrafts] = useState<
+    Record<string, string>
+  >(() =>
+    buildInitialMonthlyDrafts(
+      settings,
+      buildVisibleMonthKeys(settings.monthlyElectricRates)
+    )
+  );
+  const [editedMonthKeys, setEditedMonthKeys] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [latePenaltyValueDraft, setLatePenaltyValueDraft] = useState<string>(() =>
+    settings.latePenalty?.value !== null &&
+    settings.latePenalty?.value !== undefined
+      ? String(settings.latePenalty.value)
+      : ''
+  );
+  const [validationErrors, setValidationErrors] = useState<
+    Record<string, string>
+  >({});
+  const [customRateError, setCustomRateError] = useState<string | null>(null);
+
   const [mobileCodeDraft, setMobileCodeDraft] = useState<string>(
     () => resolveConfiguredPropertyCode(settings.cloudSync.propertyCode)
   );
@@ -102,8 +176,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   useEffect(() => {
     setForm(settings);
+    setDefaultRateDraft(String(settings.defaultElectricRate));
+    setDefaultRentDraft(String(settings.defaultMonthlyRent));
+    const keys = buildVisibleMonthKeys(settings.monthlyElectricRates);
+    setMonthlyRateDrafts(buildInitialMonthlyDrafts(settings, keys));
+    setEditedMonthKeys({});
+    setLatePenaltyValueDraft(
+      settings.latePenalty?.value !== null &&
+        settings.latePenalty?.value !== undefined
+        ? String(settings.latePenalty.value)
+        : ''
+    );
+    setValidationErrors({});
     setMobileCodeDraft(resolveConfiguredPropertyCode(settings.cloudSync.propertyCode));
   }, [settings]);
+
+  const visibleMonthKeys = buildVisibleMonthKeys(form.monthlyElectricRates);
+  const currentBillingSchedule = getBillingMonthSchedule(
+    getCurrentBillingMonthKey()
+  );
 
   const mobileLock = getMobileCodeMonthlyLock(form.cloudSync);
   const committedPropertyCode = resolveConfiguredPropertyCode(
@@ -227,14 +318,119 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
+    const nextErrors: Record<string, string> = {};
+
+    const trimmedDefaultRate = defaultRateDraft.trim();
+    const parsedDefaultRate =
+      trimmedDefaultRate === '' ? Number.NaN : Number(trimmedDefaultRate);
+    if (
+      trimmedDefaultRate === '' ||
+      !Number.isFinite(parsedDefaultRate) ||
+      parsedDefaultRate < 0
+    ) {
+      nextErrors.defaultElectricRate =
+        'Enter a valid non-negative default electric rate (e.g., 12.50).';
+    }
+
+    const trimmedDefaultRent = defaultRentDraft.trim();
+    const parsedDefaultRent =
+      trimmedDefaultRent === '' ? Number.NaN : Number(trimmedDefaultRent);
+    if (
+      trimmedDefaultRent === '' ||
+      !Number.isFinite(parsedDefaultRent) ||
+      parsedDefaultRent < 0
+    ) {
+      nextErrors.defaultMonthlyRent =
+        'Enter a valid non-negative default monthly rent.';
+    }
+
+    // Preserve all existing historical monthly rates, and update each edited/explicit month independently
+    let nextMonthlyRates: Record<string, number> = {
+      ...(form.monthlyElectricRates || {}),
+    };
+    for (const monthKey of visibleMonthKeys) {
+      const hasExistingExplicit =
+        form.monthlyElectricRates !== undefined &&
+        Object.prototype.hasOwnProperty.call(form.monthlyElectricRates, monthKey);
+      const wasEdited = Boolean(editedMonthKeys[monthKey]);
+      const draftRaw = (monthlyRateDrafts[monthKey] ?? '').trim();
+
+      if (draftRaw === '') {
+        nextErrors[`month:${monthKey}`] = 'Enter a valid rate before saving.';
+        continue;
+      }
+      const parsedMonthRate = Number(draftRaw);
+      if (!Number.isFinite(parsedMonthRate) || parsedMonthRate < 0) {
+        nextErrors[`month:${monthKey}`] = 'Rate must be a valid non-negative number.';
+        continue;
+      }
+
+      if (wasEdited || hasExistingExplicit) {
+        nextMonthlyRates = updateIndependentMonthlyElectricRate(
+          {
+            defaultElectricRate: form.defaultElectricRate,
+            monthlyElectricRates: nextMonthlyRates,
+          },
+          monthKey,
+          parsedMonthRate
+        );
+      }
+    }
+
+    // Validate configurable late payment penalty (never invent/hardcode an arbitrary penalty rate)
+    const currentPenalty = form.latePenalty || {
+      enabled: false,
+      mode: 'fixed' as const,
+      value: null,
+      applyPerDay: false,
+    };
+    const trimmedPenalty = latePenaltyValueDraft.trim();
+    let parsedPenaltyValue: number | null = null;
+    if (trimmedPenalty !== '') {
+      const num = Number(trimmedPenalty);
+      if (!Number.isFinite(num) || num < 0) {
+        nextErrors.latePenaltyValue = 'Enter a valid non-negative penalty value.';
+      } else if (currentPenalty.mode === 'percentage' && num > 100) {
+        nextErrors.latePenaltyValue = 'Percentage penalty cannot exceed 100%.';
+      } else {
+        parsedPenaltyValue = roundCurrency(num);
+      }
+    }
+
+    if (currentPenalty.enabled) {
+      if (parsedPenaltyValue === null || parsedPenaltyValue <= 0) {
+        nextErrors.latePenaltyValue =
+          currentPenalty.mode === 'percentage'
+            ? 'Enter a penalty percentage greater than 0 (e.g., 5) or disable late penalty.'
+            : 'Enter a fixed penalty amount greater than ₱0 (e.g., 200) or disable late penalty.';
+      }
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setValidationErrors(nextErrors);
+      setStatusBanner(
+        'Please fix the highlighted rate or penalty fields before saving.'
+      );
+      return;
+    }
+
+    setValidationErrors({});
     const normalizedForm: AppSettings = {
       ...form,
+      defaultElectricRate: roundCurrency(parsedDefaultRate),
+      defaultMonthlyRent: roundCurrency(parsedDefaultRent),
+      monthlyElectricRates: nextMonthlyRates,
+      latePenalty: {
+        ...currentPenalty,
+        value: parsedPenaltyValue,
+      },
       cloudSync: {
         ...form.cloudSync,
         propertyCode: resolveConfiguredPropertyCode(form.cloudSync?.propertyCode),
       },
     };
     setForm(normalizedForm);
+    setEditedMonthKeys({});
     onUpdateSettings(normalizedForm);
     setStatusBanner('Settings saved successfully.');
     setTimeout(() => setStatusBanner(null), 3000);
@@ -445,17 +641,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 Default Electric Rate Fallback (₱ / kWh)
               </label>
               <input
-                type="number"
-                step="0.01"
-                value={form.defaultElectricRate}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    defaultElectricRate: parseFloat(e.target.value) || 0,
-                  })
-                }
-                className="w-full h-10 rounded-xl bg-[#0D121B] border border-amber-500/40 px-3.5 text-xs sm:text-sm font-bold text-amber-400 font-mono-num focus:border-amber-500 focus:outline-none transition"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g., 12.50"
+                value={defaultRateDraft}
+                onChange={(e) => {
+                  const next = sanitizeDecimalInput(e.target.value);
+                  if (next === null) return;
+                  setDefaultRateDraft(next);
+                  setValidationErrors((prev) => {
+                    if (!prev.defaultElectricRate) return prev;
+                    const copy = { ...prev };
+                    delete copy.defaultElectricRate;
+                    return copy;
+                  });
+                }}
+                className={`w-full h-10 rounded-xl bg-[#0D121B] border px-3.5 text-xs sm:text-sm font-bold text-amber-400 font-mono-num focus:outline-none transition ${
+                  validationErrors.defaultElectricRate
+                    ? 'border-red-500/80 focus:border-red-400'
+                    : 'border-amber-500/40 focus:border-amber-500'
+                }`}
               />
+              {validationErrors.defaultElectricRate ? (
+                <p className="text-[11px] text-red-400 mt-1">
+                  {validationErrors.defaultElectricRate}
+                </p>
+              ) : (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Used only for months without their own independent rate.
+                </p>
+              )}
             </div>
 
             <div>
@@ -463,21 +678,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 Default Monthly Unit Rent (₱)
               </label>
               <input
-                type="number"
-                step="0.01"
-                value={form.defaultMonthlyRent}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    defaultMonthlyRent: parseFloat(e.target.value) || 0,
-                  })
-                }
-                className="w-full h-10 rounded-xl bg-[#0D121B] border border-[#263248] px-3.5 text-xs sm:text-sm font-bold text-white font-mono-num focus:border-amber-500 focus:outline-none transition"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g., 4500"
+                value={defaultRentDraft}
+                onChange={(e) => {
+                  const next = sanitizeDecimalInput(e.target.value);
+                  if (next === null) return;
+                  setDefaultRentDraft(next);
+                  setValidationErrors((prev) => {
+                    if (!prev.defaultMonthlyRent) return prev;
+                    const copy = { ...prev };
+                    delete copy.defaultMonthlyRent;
+                    return copy;
+                  });
+                }}
+                className={`w-full h-10 rounded-xl bg-[#0D121B] border px-3.5 text-xs sm:text-sm font-bold text-white font-mono-num focus:outline-none transition ${
+                  validationErrors.defaultMonthlyRent
+                    ? 'border-red-500/80 focus:border-red-400'
+                    : 'border-[#263248] focus:border-amber-500'
+                }`}
               />
+              {validationErrors.defaultMonthlyRent && (
+                <p className="text-[11px] text-red-400 mt-1">
+                  {validationErrors.defaultMonthlyRent}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Monthly Electric Rate Schedule (e.g. Nov: 11.84, Dec: 11.63) */}
+          {/* Monthly Electric Rate Schedule (Independent per month) */}
           <div className="pt-4 border-t border-[#232F44] space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -486,134 +716,342 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <span>Monthly Electric Rate Schedule (₱ / kWh)</span>
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                  Rates from January through the current month. Changes update active receipts right away.
+                  Each month stores its own independent rate. Editing one month never alters other months or historical finalized bills.
                 </p>
               </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-3">
-              {getScheduledMonthKeys(new Date(), 0, form.monthlyElectricRates).map(
-                (monthKey) => {
-                  const val =
-                    form.monthlyElectricRates?.[monthKey] ??
-                    form.defaultElectricRate;
-                  const currentKey = normalizeMonthKey();
-                  const isCurrent = monthKey === currentKey;
-                  return (
-                    <div
-                      key={monthKey}
-                      className={`rounded-2xl bg-[#0D121B] border p-3 ${
-                        isCurrent ? 'border-amber-500/45' : 'border-[#263248]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                        <label className="text-xs font-bold text-white flex items-center gap-1 min-w-0 truncate">
-                          <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                          <span className="truncate">{formatMonthKeyLabel(monthKey, 'short')}</span>
-                        </label>
-                        {isCurrent && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 shrink-0">
-                            Current
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-amber-400">₱</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={val}
-                          onChange={(e) => {
-                            const parsed = parseFloat(e.target.value);
-                            setForm((prev) => ({
-                              ...prev,
-                              defaultElectricRate: isCurrent
-                                ? Number.isFinite(parsed)
-                                  ? parsed
-                                  : 0
-                                : prev.defaultElectricRate,
-                              monthlyElectricRates: {
-                                ...(prev.monthlyElectricRates || {}),
-                                [monthKey]: Number.isFinite(parsed) ? parsed : 0,
-                              },
-                            }));
-                          }}
-                          className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-2.5 text-sm font-bold text-amber-400 font-mono-num focus:border-amber-500 focus:outline-none"
-                        />
-                        <span className="text-[11px] text-slate-400 shrink-0">
-                          /kWh
-                        </span>
-                      </div>
-                    </div>
+              {visibleMonthKeys.map((monthKey) => {
+                const draftVal = monthlyRateDrafts[monthKey] ?? '';
+                const currentKey = normalizeMonthKey();
+                const isCurrent = monthKey === currentKey;
+                const hasCustomRate =
+                  form.monthlyElectricRates !== undefined &&
+                  Object.prototype.hasOwnProperty.call(
+                    form.monthlyElectricRates,
+                    monthKey
                   );
-                }
-              )}
+                const monthError = validationErrors[`month:${monthKey}`];
+                return (
+                  <div
+                    key={monthKey}
+                    className={`rounded-2xl bg-[#0D121B] border p-3 ${
+                      monthError
+                        ? 'border-red-500/70'
+                        : isCurrent
+                        ? 'border-amber-500/45'
+                        : 'border-[#263248]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                      <label
+                        htmlFor={`month-rate-${monthKey}`}
+                        className="text-xs font-bold text-white flex items-center gap-1 min-w-0 truncate"
+                      >
+                        <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="truncate">
+                          {formatMonthKeyLabel(monthKey, 'short')}
+                        </span>
+                      </label>
+                      {isCurrent ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 shrink-0">
+                          Current
+                        </span>
+                      ) : hasCustomRate ? (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 shrink-0">
+                          Custom
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-amber-400">₱</span>
+                      <input
+                        id={`month-rate-${monthKey}`}
+                        data-month-key={monthKey}
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        value={draftVal}
+                        onChange={(e) => {
+                          const next = sanitizeDecimalInput(e.target.value);
+                          if (next === null) return;
+                          setMonthlyRateDrafts((prev) => ({
+                            ...prev,
+                            [monthKey]: next,
+                          }));
+                          setEditedMonthKeys((prev) => ({
+                            ...prev,
+                            [monthKey]: true,
+                          }));
+                          setValidationErrors((prev) => {
+                            const errKey = `month:${monthKey}`;
+                            if (!prev[errKey]) return prev;
+                            const copy = { ...prev };
+                            delete copy[errKey];
+                            return copy;
+                          });
+                        }}
+                        className={`w-full h-9 rounded-xl bg-[#131B29] border px-2.5 text-sm font-bold text-amber-400 font-mono-num focus:outline-none ${
+                          monthError
+                            ? 'border-red-500/80 focus:border-red-400'
+                            : 'border-[#263248] focus:border-amber-500'
+                        }`}
+                      />
+                      <span className="text-[11px] text-slate-400 shrink-0">
+                        /kWh
+                      </span>
+                    </div>
+                    {monthError && (
+                      <p className="text-[10px] text-red-400 mt-1 leading-tight">
+                        {monthError}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Add / Override Any Custom Month */}
-            <div className="rounded-2xl bg-[#0D121B] border border-[#232F44] p-3 flex flex-col sm:flex-row sm:items-end gap-2.5">
-              <div className="flex-1 min-w-0">
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                  Add / Edit Specific Month
-                </label>
-                <input
-                  type="month"
-                  max={normalizeMonthKey()}
-                  value={customMonthInput}
-                  onChange={(e) => setCustomMonthInput(e.target.value)}
-                  className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs text-white focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-              <div className="w-full sm:w-40">
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                  Rate (₱/kWh)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="e.g., 11.84"
-                  value={customRateInput}
-                  onChange={(e) => setCustomRateInput(e.target.value)}
-                  className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs font-bold text-amber-400 font-mono-num focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const key = normalizeMonthKey(customMonthInput);
-                  const currentKey = normalizeMonthKey();
-                  if (key > currentKey) {
-                    setStatusBanner(
-                      `Future months (${formatMonthKeyLabel(key, 'long')}) are not available yet until that month arrives.`
+            <div className="rounded-2xl bg-[#0D121B] border border-[#232F44] p-3 space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-end gap-2.5">
+                <div className="flex-1 min-w-0">
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Add / Edit Specific Month
+                  </label>
+                  <input
+                    type="month"
+                    max={normalizeMonthKey()}
+                    value={customMonthInput}
+                    onChange={(e) => {
+                      setCustomMonthInput(e.target.value);
+                      setCustomRateError(null);
+                    }}
+                    className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+                <div className="w-full sm:w-40">
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Rate (₱/kWh)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="e.g., 12.50"
+                    value={customRateInput}
+                    onChange={(e) => {
+                      const next = sanitizeDecimalInput(e.target.value);
+                      if (next === null) return;
+                      setCustomRateInput(next);
+                      setCustomRateError(null);
+                    }}
+                    className={`w-full h-9 rounded-xl bg-[#131B29] border px-3 text-xs font-bold text-amber-400 font-mono-num focus:outline-none ${
+                      customRateError
+                        ? 'border-red-500/80 focus:border-red-400'
+                        : 'border-[#263248] focus:border-amber-500'
+                    }`}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const key = normalizeMonthKey(customMonthInput);
+                    const currentKey = normalizeMonthKey();
+                    if (key > currentKey) {
+                      setCustomRateError(
+                        `Future months (${formatMonthKeyLabel(key, 'long')}) are not available yet.`
+                      );
+                      return;
+                    }
+                    const trimmed = customRateInput.trim();
+                    const rate = trimmed === '' ? Number.NaN : Number(trimmed);
+                    if (!key || !Number.isFinite(rate) || rate < 0) {
+                      setCustomRateError(
+                        'Enter a valid non-negative electricity rate (e.g., 12.50).'
+                      );
+                      return;
+                    }
+                    const nextRates = updateIndependentMonthlyElectricRate(
+                      form,
+                      key,
+                      rate,
+                      visibleMonthKeys
                     );
-                    return;
-                  }
-                  const rate = parseFloat(customRateInput);
-                  if (!key || !Number.isFinite(rate) || rate < 0) return;
-                  const nextRates = {
-                    ...(form.monthlyElectricRates || {}),
-                    [key]: Math.round(rate * 100) / 100,
-                  };
-                  const nextSettings: AppSettings = {
-                    ...form,
-                    defaultElectricRate:
-                      key === currentKey ? nextRates[key] : form.defaultElectricRate,
-                    monthlyElectricRates: nextRates,
-                  };
-                  setForm(nextSettings);
-                  onUpdateSettings(nextSettings);
-                  setCustomRateInput('');
-                  setStatusBanner(
-                    `Applied ${formatMonthKeyLabel(key, 'long')} rate: ₱${nextRates[key].toFixed(2)}/kWh`
-                  );
-                }}
-                className="h-9 px-3.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Apply Month Rate</span>
-              </button>
+                    const nextSettings: AppSettings = {
+                      ...form,
+                      monthlyElectricRates: nextRates,
+                    };
+                    setForm(nextSettings);
+                    setMonthlyRateDrafts((prev) => ({
+                      ...prev,
+                      [key]: String(nextRates[key]),
+                    }));
+                    setCustomRateInput('');
+                    setCustomRateError(null);
+                    onUpdateSettings(nextSettings);
+                    setStatusBanner(
+                      `Saved independent rate for ${formatMonthKeyLabel(key, 'long')}: ₱${nextRates[key].toFixed(2)}/kWh (other months unchanged).`
+                    );
+                  }}
+                  className="h-9 px-3.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Apply Month Rate</span>
+                </button>
+              </div>
+              {customRateError && (
+                <p className="text-[11px] text-red-400">{customRateError}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Monthly Payment Schedule & Configurable Late Payment Penalty */}
+          <div className="pt-4 border-t border-[#232F44] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Monthly Rent Payment Schedule &amp; Late Penalty</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                  Payment Period: <span className="text-slate-200 font-semibold">1st - 10th of each billing month</span>. Late penalties start on the <span className="text-amber-300 font-semibold">11th day</span>. Active cycle: {currentBillingSchedule.billingPeriodLabel} (Due {currentBillingSchedule.dueDateLabel}).
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none px-3 py-1.5 rounded-xl bg-[#0D121B] border border-[#263248]">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.latePenalty?.enabled)}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setForm((prev) => ({
+                      ...prev,
+                      latePenalty: {
+                        mode: prev.latePenalty?.mode || 'fixed',
+                        value: prev.latePenalty?.value ?? null,
+                        applyPerDay: Boolean(prev.latePenalty?.applyPerDay),
+                        enabled,
+                      },
+                    }));
+                    setValidationErrors((prev) => {
+                      if (!prev.latePenaltyValue) return prev;
+                      const copy = { ...prev };
+                      delete copy.latePenaltyValue;
+                      return copy;
+                    });
+                  }}
+                  className="w-4 h-4 rounded accent-amber-500 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-white">
+                  {form.latePenalty?.enabled
+                    ? 'Late Penalty Enabled'
+                    : 'Late Penalty Off'}
+                </span>
+              </label>
+            </div>
+
+            <div className="rounded-2xl bg-[#0D121B] border border-[#263248] p-3.5 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Penalty Type
+                  </label>
+                  <select
+                    value={form.latePenalty?.mode || 'fixed'}
+                    onChange={(e) => {
+                      const mode =
+                        e.target.value === 'percentage' ? 'percentage' : 'fixed';
+                      setForm((prev) => ({
+                        ...prev,
+                        latePenalty: {
+                          enabled: Boolean(prev.latePenalty?.enabled),
+                          value: prev.latePenalty?.value ?? null,
+                          applyPerDay: Boolean(prev.latePenalty?.applyPerDay),
+                          mode,
+                        },
+                      }));
+                    }}
+                    className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs font-semibold text-white focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="fixed">Fixed Amount (₱)</option>
+                    <option value="percentage">Percentage of Rent (%)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    {(form.latePenalty?.mode || 'fixed') === 'percentage'
+                      ? 'Penalty Percentage (%)'
+                      : 'Penalty Amount (₱)'}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={
+                      (form.latePenalty?.mode || 'fixed') === 'percentage'
+                        ? 'Set % (e.g., 5)'
+                        : 'Set ₱ (e.g., 200)'
+                    }
+                    value={latePenaltyValueDraft}
+                    onChange={(e) => {
+                      const next = sanitizeDecimalInput(e.target.value);
+                      if (next === null) return;
+                      setLatePenaltyValueDraft(next);
+                      setValidationErrors((prev) => {
+                        if (!prev.latePenaltyValue) return prev;
+                        const copy = { ...prev };
+                        delete copy.latePenaltyValue;
+                        return copy;
+                      });
+                    }}
+                    className={`w-full h-9 rounded-xl bg-[#131B29] border px-3 text-xs font-bold text-amber-400 font-mono-num focus:outline-none ${
+                      validationErrors.latePenaltyValue
+                        ? 'border-red-500/80 focus:border-red-400'
+                        : 'border-[#263248] focus:border-amber-500'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Charging Frequency (From Day 11)
+                  </label>
+                  <select
+                    value={form.latePenalty?.applyPerDay ? 'per_day' : 'flat'}
+                    onChange={(e) => {
+                      const applyPerDay = e.target.value === 'per_day';
+                      setForm((prev) => ({
+                        ...prev,
+                        latePenalty: {
+                          enabled: Boolean(prev.latePenalty?.enabled),
+                          mode: prev.latePenalty?.mode || 'fixed',
+                          value: prev.latePenalty?.value ?? null,
+                          applyPerDay,
+                        },
+                      }));
+                    }}
+                    className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs font-semibold text-white focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="flat">One-Time Penalty (Day 11+)</option>
+                    <option value="per_day">Per Late Day (starting Day 11)</option>
+                  </select>
+                </div>
+              </div>
+
+              {validationErrors.latePenaltyValue ? (
+                <p className="text-[11px] text-red-400">
+                  {validationErrors.latePenaltyValue}
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  {form.latePenalty?.enabled && latePenaltyValueDraft.trim()
+                    ? `Starting on the 11th of the billing month, late rent incurs ${
+                        (form.latePenalty?.mode || 'fixed') === 'percentage'
+                          ? `${latePenaltyValueDraft}% of chargeable rent`
+                          : `₱${latePenaltyValueDraft}`
+                      }${form.latePenalty?.applyPerDay ? ' per late day' : ' (one-time)'}.`
+                    : 'No late penalty rate is hardcoded. Configure your own fixed amount or percentage above and enable it when ready.'}
+                </p>
+              )}
             </div>
           </div>
 

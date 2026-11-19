@@ -16,7 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
-import { isMobileDevice } from '../../utils/billingCalculator';
+import { isIOSDevice, isMobileDevice } from '../../utils/billingCalculator';
 import { resolveConfiguredPropertyCode } from '../../utils/propertyCode';
 
 interface DownloadAppsModalProps {
@@ -43,6 +43,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
     'downloads'
   );
   const isMobile = isMobileDevice();
+  const isIOS = isIOSDevice();
 
   if (!isOpen) return null;
 
@@ -268,6 +269,66 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                 </div>
               )}
 
+              {/* macOS Desktop App Card (Desktop Browsers) */}
+              {!isMobile && (
+                <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-sky-500/50 transition duration-300">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-500/20 to-sky-600/10 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0 shadow-inner">
+                      <Laptop className="w-6 h-6" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-extrabold text-white text-base">
+                          4Rent macOS Desktop App
+                        </h3>
+                        <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300 font-mono text-[10px] font-bold">
+                          .DMG / .ZIP (Apple Silicon &amp; Intel)
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-1">
+                        Native Electron macOS application with signed entitlements, native menu shortcuts (Cmd+C/V/Q), PNG clipboard copy, and offline IndexedDB storage.
+                      </p>
+                      <div className="mt-3 rounded-xl bg-[#0D121B] border border-[#202B3F] p-3 text-[11px] text-slate-300 space-y-1">
+                        <div className="font-bold text-sky-300">Build on macOS:</div>
+                        <code className="block font-mono text-amber-300 bg-[#080B10] px-2.5 py-1.5 rounded-lg">
+                          npm run dist:mac
+                        </code>
+                        <p className="text-[10.5px] text-slate-400">
+                          Generates installable <code className="text-slate-200">4Rent-1.1.0-arm64.dmg</code>, <code className="text-slate-200">4Rent-1.1.0-x64.dmg</code>, and <code className="text-slate-200">.zip</code> bundles inside <code className="text-slate-200">release/</code>. Drag 4Rent into Applications to install.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* iOS Safari Add to Home Screen Card */}
+              <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-blue-500/50 transition duration-300">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-indigo-600/10 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0 shadow-inner">
+                    <Smartphone className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-extrabold text-white text-base">
+                        iPhone &amp; iPad App (iOS Home Screen)
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-300 font-mono text-[10px] font-bold">
+                        {isIOS ? 'Recommended for Your Device' : 'Safari PWA'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Install 4Rent directly to your iOS Home Screen for full-screen standalone app mode, offline caching, camera sub-meter OCR, and PNG receipt copy.
+                    </p>
+                    <ol className="mt-2.5 list-decimal list-inside space-y-1 text-[11px] text-slate-300">
+                      <li>Open 4Rent in <strong className="text-white">Safari</strong> on your iPhone or iPad.</li>
+                      <li>Tap the <strong className="text-blue-300">Share</strong> button (square with upward arrow) in the Safari toolbar.</li>
+                      <li>Scroll down and tap <strong className="text-amber-300">Add to Home Screen</strong>, then tap <strong className="text-white">Add</strong>.</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
               {/* Mobile App Card */}
               <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-emerald-500/50 transition duration-300">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
@@ -417,9 +478,45 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
               </div>
 
               <div className="rounded-2xl bg-[#131B29] border border-[#243147] p-4">
+                <div className="font-bold text-sky-400 text-sm flex items-center gap-2 mb-2">
+                  <Laptop className="w-4 h-4" />
+                  <span>How to Build &amp; Install on macOS</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs leading-relaxed">
+                  <li>
+                    On macOS (Apple Silicon or Intel), run <code className="text-amber-300">npm run dist:mac</code> from the project root.
+                  </li>
+                  <li>
+                    Open the generated <code className="text-sky-300">release/4Rent-1.1.0-arm64.dmg</code> (or <code className="text-sky-300">x64.dmg</code>) installer and drag <strong className="text-white">4Rent</strong> into <strong className="text-white">Applications</strong>.
+                  </li>
+                  <li>
+                    Launch 4Rent from Applications or Spotlight; if unsigned Gatekeeper prompts on first launch, right-click the app and select <strong className="text-white">Open</strong>.
+                  </li>
+                </ol>
+              </div>
+
+              <div className="rounded-2xl bg-[#131B29] border border-[#243147] p-4">
+                <div className="font-bold text-blue-400 text-sm flex items-center gap-2 mb-2">
+                  <Smartphone className="w-4 h-4" />
+                  <span>How to Add to iPhone / iPad Home Screen (iOS Safari)</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs leading-relaxed">
+                  <li>
+                    Open 4Rent in <strong className="text-white">Safari</strong> on iOS (Chrome on iOS does not expose full PWA standalone mode).
+                  </li>
+                  <li>
+                    Tap the <strong className="text-blue-300">Share</strong> icon at the bottom of Safari, then select <strong className="text-amber-300">Add to Home Screen</strong>.
+                  </li>
+                  <li>
+                    Launch 4Rent from your Home Screen icon to use it as a full-screen standalone app with offline storage and camera OCR.
+                  </li>
+                </ol>
+              </div>
+
+              <div className="rounded-2xl bg-[#131B29] border border-[#243147] p-4">
                 <div className="font-bold text-emerald-400 text-sm flex items-center gap-2 mb-2">
                   <Smartphone className="w-4 h-4" />
-                  <span>How to Install the Mobile App</span>
+                  <span>How to Install the Android Mobile App (.APK)</span>
                 </div>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs leading-relaxed">
                   <li>

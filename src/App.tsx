@@ -3,33 +3,42 @@ import {
   AdvanceBalanceTransaction,
   AppSettings,
   BillRecord,
+  ComponentPaymentAllocation,
+  MonthlyMeterReading,
   NavigationTab,
+  PaymentAllocationTarget,
   Room,
   RoomInquiryBooking,
   SecurityConfig,
+  SubMeterReadingLog,
   TenantHistoryEntry,
 } from './types/rental';
 import {
   appendAuditLog,
   applyCloudSnapshotCleanly,
   clearPendingCloudApply,
+  commitBillingTransaction,
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   isAppHydrated,
   loadBills,
   loadInquiries,
+  loadMonthlyReadings,
+  loadReadingLogs,
   loadRooms,
   loadSettings,
   loadTenantHistory,
+  migrateDatabaseIfNeeded,
   peekPendingCloudApply,
   saveBills,
   saveInquiries,
+  saveMonthlyReadings,
   saveRooms,
   saveSettings,
   saveTenantHistory,
-  appendReadingLog,
   setAppHydrated,
   subscribeToLocalCrossWindowSync,
+  upsertMonthlyMeterReading,
 } from './services/storageService';
 import { loadSnapshotFromIndexedDb } from './services/idbDatabase';
 import {
@@ -64,6 +73,10 @@ import {
   formatKwhReading,
   getAdvancePolicyAllowance,
 } from './utils/financialEngine';
+import {
+  normalizeBillingMonthKey,
+  updateIndependentMonthlyElectricRate,
+} from './utils/rentSchedule';
 import { resolveConfiguredPropertyCode } from './utils/propertyCode';
 import { requestAndVerifyNotifications } from './services/notificationService';
 import { SecuritySetupScreen } from './components/security/SecuritySetupScreen';
@@ -106,6 +119,9 @@ export function App() {
   );
   const [tenantHistory, setTenantHistory] = useState<TenantHistoryEntry[]>(() =>
     loadTenantHistory()
+  );
+  const [monthlyReadings, setMonthlyReadings] = useState<MonthlyMeterReading[]>(
+    () => loadMonthlyReadings()
   );
   const [isHydrated, setIsHydrated] = useState<boolean>(() => isAppHydrated());
 
@@ -360,6 +376,7 @@ export function App() {
             setBills(loadBills());
             setInquiries(loadInquiries());
             setTenantHistory(loadTenantHistory());
+            setMonthlyReadings(loadMonthlyReadings());
             setSettings(loadSettings());
             appliedPendingCloud = true;
 
@@ -397,6 +414,7 @@ export function App() {
             setBills(loadBills());
             setInquiries(loadInquiries());
             setTenantHistory(loadTenantHistory());
+            setMonthlyReadings(loadMonthlyReadings());
             if (idbSnap.settings && !loadSettings().security?.isSetupComplete) {
               setSettings(idbSnap.settings);
               if (idbSnap.settings.security?.isSetupComplete) {
@@ -410,6 +428,11 @@ export function App() {
         console.warn('[4Rent] IndexedDB hydration error:', err);
       } finally {
         if (mounted) {
+          const mig = migrateDatabaseIfNeeded();
+          if (mig.migrated) {
+            setBills(loadBills());
+            setMonthlyReadings(loadMonthlyReadings());
+          }
           setAppHydrated(true);
           setIsHydrated(true);
 
@@ -461,6 +484,7 @@ export function App() {
                     setBills(loadBills());
                     setInquiries(loadInquiries());
                     setTenantHistory(loadTenantHistory());
+                    setMonthlyReadings(loadMonthlyReadings());
                     triggerFeedback(
                       syncResult.mode === 'switched-new'
                         ? 'New Property Space Initialized'
@@ -497,6 +521,7 @@ export function App() {
       setBills(loadBills());
       setInquiries(loadInquiries());
       setTenantHistory(loadTenantHistory());
+      setMonthlyReadings(loadMonthlyReadings());
       setSettings(loadSettings());
     });
     return () => {
@@ -518,6 +543,7 @@ export function App() {
           setBills(loadBills());
           setInquiries(loadInquiries());
           setTenantHistory(loadTenantHistory());
+          setMonthlyReadings(loadMonthlyReadings());
         }
       );
       return () => {
@@ -548,6 +574,7 @@ export function App() {
           setBills(loadBills());
           setInquiries(loadInquiries());
           setTenantHistory(loadTenantHistory());
+          setMonthlyReadings(loadMonthlyReadings());
         }
       }
     };
@@ -592,6 +619,11 @@ export function App() {
     if (!isHydrated) return;
     saveTenantHistory(tenantHistory);
   }, [tenantHistory, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    saveMonthlyReadings(monthlyReadings);
+  }, [monthlyReadings, isHydrated]);
 
   const triggerOptionalCloudSync = () => {
     if (isCloudConfigured(settings.cloudSync)) {
@@ -1111,8 +1143,40 @@ export function App() {
     }
   };
 
-  // Generate Bill -> Atomic centavo transaction, enforces 1 Active Receipt per Room, idempotency, and prepaid wallet math
-  const handleGenerateBill = (newBill: BillRecord): boolean => {
+  // Save Verified Monthly Sub-Meter Reading independently (preserves previous readings & prevents duplicates)
+  const handleSaveVerifiedMeterReading = (
+    reading: MonthlyMeterReading
+  ): { ok: boolean; error?: string; saved?: MonthlyMeterReading } => {
+    const res = upsertMonthlyMeterReading(reading);
+    if (!res.ok) {
+      triggerFeedback('Meter Reading Blocked', res.error, 'error');
+      return { ok: false, error: res.error };
+    }
+    setMonthlyReadings(res.readings);
+    appendAuditLog(
+      'Monthly Meter Reading Verified',
+      `${reading.roomName} (${reading.billingPeriod}): ${formatKwhReading(reading.previousReadingKwh)} -> ${formatKwhReading(reading.currentReadingKwh)} kWh (${formatKwhReading(reading.consumptionKwh)} kWh @ ₱${reading.electricRate.toFixed(2)}/kWh).`,
+      'billing'
+    );
+    triggerFeedback(
+      `Meter Reading Saved (${reading.billingPeriod})`,
+      `${reading.roomName}: ${formatKwhReading(reading.consumptionKwh)} kWh • ₱${reading.electricCharge.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`,
+      'success'
+    );
+    triggerOptionalCloudSync();
+    return { ok: true, saved: res.saved };
+  };
+
+  // Generate Bill -> Atomic centavo transaction, enforces verified electricity reading,
+  // unique (roomId, billingMonthKey), idempotency, separate component balances, and rollback safety
+  const handleGenerateBill = (
+    newBill: BillRecord,
+    options?: {
+      meterReading?: MonthlyMeterReading;
+      initialAllocationTarget?: PaymentAllocationTarget;
+      initialCustomAllocation?: Partial<ComponentPaymentAllocation>;
+    }
+  ): boolean => {
     try {
       const targetRoom = rooms.find((r) => r.id === newBill.roomId);
       if (!targetRoom) {
@@ -1120,12 +1184,29 @@ export function App() {
         return false;
       }
 
+      const monthKey = normalizeBillingMonthKey(
+        newBill.billingMonthKey || newBill.billingPeriod
+      );
+      const readingId =
+        options?.meterReading?.id ||
+        newBill.meterReadingId ||
+        `mread-${targetRoom.id}-${monthKey}-${Date.now()}`;
+
       const txResult = executeGenerateBillTransaction({
         room: targetRoom,
         existingBills: bills,
-        billDraft: newBill,
+        billDraft: {
+          ...newBill,
+          billingMonthKey: monthKey,
+          meterReadingId: readingId,
+          electricityVerified:
+            newBill.electricityVerified ?? Boolean(options?.meterReading?.isVerified),
+        },
         advanceCapMode: settings.advanceCapMode || 'unlimited',
         idempotencyKey: newBill.idempotencyKey || newBill.id,
+        requireVerifiedElectricity: true,
+        initialAllocationTarget: options?.initialAllocationTarget || 'auto',
+        initialCustomAllocation: options?.initialCustomAllocation,
       });
 
       if (!txResult.ok || !txResult.createdBill || !txResult.updatedRoom) {
@@ -1143,11 +1224,64 @@ export function App() {
 
       const issuedBill = txResult.createdBill;
       const nextRoom = txResult.updatedRoom;
+      const nextRooms = rooms.map((r) => (r.id === nextRoom.id ? nextRoom : r));
+      const nextBills = txResult.archivedPreviousBills;
 
-      setBills(txResult.archivedPreviousBills);
-      setRooms((prev) => prev.map((r) => (r.id === nextRoom.id ? nextRoom : r)));
+      const nowIso = new Date().toISOString();
+      const verifiedReading: MonthlyMeterReading = options?.meterReading
+        ? {
+            ...options.meterReading,
+            id: readingId,
+            billingMonthKey: monthKey,
+            billId: issuedBill.id,
+            isVerified: true,
+            updatedAt: nowIso,
+          }
+        : {
+            id: readingId,
+            roomId: issuedBill.roomId,
+            roomName: issuedBill.roomName,
+            tenantName: issuedBill.tenantName,
+            billingPeriod: issuedBill.billingPeriod,
+            billingMonthKey: monthKey,
+            previousReadingKwh: issuedBill.prevReading,
+            currentReadingKwh: issuedBill.currReading,
+            consumptionKwh: issuedBill.consumptionKwh,
+            electricRate: issuedBill.electricRate,
+            electricCharge: issuedBill.electricTotal,
+            source:
+              issuedBill.ocrConfidence !== undefined
+                ? 'ocr_verified'
+                : 'manual_authorized',
+            ocrExtractedReadingKwh:
+              issuedBill.ocrConfidence !== undefined
+                ? issuedBill.currReading
+                : null,
+            ocrConfidence: issuedBill.ocrConfidence,
+            isVerified: true,
+            verifiedAt: issuedBill.createdAt,
+            prevPhotoDataUrl: issuedBill.prevMeterPhotoDataUrl,
+            prevCropDataUrl: issuedBill.prevMeterCropDataUrl,
+            currPhotoDataUrl: issuedBill.meterPhotoDataUrl,
+            currCropDataUrl: issuedBill.currMeterCropDataUrl,
+            billId: issuedBill.id,
+            createdAt: issuedBill.createdAt,
+            updatedAt: nowIso,
+          };
 
-      appendReadingLog({
+      const nextMonthlyReadings = [
+        verifiedReading,
+        ...monthlyReadings.filter(
+          (r) =>
+            !(
+              r.roomId === verifiedReading.roomId &&
+              normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod) ===
+                monthKey
+            ) && r.id !== verifiedReading.id
+        ),
+      ];
+
+      const newLog: SubMeterReadingLog = {
         id: `meter-log-${issuedBill.id}-${Date.now()}`,
         roomId: issuedBill.roomId,
         roomName: issuedBill.roomName,
@@ -1164,17 +1298,47 @@ export function App() {
         cropDataUrl: issuedBill.currMeterCropDataUrl,
         billId: issuedBill.id,
         notes: issuedBill.notes,
+      };
+      const existingLogs = loadReadingLogs();
+      const nextLogs = [
+        newLog,
+        ...existingLogs.filter((item) => item.id !== newLog.id),
+      ];
+
+      const commitRes = commitBillingTransaction({
+        rooms: nextRooms,
+        bills: nextBills,
+        monthlyReadings: nextMonthlyReadings,
+        meterLogs: nextLogs,
       });
+
+      if (!commitRes.ok) {
+        triggerFeedback(
+          'Database Commit Failed',
+          `${commitRes.error} No partial changes were saved.`,
+          'error'
+        );
+        return false;
+      }
+
+      setBills(nextBills);
+      setRooms(nextRooms);
+      setMonthlyReadings(nextMonthlyReadings);
 
       appendAuditLog(
         'Official Receipt Generated',
-        `Receipt #${issuedBill.receiptNo} issued for ${issuedBill.roomName}.`,
+        `Receipt #${issuedBill.receiptNo} issued for ${issuedBill.roomName} (${issuedBill.billingPeriod}) • Verified ${formatKwhReading(issuedBill.consumptionKwh)} kWh.`,
         'billing'
       );
       setActiveReceiptBill(issuedBill);
       triggerFeedback(
         `Receipt #${issuedBill.receiptNo} Generated`,
         `${issuedBill.roomName}: ${formatKwhReading(issuedBill.consumptionKwh)} kWh used • Net Due ₱${issuedBill.remainingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}${
+          (issuedBill.electricityRemaining ?? 0) > 0 &&
+          (issuedBill.rentRemaining ?? 0) <= 0
+            ? ` • Electricity Unpaid: ₱${(issuedBill.electricityRemaining || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
+            : ''
+        }${
           (issuedBill.advanceBalanceAfter ?? 0) > 0
             ? ` • Advance Rem: ₱${(issuedBill.advanceBalanceAfter || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
             : ''
@@ -1195,13 +1359,17 @@ export function App() {
     }
   };
 
-  // Record Payment -> Atomically applies cash/transfer payment and credits any excess to Advance Wallet
+  // Record Payment -> Atomically applies cash/transfer payment with separate Rent/Electricity/Penalty tracking
   const handleRecordPayment = (
     billId: string,
     amount: number,
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
     referenceNo?: string,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    paymentOptions?: {
+      allocationTarget?: PaymentAllocationTarget;
+      customAllocation?: Partial<ComponentPaymentAllocation>;
+    }
   ) => {
     try {
       if (!claimTxKey(idempotencyKey)) return;
@@ -1217,6 +1385,8 @@ export function App() {
         referenceNo,
         advanceCapMode: settings.advanceCapMode || 'unlimited',
         idempotencyKey,
+        allocationTarget: paymentOptions?.allocationTarget || 'auto',
+        customAllocation: paymentOptions?.customAllocation,
       });
 
       if (!txResult.ok || !txResult.updatedBill) {
@@ -1235,27 +1405,47 @@ export function App() {
       const overpaymentCredited = txResult.overpaymentCredited;
       const receiptNo = updatedReceiptObj.receiptNo;
 
-      setBills((prev) =>
-        prev.map((b) => (b.id === billId ? updatedReceiptObj : b))
+      const nextBills = bills.map((b) =>
+        b.id === billId ? updatedReceiptObj : b
       );
+      const nextRooms = updatedRoomObj
+        ? rooms.map((r) => (r.id === updatedRoomObj.id ? updatedRoomObj : r))
+        : rooms;
 
-      if (updatedRoomObj) {
-        setRooms((prev) =>
-          prev.map((r) => (r.id === updatedRoomObj.id ? updatedRoomObj : r))
+      const commitRes = commitBillingTransaction({
+        bills: nextBills,
+        rooms: nextRooms,
+      });
+      if (!commitRes.ok) {
+        triggerFeedback(
+          'Payment Save Failed',
+          `${commitRes.error} No partial payment was committed.`,
+          'error'
         );
+        return;
       }
+
+      setBills(nextBills);
+      if (updatedRoomObj) {
+        setRooms(nextRooms);
+      }
+
+      const unpaidElec = updatedReceiptObj.electricityRemaining ?? 0;
+      const unpaidRent = updatedReceiptObj.rentRemaining ?? 0;
 
       appendAuditLog(
         'Payment Recorded',
-        `₱${amount.toFixed(2)} via ${method} for Receipt #${receiptNo}.`,
+        `₱${amount.toFixed(2)} via ${method} for Receipt #${receiptNo} (${paymentOptions?.allocationTarget || 'auto'}). Status: ${updatedReceiptObj.status.toUpperCase()}.`,
         'billing'
       );
       triggerFeedback(
         `Payment Recorded (₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
         overpaymentCredited > 0
           ? `Paid via ${method}. Excess ₱${overpaymentCredited.toFixed(2)} added to Advance Credit Wallet!`
-          : `Paid via ${method} for Receipt #${receiptNo}. Remaining: ₱${newRoomRemaining.toFixed(2)}.`,
-        'success',
+          : unpaidElec > 0 && unpaidRent <= 0
+            ? `Rent recorded via ${method}. Bill stays PARTIAL: Electricity balance ₱${unpaidElec.toFixed(2)} is still unpaid.`
+            : `Paid via ${method} for Receipt #${receiptNo}. Remaining: ₱${newRoomRemaining.toFixed(2)}.`,
+        unpaidElec > 0 && unpaidRent <= 0 ? 'info' : 'success',
         'View Official Receipt',
         () => setActiveReceiptBill(updatedReceiptObj)
       );
@@ -1274,7 +1464,11 @@ export function App() {
     amount: number,
     method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
     referenceNo?: string,
-    onCommitted?: () => void
+    onCommitted?: () => void,
+    paymentOptions?: {
+      allocationTarget?: PaymentAllocationTarget;
+      customAllocation?: Partial<ComponentPaymentAllocation>;
+    }
   ) => {
     const targetBill = bills.find((b) => b.id === billId);
     if (!targetBill) return;
@@ -1307,14 +1501,28 @@ export function App() {
         title: `Authorize Overpayment & Advance Credit`,
         description: `${targetBill.roomName}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} will credit to Advance Wallet. Verify with Biometrics or your 4-Digit PIN.`,
         onConfirm: () => {
-          handleRecordPayment(billId, amount, method, referenceNo, txKey);
+          handleRecordPayment(
+            billId,
+            amount,
+            method,
+            referenceNo,
+            txKey,
+            paymentOptions
+          );
           onCommitted?.();
         },
       });
       return;
     }
     const txKey = `pay-${billId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    handleRecordPayment(billId, amount, method, referenceNo, txKey);
+    handleRecordPayment(
+      billId,
+      amount,
+      method,
+      referenceNo,
+      txKey,
+      paymentOptions
+    );
     onCommitted?.();
   };
 
@@ -1706,6 +1914,7 @@ export function App() {
       setBills(loadBills());
       setInquiries(loadInquiries());
       setTenantHistory(loadTenantHistory());
+      setMonthlyReadings(loadMonthlyReadings());
       setSettings(loadSettings());
 
       if (options?.switchToDashboard) {
@@ -1792,25 +2001,24 @@ export function App() {
   const handleApplyMonthlyElectricRate = (monthOrPeriod: string, rate: number) => {
     const monthKey = normalizeMonthKey(monthOrPeriod);
     const cleanRate = roundCurrency(Math.max(0, rate));
-    const currentKey = normalizeMonthKey();
+    const nextMonthlyRates = updateIndependentMonthlyElectricRate(
+      settings,
+      monthKey,
+      cleanRate
+    );
     const nextSettings: AppSettings = {
       ...settings,
-      defaultElectricRate:
-        monthKey === currentKey ? cleanRate : settings.defaultElectricRate,
-      monthlyElectricRates: {
-        ...(settings.monthlyElectricRates || {}),
-        [monthKey]: cleanRate,
-      },
+      monthlyElectricRates: nextMonthlyRates,
     };
     const updatedCount = applySettingsAndRecalculateBills(nextSettings);
     appendAuditLog(
       'Monthly Electric Rate Applied',
-      `${formatMonthKeyLabel(monthKey, 'long')}: ₱${cleanRate.toFixed(2)}/kWh (${updatedCount} active receipt(s) updated)`,
+      `${formatMonthKeyLabel(monthKey, 'long')}: ₱${cleanRate.toFixed(2)}/kWh (${updatedCount} active receipt(s) updated; other months untouched)`,
       'billing'
     );
     triggerFeedback(
       `${formatMonthKeyLabel(monthKey, 'long')} Rate Applied`,
-      `₱${cleanRate.toFixed(2)}/kWh reflected on active receipts immediately (previous applied receipts locked).`,
+      `₱${cleanRate.toFixed(2)}/kWh saved independently for ${formatMonthKeyLabel(monthKey, 'long')} (other months and locked receipts unchanged).`,
       'success'
     );
     triggerOptionalCloudSync();
@@ -2186,6 +2394,8 @@ export function App() {
       <SubMeterScannerModal
         isOpen={isScannerOpen}
         rooms={rooms}
+        existingBills={bills}
+        monthlyReadings={monthlyReadings}
         initialRoom={scannerTargetRoom}
         advanceCapMode={settings.advanceCapMode || 'unlimited'}
         globalElectricRate={getElectricRateForPeriod(
@@ -2193,8 +2403,11 @@ export function App() {
           new Date().toISOString()
         )}
         monthlyElectricRates={settings.monthlyElectricRates}
+        latePenaltyConfig={settings.latePenalty}
         securityPin={settings.security?.pinCode || ''}
         onClose={() => setIsScannerOpen(false)}
+        onSaveVerifiedReading={handleSaveVerifiedMeterReading}
+        onOpenExistingReceipt={(bill) => setActiveReceiptBill(bill)}
         onGenerateBill={handleGenerateBill}
       />
 

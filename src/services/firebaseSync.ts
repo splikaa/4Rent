@@ -1,9 +1,14 @@
-import { AppDatabaseSnapshot, CloudSyncConfig } from '../types/rental';
+import {
+  AppDatabaseSnapshot,
+  CloudSyncConfig,
+  MonthlyMeterReading,
+} from '../types/rental';
 import {
   formatMonthKeyLabel,
   getAdjacentMonthKey,
   normalizeMonthKey,
 } from '../utils/billingCalculator';
+import { normalizeBillingMonthKey } from '../utils/rentSchedule';
 import { getStoredMobileAppliedMonth } from './storageService';
 import { getMeterMasterImage } from './idbDatabase';
 import { reconcileRoomAdvanceLedger } from '../utils/financialEngine';
@@ -138,10 +143,20 @@ async function resolveSnapshotMediaForCloud(
       currMeterCropDataUrl: await resolveCloudImageField(b.currMeterCropDataUrl),
     }))
   );
+  const monthlyReadings = await Promise.all(
+    (snapshot.monthlyReadings || []).map(async (r) => ({
+      ...r,
+      prevPhotoDataUrl: await resolveCloudImageField(r.prevPhotoDataUrl),
+      prevCropDataUrl: await resolveCloudImageField(r.prevCropDataUrl),
+      currPhotoDataUrl: await resolveCloudImageField(r.currPhotoDataUrl),
+      currCropDataUrl: await resolveCloudImageField(r.currCropDataUrl),
+    }))
+  );
   return {
     ...snapshot,
     rooms,
     bills,
+    monthlyReadings,
   };
 }
 
@@ -500,16 +515,49 @@ export function mergeDatabaseSnapshots(
     meterLogMap.set(m.id, m);
   }
 
+  const monthlyReadingMap = new Map<string, MonthlyMeterReading>();
+  const upsertMergedReading = (r: MonthlyMeterReading) => {
+    if (!r || !r.roomId) return;
+    const key = `${r.roomId}::${normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod)}`;
+    const existing = monthlyReadingMap.get(key);
+    if (!existing) {
+      monthlyReadingMap.set(key, r);
+      return;
+    }
+    const existingTs = new Date(
+      existing.updatedAt || existing.verifiedAt || existing.createdAt || 0
+    ).getTime();
+    const candidateTs = new Date(
+      r.updatedAt || r.verifiedAt || r.createdAt || 0
+    ).getTime();
+    if (candidateTs >= existingTs) {
+      monthlyReadingMap.set(key, r);
+    }
+  };
+  for (const r of remote.monthlyReadings || []) {
+    upsertMergedReading(r);
+  }
+  for (const r of local.monthlyReadings || []) {
+    upsertMergedReading(r);
+  }
+
   // Keep local device security credentials intact when merging remote settings
+  // Also preserve independent monthlyElectricRates from both remote and local (local wins per-month)
+  const mergedMonthlyRates: Record<string, number> = {
+    ...(remote.settings?.monthlyElectricRates || {}),
+    ...(local.settings?.monthlyElectricRates || {}),
+  };
   const mergedSettings = {
     ...(remote.settings || {}),
     ...(local.settings || {}),
+    monthlyElectricRates: mergedMonthlyRates,
     security: local.settings?.security || remote.settings?.security,
     cloudSync: local.settings?.cloudSync || remote.settings?.cloudSync,
   };
 
   return {
-    version: '1.0.0',
+    version: '1.1.0',
+    schemaVersion: Math.max(local.schemaVersion || 1, remote.schemaVersion || 1, 2),
     exportedAt: new Date().toISOString(),
     rooms: Array.from(roomMap.values()).map((r) =>
       r.status === 'vacant' ? r : reconcileRoomAdvanceLedger(r)
@@ -519,6 +567,9 @@ export function mergeDatabaseSnapshots(
     tenantHistory: Array.from(historyMap.values()),
     meterLogs: Array.from(meterLogMap.values()).sort((a, b) =>
       String(b.readingDate || '').localeCompare(String(a.readingDate || ''))
+    ),
+    monthlyReadings: Array.from(monthlyReadingMap.values()).sort((a, b) =>
+      String(b.billingMonthKey || '').localeCompare(String(a.billingMonthKey || ''))
     ),
     settings: mergedSettings,
   };

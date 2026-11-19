@@ -1,7 +1,10 @@
 {
   "name": "4rent-management-system",
+  "productName": "4Rent",
+  "author": "4Rent Management System",
+  "description": "4Rent Room Rental Management System - Cross-Platform Desktop & Mobile Property Billing and Sub-Meter OCR Suite",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -10,7 +13,105 @@
     "build": "tsc -b && vite build",
     "test": "node scripts/run_tests.mjs",
     "build:apk": "node scripts/build_signed_apk.mjs",
+    "pack:desktop": "npm run build && electron-builder --dir",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:mac:arm64": "npm run build && electron-builder --mac --arm64",
+    "dist:mac:x64": "npm run build && electron-builder --mac --x64",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:desktop": "npm run build && electron-builder -mwl",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.fourrent.managementsystem",
+    "productName": "4Rent",
+    "copyright": "Copyright © 2026 4Rent Management System",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!dist/**/*.map"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.business",
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": "4Rent uses the camera to capture and verify electric sub-meter kWh readings."
+      }
+    },
+    "dmg": {
+      "title": "4Rent Management System",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Office",
+      "target": [
+        "AppImage"
+      ]
+    }
   },
   "dependencies": {
     "html-to-image": "^1.11.11",
@@ -26,6 +127,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "apk_sign_ts": "^1.0.1",
     "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
     "jszip": "^3.10.2",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",

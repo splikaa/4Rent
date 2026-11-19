@@ -1,10 +1,12 @@
-import { AppDatabaseSnapshot } from '../types/rental';
+import { AppDatabaseSnapshot, MonthlyMeterReading } from '../types/rental';
 
 const DB_NAME = 'FourRentPersistentDatabase';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'app_state';
 const PRIMARY_KEY = 'master_snapshot';
 export const METER_IMAGES_STORE = 'meter_images';
+export const MONTHLY_READINGS_STORE = 'monthly_readings';
+export const SCHEMA_META_STORE = 'schema_meta';
 
 // In-memory fallback for environments where IndexedDB is blocked or unavailable
 const memoryMasterImageStore = new Map<string, string>();
@@ -16,13 +18,28 @@ function openDb(): Promise<IDBDatabase> {
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+    req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
       }
       if (!db.objectStoreNames.contains(METER_IMAGES_STORE)) {
         db.createObjectStore(METER_IMAGES_STORE);
+      }
+      // Non-destructive v3 migration: add monthly_readings store with unique (roomId, billingMonthKey) index
+      if (!db.objectStoreNames.contains(MONTHLY_READINGS_STORE)) {
+        const readingStore = db.createObjectStore(MONTHLY_READINGS_STORE, {
+          keyPath: 'id',
+        });
+        if (typeof readingStore.createIndex === 'function') {
+          readingStore.createIndex('by_room_month', ['roomId', 'billingMonthKey'], {
+            unique: true,
+          });
+          readingStore.createIndex('by_room', 'roomId', { unique: false });
+        }
+      }
+      if (!db.objectStoreNames.contains(SCHEMA_META_STORE)) {
+        db.createObjectStore(SCHEMA_META_STORE);
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -276,6 +293,49 @@ export async function loadSnapshotFromIndexedDb(): Promise<AppDatabaseSnapshot |
     return result;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Synchronizes verified monthly meter readings into the dedicated indexed IndexedDB store
+ * inside a single readwrite transaction while keeping all historical records intact.
+ */
+export async function syncMonthlyReadingsToIndexedDb(
+  readings: MonthlyMeterReading[]
+): Promise<void> {
+  if (typeof indexedDB === 'undefined' || !Array.isArray(readings)) return;
+  try {
+    const db = await openDb();
+    if (!db.objectStoreNames.contains(MONTHLY_READINGS_STORE)) {
+      db.close();
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(MONTHLY_READINGS_STORE, 'readwrite');
+      const store = tx.objectStore(MONTHLY_READINGS_STORE);
+      const hasClear = typeof store.clear === 'function';
+      if (hasClear) {
+        store.clear();
+      }
+      const seenKeys = new Set<string>();
+      let putCount = 0;
+      for (const r of readings) {
+        const uniq = `${r.roomId}::${r.billingMonthKey}`;
+        if (seenKeys.has(uniq)) continue;
+        seenKeys.add(uniq);
+        store.put(r);
+        putCount += 1;
+      }
+      if (!hasClear && putCount === 0) {
+        resolve();
+        return;
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // Non-fatal fallback; master_snapshot & localStorage retain full copies
   }
 }
 

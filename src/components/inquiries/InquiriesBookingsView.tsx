@@ -193,7 +193,7 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400">Target Move-In:</span>
                         <span className="font-mono-num font-bold">
-                          {inq.targetMoveInDate} (Pays Day 1 to 10)
+                          {inq.targetMoveInDate} (Due 1st–10th Monthly)
                         </span>
                       </div>
                       <div className="flex items-center justify-between">

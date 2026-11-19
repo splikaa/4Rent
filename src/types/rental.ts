@@ -13,7 +13,8 @@ export interface TenantProfile {
   phone: string;
   messengerUsername?: string;
   moveInDate: string;
-  dueDayOfMonth: number; // Strictly 1 - 10 of every month
+  moveOutDate?: string; // Optional planned or actual occupancy end date (YYYY-MM-DD) for mid-month proration
+  dueDayOfMonth: number; // Preferred reminder day (1-10); billing due date is the 10th of the billing month
   emergencyContact?: string;
   validIdVerified?: boolean; // Landlord safety: Tenant valid ID verified on file
   privacyConsentSigned?: boolean; // Tenant privacy: RA 10173 Data Privacy & Lease terms acknowledged
@@ -114,6 +115,21 @@ export interface RoomInquiryBooking {
   createdAt: string;
 }
 
+export type PaymentAllocationTarget =
+  | 'auto'
+  | 'rent'
+  | 'electricity'
+  | 'penalty'
+  | 'custom';
+
+export interface ComponentPaymentAllocation {
+  rentPaid: number;
+  electricityPaid: number;
+  latePenaltyPaid: number;
+  carryOverPaid: number;
+  otherChargesPaid?: number;
+}
+
 export interface PaymentTransaction {
   id: string;
   amount: number;
@@ -122,6 +138,40 @@ export interface PaymentTransaction {
   paidAt: string;
   referenceNo?: string;
   note?: string;
+  allocationTarget?: PaymentAllocationTarget;
+  componentAllocation?: ComponentPaymentAllocation;
+}
+
+export interface MonthlyMeterReading {
+  id: string;
+  roomId: string;
+  roomName: string;
+  tenantName?: string;
+  billingPeriod: string; // e.g., "Nov 2026"
+  billingMonthKey: string; // Canonical "YYYY-MM" unique per room
+  previousReadingKwh: number;
+  currentReadingKwh: number;
+  consumptionKwh: number;
+  electricRate: number;
+  electricCharge: number;
+  source: 'ocr_verified' | 'ocr_corrected' | 'manual_authorized';
+  ocrExtractedReadingKwh?: number | null;
+  ocrConfidence?: number;
+  isVerified: boolean;
+  verifiedAt: string;
+  correctionAuthorized?: boolean;
+  correctionNote?: string;
+  meterResetOrReplacement?: boolean;
+  meterResetType?: 'dial_rollover' | 'meter_reset';
+  meterResetDocumentedReason?: string;
+  dialDigits?: number;
+  prevPhotoDataUrl?: string;
+  prevCropDataUrl?: string;
+  currPhotoDataUrl?: string;
+  currCropDataUrl?: string;
+  billId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface BillRecord {
@@ -133,26 +183,42 @@ export interface BillRecord {
   tenantPhone?: string;
   tenantMessenger?: string;
   billingPeriod: string; // e.g., "Nov 2026"
+  billingMonthKey?: string; // Canonical "YYYY-MM" for strict period deduplication
   createdAt: string;
-  dueDate: string; // Always within Day 1 - 10 of the month
-  paymentWindowLabel?: string; // "Every 1st - 10th of the Month"
+  dueDate: string; // 10th day of the billing month (Payment Period: 1st-10th; Late from 11th)
+  paymentWindowLabel?: string; // e.g., "1st - 10th of Nov 2026 (Late Penalty starts 11th)"
 
   // Dual Electric Sub-Meter OCR Data (Previous Meter + Current Meter Proofs)
   prevReading: number;
   currReading: number;
   consumptionKwh: number; // currReading - prevReading
-  electricRate: number; // Global ₱/kWh from Settings
+  electricRate: number; // Applicable monthly ₱/kWh rate locked for this billing month
   electricTotal: number; // consumptionKwh * electricRate
+  electricityVerified?: boolean; // Mandatory verified OCR/authorized electricity reading flag
+  meterReadingId?: string; // Foreign reference to verified MonthlyMeterReading
   prevMeterPhotoDataUrl?: string; // Sub-Meter #1: Previous Reading Photo Proof
   prevMeterCropDataUrl?: string; // Sub-Meter #1: Cropped Register Value Screenshot
   meterPhotoDataUrl?: string; // Sub-Meter #2: Current Reading Photo Proof
   currMeterCropDataUrl?: string; // Sub-Meter #2: Cropped Register Value Screenshot
   ocrConfidence?: number;
 
+  // Rent Schedule, Proration & Configurable Late Penalty Breakdown
+  baseRent: number; // Chargeable rent for this billing month (equals prorated rent if prorated)
+  monthlyRentFull?: number; // Full monthly room rent before proration
+  isProrated?: boolean;
+  occupiedDays?: number;
+  daysInBillingMonth?: number;
+  dailyRentRate?: number;
+  occupancyStartDate?: string; // YYYY-MM-DD
+  occupancyEndDate?: string; // YYYY-MM-DD
+  latePenalty?: number; // Configurable penalty applied starting on the 11th day of billing month
+  latePenaltyLabel?: string;
+  daysPastDue?: number;
+  totalRentDue?: number; // baseRent + (latePenalty || 0)
+
   // Financial Breakdown
-  baseRent: number;
   otherCharges?: number;
-  grossCharges?: number; // baseRent + electricTotal + previousBalanceCarryOver + otherCharges
+  grossCharges?: number; // baseRent + electricTotal + latePenalty + previousBalanceCarryOver + otherCharges
   securityDepositRequired: number;
   securityDepositApplied?: number; // Paid required deposit deducted from this bill
   securityDepositRemainingAfterBill?: number; // Remaining paid deposit carried forward to future bills
@@ -165,6 +231,17 @@ export interface BillRecord {
   amountPaid: number;
   overpaymentToAdvance: number; // Any excess paid above totalAmountDue credited to room's Advance Balance
   remainingBalance: number;
+
+  // Separate Component Payment Tracking (Rent vs Electricity vs Late Penalty vs Carry-Over)
+  rentPaid?: number;
+  rentRemaining?: number;
+  electricityPaid?: number;
+  electricityRemaining?: number;
+  latePenaltyPaid?: number;
+  latePenaltyRemaining?: number;
+  carryOverPaid?: number;
+  carryOverRemaining?: number;
+
   status: 'paid' | 'partial' | 'unpaid';
   paymentMethod?: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer';
   paidAt?: string;
@@ -215,16 +292,24 @@ export interface CloudSyncConfig {
   mobileCodeAppliedAt?: string;
 }
 
+export interface LatePenaltyConfig {
+  enabled: boolean;
+  mode: 'fixed' | 'percentage'; // Fixed Peso amount OR Percentage of chargeable rent
+  value: number | null; // Null by default (admin must configure; never hardcoded to an arbitrary rate)
+  applyPerDay?: boolean; // false = flat once starting Day 11, true = per late day starting Day 11
+}
+
 export interface AppSettings {
   apartmentName: string;
   landlordName: string;
   landlordPhone: string;
   landlordMessenger: string;
   paymentInstructions: string;
-  defaultElectricRate: number; // Master ₱/kWh fallback rate
-  monthlyElectricRates?: Record<string, number>; // Monthly rate overrides keyed by YYYY-MM (e.g. '2026-11': 11.84)
+  defaultElectricRate: number; // Master ₱/kWh fallback rate for unconfigured months
+  monthlyElectricRates?: Record<string, number>; // Independent monthly rates keyed by YYYY-MM (e.g. '2026-01': 12.50)
   defaultMonthlyRent: number;
   defaultSecurityDeposit: number;
+  latePenalty?: LatePenaltyConfig; // Configurable late payment penalty starting Day 11 of billing month
   advanceCapMode?: AdvanceCapPolicyMode; // 'unlimited' = Prepaid Wallet (default), '1_month' = Legacy 1-month cap
   remindersPromptShown: boolean;
   remindersEnabled: boolean;
@@ -253,6 +338,7 @@ export interface SubMeterReadingLog {
 
 export interface AppDatabaseSnapshot {
   version: string;
+  schemaVersion?: number;
   exportedAt: string;
   rooms: Room[];
   bills: BillRecord[];
@@ -260,4 +346,5 @@ export interface AppDatabaseSnapshot {
   tenantHistory: TenantHistoryEntry[];
   settings: AppSettings;
   meterLogs?: SubMeterReadingLog[];
+  monthlyReadings?: MonthlyMeterReading[];
 }

@@ -200,10 +200,10 @@ export const GUIDE_FLOWS: GuideFlowDefinition[] = [
       },
       {
         stepNo: 3,
-        title: 'Direct Messenger Delivery',
+        title: 'Copy Receipt as PNG & Share',
         badge: 'Step 3 • Share',
         instruction:
-          'Tap Share to Messenger to open the tenant chat with receipt details/image copied and ready to send.',
+          'Tap Copy Receipt as PNG to copy a high-resolution receipt image to your clipboard and paste directly into Messenger, or tap Share Receipt on mobile.',
       },
     ],
   },

@@ -4,6 +4,9 @@ import {
   AdvanceTransactionType,
   AppSettings,
   BillRecord,
+  ComponentPaymentAllocation,
+  MonthlyMeterReading,
+  PaymentAllocationTarget,
   PaymentTransaction,
   Room,
 } from '../types/rental';
@@ -123,6 +126,7 @@ export function getAdvancePolicyAllowance(
 export interface ChargeAllocationInput {
   baseRent: number;
   electricTotal: number;
+  latePenalty?: number;
   previousBalanceCarryOver?: number;
   otherCharges?: number;
   availableSecurityDeposit?: number;
@@ -140,6 +144,7 @@ export interface AdvanceComponentAllocation {
 export interface ChargeAllocationResult {
   baseRent: number;
   electricTotal: number;
+  latePenalty: number;
   previousBalanceCarryOver: number;
   otherCharges: number;
   grossCharges: number;
@@ -150,6 +155,13 @@ export interface ChargeAllocationResult {
   totalCreditsApplied: number;
   netTotalAmountDue: number;
   advanceBreakdown: AdvanceComponentAllocation[];
+  componentNetDue: {
+    carryOverCents: number;
+    rentCents: number;
+    latePenaltyCents: number;
+    electricityCents: number;
+    otherCents: number;
+  };
 }
 
 /**
@@ -161,11 +173,12 @@ export function allocateChargesAndCredits(
 ): ChargeAllocationResult {
   const baseRentCents = Math.max(0, toCentavos(input.baseRent));
   const electricCents = Math.max(0, toCentavos(input.electricTotal));
+  const latePenaltyCents = Math.max(0, toCentavos(input.latePenalty));
   const carryOverCents = Math.max(0, toCentavos(input.previousBalanceCarryOver));
   const otherCents = Math.max(0, toCentavos(input.otherCharges));
 
   const grossChargesCents =
-    baseRentCents + electricCents + carryOverCents + otherCents;
+    baseRentCents + electricCents + latePenaltyCents + carryOverCents + otherCents;
 
   const secAvailCents = Math.max(0, toCentavos(input.availableSecurityDeposit));
   const maxSecAllowedCents =
@@ -202,31 +215,40 @@ export function allocateChargesAndCredits(
     dueAfterSecurityDepositCents - advanceAppliedCents
   );
 
-  // Itemize how the advance credit paid down each component after deposit deduction
+  // Itemize how security deposit and advance credits offset each component
   const componentQueue: Array<{
+    key: 'carryOverCents' | 'rentCents' | 'latePenaltyCents' | 'electricityCents' | 'otherCents';
     category: AdvanceComponentAllocation['category'];
     label: string;
     cents: number;
   }> = [
-    { category: 'carryover', label: 'Previous Unpaid Balance', cents: carryOverCents },
-    { category: 'rent', label: 'Monthly Rent', cents: baseRentCents },
-    { category: 'electricity', label: 'Electricity Charges', cents: electricCents },
-    { category: 'other', label: 'Other Charges', cents: otherCents },
+    { key: 'carryOverCents', category: 'carryover', label: 'Previous Unpaid Balance', cents: carryOverCents },
+    { key: 'rentCents', category: 'rent', label: 'Monthly Rent', cents: baseRentCents },
+    { key: 'latePenaltyCents', category: 'other', label: 'Late Payment Penalty', cents: latePenaltyCents },
+    { key: 'electricityCents', category: 'electricity', label: 'Electricity Charges', cents: electricCents },
+    { key: 'otherCents', category: 'other', label: 'Other Charges', cents: otherCents },
   ];
 
   let secOffsetRemaining = securityDepositAppliedCents;
   let advOffsetRemaining = advanceAppliedCents;
   const advanceBreakdown: AdvanceComponentAllocation[] = [];
+  const componentNetDue = {
+    carryOverCents: 0,
+    rentCents: 0,
+    latePenaltyCents: 0,
+    electricityCents: 0,
+    otherCents: 0,
+  };
 
   for (const item of componentQueue) {
     if (item.cents <= 0) continue;
     const secCovered = Math.min(item.cents, secOffsetRemaining);
     secOffsetRemaining -= secCovered;
-    const netComponentCents = item.cents - secCovered;
-    if (netComponentCents <= 0 || advOffsetRemaining <= 0) continue;
-
-    const advCovered = Math.min(netComponentCents, advOffsetRemaining);
+    const afterSecCents = item.cents - secCovered;
+    const advCovered = Math.min(afterSecCents, advOffsetRemaining);
     advOffsetRemaining -= advCovered;
+    componentNetDue[item.key] = Math.max(0, afterSecCents - advCovered);
+
     if (advCovered > 0) {
       advanceBreakdown.push({
         category: item.category,
@@ -239,6 +261,7 @@ export function allocateChargesAndCredits(
   return {
     baseRent: fromCentavos(baseRentCents),
     electricTotal: fromCentavos(electricCents),
+    latePenalty: fromCentavos(latePenaltyCents),
     previousBalanceCarryOver: fromCentavos(carryOverCents),
     otherCharges: fromCentavos(otherCents),
     grossCharges: fromCentavos(grossChargesCents),
@@ -251,6 +274,311 @@ export function allocateChargesAndCredits(
     ),
     netTotalAmountDue: fromCentavos(netTotalDueCents),
     advanceBreakdown,
+    componentNetDue,
+  };
+}
+
+export interface BillComponentBalances {
+  rentDue: number;
+  rentPaid: number;
+  rentRemaining: number;
+  electricityDue: number;
+  electricityPaid: number;
+  electricityRemaining: number;
+  latePenaltyDue: number;
+  latePenaltyPaid: number;
+  latePenaltyRemaining: number;
+  carryOverDue: number;
+  carryOverPaid: number;
+  carryOverRemaining: number;
+  otherDue: number;
+  otherPaid: number;
+  otherRemaining: number;
+  totalAmountDue: number;
+  totalPaid: number;
+  outstandingBalance: number;
+  hasUnpaidElectricity: boolean;
+  isRentPaid: boolean;
+  isElectricityPaid: boolean;
+}
+
+function normalizeMonthKeyInternal(periodOrDate?: string): string {
+  const trimmed = (periodOrDate || '').trim();
+  const ymExact = trimmed.match(/^(\d{4})-(\d{2})$/);
+  if (ymExact) return `${ymExact[1]}-${ymExact[2]}`;
+  if (trimmed) {
+    const ymPrefix = trimmed.match(/^(\d{4})-(\d{2})/);
+    if (ymPrefix) return `${ymPrefix[1]}-${ymPrefix[2]}`;
+    const parsedFromLabel = new Date(`1 ${trimmed}`);
+    if (!Number.isNaN(parsedFromLabel.getTime())) {
+      return `${parsedFromLabel.getFullYear()}-${String(parsedFromLabel.getMonth() + 1).padStart(2, '0')}`;
+    }
+    const parsedAny = new Date(trimmed);
+    if (!Number.isNaN(parsedAny.getTime())) {
+      return `${parsedAny.getFullYear()}-${String(parsedAny.getMonth() + 1).padStart(2, '0')}`;
+    }
+  }
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Computes exact separate component payment balances (Rent, Electricity, Late Penalty, Carry-Over)
+ * for both new bills with explicit component tracking and legacy bills.
+ */
+export function computeBillComponentBalances(
+  bill: Pick<
+    BillRecord,
+    | 'baseRent'
+    | 'electricTotal'
+    | 'latePenalty'
+    | 'previousBalanceCarryOver'
+    | 'otherCharges'
+    | 'securityDepositApplied'
+    | 'advanceApplied'
+    | 'depositApplied'
+    | 'totalAmountDue'
+    | 'amountPaid'
+    | 'remainingBalance'
+    | 'rentPaid'
+    | 'rentRemaining'
+    | 'electricityPaid'
+    | 'electricityRemaining'
+    | 'latePenaltyPaid'
+    | 'latePenaltyRemaining'
+    | 'carryOverPaid'
+    | 'carryOverRemaining'
+  >
+): BillComponentBalances {
+  const secCredits = Math.max(0, toCentavos(bill.securityDepositApplied));
+  const advCredits = Math.max(0, toCentavos(bill.advanceApplied));
+  const totalCredits =
+    secCredits + advCredits > 0
+      ? secCredits + advCredits
+      : Math.max(0, toCentavos(bill.depositApplied));
+
+  const alloc = allocateChargesAndCredits({
+    baseRent: bill.baseRent,
+    electricTotal: bill.electricTotal,
+    latePenalty: bill.latePenalty || 0,
+    previousBalanceCarryOver: bill.previousBalanceCarryOver,
+    otherCharges: bill.otherCharges || 0,
+    availableSecurityDeposit: fromCentavos(secCredits),
+    availableAdvanceCredit: fromCentavos(
+      secCredits + advCredits > 0 ? advCredits : totalCredits
+    ),
+  });
+
+  const rentDueCents = alloc.componentNetDue.rentCents;
+  const elecDueCents = alloc.componentNetDue.electricityCents;
+  const penDueCents = alloc.componentNetDue.latePenaltyCents;
+  const carryDueCents = alloc.componentNetDue.carryOverCents;
+  const otherDueCents = alloc.componentNetDue.otherCents;
+
+  const hasExplicitTracking =
+    typeof bill.rentPaid === 'number' &&
+    typeof bill.electricityPaid === 'number';
+
+  let rentPaidCents = 0;
+  let elecPaidCents = 0;
+  let penPaidCents = 0;
+  let carryPaidCents = 0;
+  let otherPaidCents = 0;
+
+  if (hasExplicitTracking) {
+    rentPaidCents = Math.min(rentDueCents, Math.max(0, toCentavos(bill.rentPaid)));
+    elecPaidCents = Math.min(elecDueCents, Math.max(0, toCentavos(bill.electricityPaid)));
+    penPaidCents = Math.min(penDueCents, Math.max(0, toCentavos(bill.latePenaltyPaid)));
+    carryPaidCents = Math.min(carryDueCents, Math.max(0, toCentavos(bill.carryOverPaid)));
+    const assigned = rentPaidCents + elecPaidCents + penPaidCents + carryPaidCents;
+    const leftoverPaid = Math.max(0, toCentavos(bill.amountPaid) - assigned);
+    otherPaidCents = Math.min(otherDueCents, leftoverPaid);
+  } else {
+    // Reconstruct component allocation deterministically for legacy bills:
+    // Carry-over -> Late Penalty -> Rent -> Electricity -> Other
+    let remCash = Math.max(0, toCentavos(bill.amountPaid));
+    carryPaidCents = Math.min(carryDueCents, remCash);
+    remCash -= carryPaidCents;
+    penPaidCents = Math.min(penDueCents, remCash);
+    remCash -= penPaidCents;
+    rentPaidCents = Math.min(rentDueCents, remCash);
+    remCash -= rentPaidCents;
+    elecPaidCents = Math.min(elecDueCents, remCash);
+    remCash -= elecPaidCents;
+    otherPaidCents = Math.min(otherDueCents, remCash);
+  }
+
+  const rentRemCents = Math.max(0, rentDueCents - rentPaidCents);
+  const elecRemCents = Math.max(0, elecDueCents - elecPaidCents);
+  const penRemCents = Math.max(0, penDueCents - penPaidCents);
+  const carryRemCents = Math.max(0, carryDueCents - carryPaidCents);
+  const otherRemCents = Math.max(0, otherDueCents - otherPaidCents);
+
+  const componentSumRemCents =
+    rentRemCents + elecRemCents + penRemCents + carryRemCents + otherRemCents;
+  const fallbackRemCents = Math.max(
+    0,
+    toCentavos(bill.totalAmountDue) - Math.max(0, toCentavos(bill.amountPaid))
+  );
+  const outstandingCents = Math.max(componentSumRemCents, fallbackRemCents);
+
+  return {
+    rentDue: fromCentavos(rentDueCents),
+    rentPaid: fromCentavos(rentPaidCents),
+    rentRemaining: fromCentavos(rentRemCents),
+    electricityDue: fromCentavos(elecDueCents),
+    electricityPaid: fromCentavos(elecPaidCents),
+    electricityRemaining: fromCentavos(elecRemCents),
+    latePenaltyDue: fromCentavos(penDueCents),
+    latePenaltyPaid: fromCentavos(penPaidCents),
+    latePenaltyRemaining: fromCentavos(penRemCents),
+    carryOverDue: fromCentavos(carryDueCents),
+    carryOverPaid: fromCentavos(carryPaidCents),
+    carryOverRemaining: fromCentavos(carryRemCents),
+    otherDue: fromCentavos(otherDueCents),
+    otherPaid: fromCentavos(otherPaidCents),
+    otherRemaining: fromCentavos(otherRemCents),
+    totalAmountDue: fromCentavos(Math.max(0, toCentavos(bill.totalAmountDue))),
+    totalPaid: fromCentavos(Math.max(0, toCentavos(bill.amountPaid))),
+    outstandingBalance: fromCentavos(outstandingCents),
+    hasUnpaidElectricity: elecRemCents > 0,
+    isRentPaid: rentRemCents === 0,
+    isElectricityPaid: elecRemCents === 0,
+  };
+}
+
+function distributeCashAcrossComponents(params: {
+  paymentCents: number;
+  currentBalances: BillComponentBalances;
+  allocationTarget?: PaymentAllocationTarget;
+  customAllocation?: Partial<ComponentPaymentAllocation>;
+}): {
+  appliedToBillCents: number;
+  overpaymentCents: number;
+  txAllocation: ComponentPaymentAllocation;
+  nextPaid: {
+    rentPaidCents: number;
+    elecPaidCents: number;
+    penPaidCents: number;
+    carryPaidCents: number;
+    otherPaidCents: number;
+  };
+  nextRemaining: {
+    rentRemCents: number;
+    elecRemCents: number;
+    penRemCents: number;
+    carryRemCents: number;
+    otherRemCents: number;
+  };
+} {
+  const { paymentCents, currentBalances, allocationTarget = 'auto', customAllocation } =
+    params;
+
+  let remRent = toCentavos(currentBalances.rentRemaining);
+  let remElec = toCentavos(currentBalances.electricityRemaining);
+  let remPen = toCentavos(currentBalances.latePenaltyRemaining);
+  let remCarry = toCentavos(currentBalances.carryOverRemaining);
+  let remOther = toCentavos(currentBalances.otherRemaining);
+
+  let addRent = 0;
+  let addElec = 0;
+  let addPen = 0;
+  let addCarry = 0;
+  let addOther = 0;
+  let cashLeft = Math.max(0, paymentCents);
+
+  const take = (targetRem: number, maxCap?: number): number => {
+    const cap = maxCap !== undefined ? Math.min(targetRem, Math.max(0, maxCap)) : targetRem;
+    const used = Math.min(cashLeft, cap);
+    cashLeft -= used;
+    return used;
+  };
+
+  if (allocationTarget === 'custom' && customAllocation) {
+    const r = take(remRent, toCentavos(customAllocation.rentPaid));
+    addRent += r;
+    remRent -= r;
+
+    const e = take(remElec, toCentavos(customAllocation.electricityPaid));
+    addElec += e;
+    remElec -= e;
+
+    const p = take(remPen, toCentavos(customAllocation.latePenaltyPaid));
+    addPen += p;
+    remPen -= p;
+
+    const c = take(remCarry, toCentavos(customAllocation.carryOverPaid));
+    addCarry += c;
+    remCarry -= c;
+
+    const o = take(remOther, toCentavos(customAllocation.otherChargesPaid));
+    addOther += o;
+    remOther -= o;
+  }
+
+  // Primary targeted component first, then any leftover applies to remaining unpaid charges
+  // so money NEVER overflows into Advance Credit while Electricity, Rent, or Penalty stays unpaid.
+  const order: Array<'carry' | 'penalty' | 'rent' | 'electricity' | 'other'> =
+    allocationTarget === 'rent'
+      ? ['rent', 'carry', 'penalty', 'electricity', 'other']
+      : allocationTarget === 'electricity'
+        ? ['electricity', 'penalty', 'rent', 'carry', 'other']
+        : allocationTarget === 'penalty'
+          ? ['penalty', 'rent', 'electricity', 'carry', 'other']
+          : ['carry', 'penalty', 'rent', 'electricity', 'other'];
+
+  for (const key of order) {
+    if (cashLeft <= 0) break;
+    if (key === 'carry' && remCarry > 0) {
+      const used = take(remCarry);
+      addCarry += used;
+      remCarry -= used;
+    } else if (key === 'penalty' && remPen > 0) {
+      const used = take(remPen);
+      addPen += used;
+      remPen -= used;
+    } else if (key === 'rent' && remRent > 0) {
+      const used = take(remRent);
+      addRent += used;
+      remRent -= used;
+    } else if (key === 'electricity' && remElec > 0) {
+      const used = take(remElec);
+      addElec += used;
+      remElec -= used;
+    } else if (key === 'other' && remOther > 0) {
+      const used = take(remOther);
+      addOther += used;
+      remOther -= used;
+    }
+  }
+
+  const appliedToBillCents = addRent + addElec + addPen + addCarry + addOther;
+  const overpaymentCents = Math.max(0, cashLeft);
+
+  return {
+    appliedToBillCents,
+    overpaymentCents,
+    txAllocation: {
+      rentPaid: fromCentavos(addRent),
+      electricityPaid: fromCentavos(addElec),
+      latePenaltyPaid: fromCentavos(addPen),
+      carryOverPaid: fromCentavos(addCarry),
+      otherChargesPaid: fromCentavos(addOther),
+    },
+    nextPaid: {
+      rentPaidCents: toCentavos(currentBalances.rentPaid) + addRent,
+      elecPaidCents: toCentavos(currentBalances.electricityPaid) + addElec,
+      penPaidCents: toCentavos(currentBalances.latePenaltyPaid) + addPen,
+      carryPaidCents: toCentavos(currentBalances.carryOverPaid) + addCarry,
+      otherPaidCents: toCentavos(currentBalances.otherPaid) + addOther,
+    },
+    nextRemaining: {
+      rentRemCents: remRent,
+      elecRemCents: remElec,
+      penRemCents: remPen,
+      carryRemCents: remCarry,
+      otherRemCents: remOther,
+    },
   };
 }
 
@@ -387,6 +715,10 @@ export interface GenerateBillTransactionInput {
   advanceCapMode?: AdvanceCapPolicyMode;
   idempotencyKey?: string;
   advanceNote?: string;
+  requireVerifiedElectricity?: boolean;
+  meterReading?: MonthlyMeterReading;
+  initialAllocationTarget?: PaymentAllocationTarget;
+  initialCustomAllocation?: Partial<ComponentPaymentAllocation>;
 }
 
 export interface GenerateBillTransactionResult {
@@ -402,17 +734,26 @@ export interface GenerateBillTransactionResult {
 
 /**
  * Executes bill issuance atomically using integer centavo math:
- * 1. Prevents duplicate issuance for matching idempotencyKey.
- * 2. Computes grossCharges, deposit deduction, advance application, and netAmountDue.
- * 3. Keeps unused advance credit intact in room.advanceRent.
- * 4. Keeps advance credit consumption strictly separate from cash amountPaid.
- * 5. Emits itemized Advance Ledger entries with balanceBefore/balanceAfter/refNo.
+ * 1. Prevents duplicate issuance for matching idempotencyKey OR duplicate active (roomId, billingMonthKey).
+ * 2. Enforces mandatory electricity meter validation (non-negative readings, no unauthorized negative delta, verified reading).
+ * 3. Computes grossCharges (including prorated rent, electricity, late penalty, carryover), deposit/advance credits, and netAmountDue.
+ * 4. Tracks Rent, Electricity, Late Penalty, and Carry-Over separately so unpaid electricity never marks a bill paid.
+ * 5. Keeps unused advance credit intact in room.advanceRent and emits itemized Advance Ledger entries.
  */
 export function executeGenerateBillTransaction(
   input: GenerateBillTransactionInput
 ): GenerateBillTransactionResult {
-  const { room, existingBills, billDraft, advanceCapMode = 'unlimited', idempotencyKey } =
-    input;
+  const {
+    room,
+    existingBills,
+    billDraft,
+    advanceCapMode = 'unlimited',
+    idempotencyKey,
+    requireVerifiedElectricity = false,
+    meterReading,
+    initialAllocationTarget = 'auto',
+    initialCustomAllocation,
+  } = input;
 
   if (idempotencyKey) {
     const existingDup = existingBills.find((b) => b.idempotencyKey === idempotencyKey);
@@ -429,6 +770,88 @@ export function executeGenerateBillTransaction(
     }
   }
 
+  const billingMonthKey = normalizeMonthKeyInternal(
+    billDraft.billingMonthKey || billDraft.billingPeriod
+  );
+
+  // Prevent duplicate active monthly bill for the same room & billing month
+  const existingPeriodBill = existingBills.find(
+    (b) =>
+      !b.isArchived &&
+      b.roomId === room.id &&
+      normalizeMonthKeyInternal(b.billingMonthKey || b.billingPeriod) ===
+        billingMonthKey
+  );
+  if (existingPeriodBill) {
+    return {
+      ok: false,
+      duplicate: true,
+      errorCode: 'DUPLICATE_BILLING_PERIOD',
+      errorMessage: `An active monthly bill (Receipt #${existingPeriodBill.receiptNo}) already exists for ${room.name} in ${billDraft.billingPeriod}. Archive or view the existing receipt instead of issuing a duplicate.`,
+      createdBill: existingPeriodBill,
+      archivedPreviousBills: existingBills,
+      ledgerEntries: [],
+    };
+  }
+
+  // Validate mandatory electricity sub-meter readings
+  const prevVal = Number(billDraft.prevReading);
+  const currVal = Number(billDraft.currReading);
+  if (
+    !Number.isFinite(prevVal) ||
+    !Number.isFinite(currVal) ||
+    prevVal < 0 ||
+    currVal < 0
+  ) {
+    return {
+      ok: false,
+      errorCode: 'MISSING_ELECTRICITY_READING',
+      errorMessage:
+        'Both previous and current electricity meter readings are required before generating a monthly bill.',
+      archivedPreviousBills: existingBills,
+      ledgerEntries: [],
+    };
+  }
+
+  if (currVal < prevVal) {
+    const hasAuthorizedReset =
+      Boolean(
+        meterReading?.meterResetOrReplacement &&
+          meterReading.meterResetDocumentedReason?.trim()
+      ) ||
+      Boolean(
+        billDraft.notes &&
+          /(Meter Reset Baseline Verified|Dial Rollover Verified)/i.test(
+            billDraft.notes
+          )
+      );
+    if (!hasAuthorizedReset) {
+      return {
+        ok: false,
+        errorCode: 'NEGATIVE_CONSUMPTION_UNAUTHORIZED',
+        errorMessage: `Negative electricity consumption (${currVal.toFixed(1)} < ${prevVal.toFixed(1)} kWh) is not allowed unless an authorized meter replacement or dial rollover is documented.`,
+        archivedPreviousBills: existingBills,
+        ledgerEntries: [],
+      };
+    }
+  }
+
+  const isElectricityVerified =
+    billDraft.electricityVerified === true || Boolean(meterReading?.isVerified);
+  if (
+    (requireVerifiedElectricity || billDraft.electricityVerified === false) &&
+    !isElectricityVerified
+  ) {
+    return {
+      ok: false,
+      errorCode: 'MISSING_VERIFIED_ELECTRICITY_READING',
+      errorMessage:
+        'Cannot generate monthly bill without a verified electricity sub-meter reading for this billing period.',
+      archivedPreviousBills: existingBills,
+      ledgerEntries: [],
+    };
+  }
+
   const nowIso = billDraft.createdAt || new Date().toISOString();
   const availSecDep = Math.max(0, roundCurrencyCentavos(room.securityDepositPaid || 0));
   const availAdv = Math.max(0, roundCurrencyCentavos(room.advanceRent || 0));
@@ -436,6 +859,7 @@ export function executeGenerateBillTransaction(
   const allocation = allocateChargesAndCredits({
     baseRent: billDraft.baseRent,
     electricTotal: billDraft.electricTotal,
+    latePenalty: billDraft.latePenalty || 0,
     previousBalanceCarryOver: billDraft.previousBalanceCarryOver,
     otherCharges: billDraft.otherCharges || 0,
     availableSecurityDeposit: availSecDep,
@@ -447,7 +871,43 @@ export function executeGenerateBillTransaction(
   // Upfront cash/transfer payment provided at generation time (never counts advance as cash)
   const upfrontCashCents = Math.max(0, toCentavos(billDraft.amountPaid));
   const netDueCents = toCentavos(allocation.netTotalAmountDue);
-  const overpaymentCents = Math.max(0, upfrontCashCents - netDueCents);
+
+  // Separate component balances before upfront cash payment
+  const preCashBalances: BillComponentBalances = {
+    rentDue: fromCentavos(allocation.componentNetDue.rentCents),
+    rentPaid: 0,
+    rentRemaining: fromCentavos(allocation.componentNetDue.rentCents),
+    electricityDue: fromCentavos(allocation.componentNetDue.electricityCents),
+    electricityPaid: 0,
+    electricityRemaining: fromCentavos(allocation.componentNetDue.electricityCents),
+    latePenaltyDue: fromCentavos(allocation.componentNetDue.latePenaltyCents),
+    latePenaltyPaid: 0,
+    latePenaltyRemaining: fromCentavos(allocation.componentNetDue.latePenaltyCents),
+    carryOverDue: fromCentavos(allocation.componentNetDue.carryOverCents),
+    carryOverPaid: 0,
+    carryOverRemaining: fromCentavos(allocation.componentNetDue.carryOverCents),
+    otherDue: fromCentavos(allocation.componentNetDue.otherCents),
+    otherPaid: 0,
+    otherRemaining: fromCentavos(allocation.componentNetDue.otherCents),
+    totalAmountDue: allocation.netTotalAmountDue,
+    totalPaid: 0,
+    outstandingBalance: allocation.netTotalAmountDue,
+    hasUnpaidElectricity: allocation.componentNetDue.electricityCents > 0,
+    isRentPaid: allocation.componentNetDue.rentCents === 0,
+    isElectricityPaid: allocation.componentNetDue.electricityCents === 0,
+  };
+
+  const cashSplit = distributeCashAcrossComponents({
+    paymentCents: upfrontCashCents,
+    currentBalances: preCashBalances,
+    allocationTarget: initialAllocationTarget,
+    customAllocation: initialCustomAllocation,
+  });
+
+  const overpaymentCents = Math.max(
+    cashSplit.overpaymentCents,
+    Math.max(0, upfrontCashCents - netDueCents)
+  );
   const overpaymentPeso = fromCentavos(overpaymentCents);
 
   if (overpaymentCents > 0) {
@@ -467,18 +927,31 @@ export function executeGenerateBillTransaction(
     }
   }
 
-  const remainingBalanceCents = Math.max(0, netDueCents - upfrontCashCents);
+  const remainingFromComponentsCents =
+    cashSplit.nextRemaining.rentRemCents +
+    cashSplit.nextRemaining.elecRemCents +
+    cashSplit.nextRemaining.penRemCents +
+    cashSplit.nextRemaining.carryRemCents +
+    cashSplit.nextRemaining.otherRemCents;
+  const remainingBalanceCents = Math.max(
+    remainingFromComponentsCents,
+    Math.max(0, netDueCents - upfrontCashCents)
+  );
+  const hasAnyUnpaidComponent =
+    cashSplit.nextRemaining.elecRemCents > 0 ||
+    cashSplit.nextRemaining.rentRemCents > 0 ||
+    cashSplit.nextRemaining.penRemCents > 0 ||
+    cashSplit.nextRemaining.carryRemCents > 0 ||
+    cashSplit.nextRemaining.otherRemCents > 0;
+
+  // Strict rule: bill CANNOT be marked 'paid' if electricity or any other component remains unpaid.
   const billStatus: BillRecord['status'] =
-    remainingBalanceCents === 0
+    remainingBalanceCents === 0 && !hasAnyUnpaidComponent
       ? 'paid'
       : upfrontCashCents > 0 || allocation.totalCreditsApplied > 0
         ? 'partial'
         : 'unpaid';
 
-  // Wait: if zero cash paid and only partial credit/deposit applied, keep status precise:
-  // If advance + deposit cover 100%, remainingBalance === 0 -> 'paid'.
-  // If cash paid > 0 OR credits applied > 0 with balance remaining -> 'partial'.
-  // If neither cash nor credits -> 'unpaid'.
   const paidAt =
     billStatus === 'paid'
       ? billDraft.paidAt || nowIso
@@ -545,10 +1018,18 @@ export function executeGenerateBillTransaction(
   }
 
   const finalAdvanceBalance = fromCentavos(runningAdvCents);
+  const totalRentDue = fromCentavos(
+    toCentavos(allocation.baseRent) + toCentavos(allocation.latePenalty)
+  );
 
   const createdBill: BillRecord = {
     ...billDraft,
+    billingMonthKey,
+    electricityVerified: isElectricityVerified,
+    meterReadingId: billDraft.meterReadingId || meterReading?.id,
     baseRent: allocation.baseRent,
+    latePenalty: allocation.latePenalty,
+    totalRentDue,
     electricTotal: allocation.electricTotal,
     previousBalanceCarryOver: allocation.previousBalanceCarryOver,
     otherCharges: allocation.otherCharges,
@@ -563,6 +1044,14 @@ export function executeGenerateBillTransaction(
     amountPaid: fromCentavos(upfrontCashCents),
     overpaymentToAdvance: overpaymentPeso,
     remainingBalance: fromCentavos(remainingBalanceCents),
+    rentPaid: fromCentavos(cashSplit.nextPaid.rentPaidCents),
+    rentRemaining: fromCentavos(cashSplit.nextRemaining.rentRemCents),
+    electricityPaid: fromCentavos(cashSplit.nextPaid.elecPaidCents),
+    electricityRemaining: fromCentavos(cashSplit.nextRemaining.elecRemCents),
+    latePenaltyPaid: fromCentavos(cashSplit.nextPaid.penPaidCents),
+    latePenaltyRemaining: fromCentavos(cashSplit.nextRemaining.penRemCents),
+    carryOverPaid: fromCentavos(cashSplit.nextPaid.carryPaidCents),
+    carryOverRemaining: fromCentavos(cashSplit.nextRemaining.carryRemCents),
     status: billStatus,
     paidAt,
     isLocked: billStatus === 'paid',
@@ -576,13 +1065,25 @@ export function executeGenerateBillTransaction(
               overpaymentCredited: overpaymentCents > 0 ? overpaymentPeso : undefined,
               method: billDraft.paymentMethod || 'Cash',
               paidAt: nowIso,
+              allocationTarget: initialAllocationTarget,
+              componentAllocation: cashSplit.txAllocation,
               note:
                 overpaymentCents > 0
                   ? `Cash payment at billing (${overpaymentPeso.toFixed(2)} credited to Advance Balance)`
-                  : 'Initial cash payment recorded with bill generation',
+                  : cashSplit.nextRemaining.elecRemCents > 0 && cashSplit.nextRemaining.rentRemCents === 0
+                    ? `Rent paid; Electricity balance ₱${fromCentavos(cashSplit.nextRemaining.elecRemCents).toFixed(2)} still unpaid`
+                    : 'Initial cash payment recorded with bill generation',
             },
           ]
-        : billDraft.paymentHistory || [],
+        : (billDraft.paymentHistory || []).map((tx, idx) =>
+            idx === 0 && !tx.componentAllocation
+              ? {
+                  ...tx,
+                  allocationTarget: tx.allocationTarget || initialAllocationTarget,
+                  componentAllocation: cashSplit.txAllocation,
+                }
+              : tx
+          ),
     updatedAt: nowIso,
   };
 
@@ -633,6 +1134,8 @@ export interface RecordPaymentTransactionInput {
   advanceCapMode?: AdvanceCapPolicyMode;
   nowIso?: string;
   idempotencyKey?: string;
+  allocationTarget?: PaymentAllocationTarget;
+  customAllocation?: Partial<ComponentPaymentAllocation>;
 }
 
 export interface RecordPaymentTransactionResult {
@@ -644,12 +1147,13 @@ export interface RecordPaymentTransactionResult {
   updatedRoom?: Room;
   overpaymentCredited: number;
   ledgerEntry?: AdvanceBalanceTransaction;
+  componentAllocation?: ComponentPaymentAllocation;
 }
 
 /**
  * Processes a cash or e-wallet payment against a bill using integer centavos.
- * Keeps cash payments strictly separate from advance credit consumption.
- * Only sets `paidAt` when status transitions to 'paid'.
+ * Keeps Rent, Electricity, Late Penalty, and Carry-Over separately tracked.
+ * Never marks a bill 'paid' if electricity charges (or any other component) remain unpaid.
  */
 export function executeRecordPaymentTransaction(
   input: RecordPaymentTransactionInput
@@ -663,6 +1167,8 @@ export function executeRecordPaymentTransaction(
     note,
     advanceCapMode = 'unlimited',
     idempotencyKey,
+    allocationTarget = 'auto',
+    customAllocation,
   } = input;
 
   const paymentCents = Math.max(0, toCentavos(paymentAmount));
@@ -694,8 +1200,20 @@ export function executeRecordPaymentTransaction(
   const nowIso = input.nowIso || new Date().toISOString();
   const prevPaidCents = Math.max(0, toCentavos(bill.amountPaid));
   const netDueCents = Math.max(0, toCentavos(bill.totalAmountDue));
+  const currentBalances = computeBillComponentBalances(bill);
+
+  const split = distributeCashAcrossComponents({
+    paymentCents,
+    currentBalances,
+    allocationTarget,
+    customAllocation,
+  });
+
   const currentRemainingCents = Math.max(0, netDueCents - prevPaidCents);
-  const overpaymentCents = Math.max(0, paymentCents - currentRemainingCents);
+  const overpaymentCents = Math.max(
+    0,
+    Math.min(split.overpaymentCents, Math.max(0, paymentCents - currentRemainingCents))
+  );
   const overpaymentPeso = fromCentavos(overpaymentCents);
 
   const currentAdvCents = Math.max(0, toCentavos(room?.advanceRent ?? bill.advanceBalanceAfter ?? 0));
@@ -717,13 +1235,46 @@ export function executeRecordPaymentTransaction(
   }
 
   const newPaidCents = prevPaidCents + paymentCents;
-  const newRemainingCents = Math.max(0, netDueCents - newPaidCents);
+  const remainingFromComponentsCents =
+    split.nextRemaining.rentRemCents +
+    split.nextRemaining.elecRemCents +
+    split.nextRemaining.penRemCents +
+    split.nextRemaining.carryRemCents +
+    split.nextRemaining.otherRemCents;
+  const newRemainingCents = Math.max(
+    remainingFromComponentsCents,
+    Math.max(0, netDueCents - newPaidCents)
+  );
+  const hasAnyUnpaidComponent =
+    split.nextRemaining.elecRemCents > 0 ||
+    split.nextRemaining.rentRemCents > 0 ||
+    split.nextRemaining.penRemCents > 0 ||
+    split.nextRemaining.carryRemCents > 0 ||
+    split.nextRemaining.otherRemCents > 0;
+
+  // Strict loophole guard: NEVER mark monthly bill as 'paid' while electricity (or rent/penalty) remains unpaid
   const nextStatus: BillRecord['status'] =
-    newRemainingCents === 0
+    newRemainingCents === 0 && !hasAnyUnpaidComponent
       ? 'paid'
       : newPaidCents > 0 || (bill.depositApplied || 0) > 0
         ? 'partial'
         : 'unpaid';
+
+  const autoNoteParts: string[] = [];
+  if (split.txAllocation.rentPaid > 0) {
+    autoNoteParts.push(`Rent ₱${split.txAllocation.rentPaid.toFixed(2)}`);
+  }
+  if (split.txAllocation.electricityPaid > 0) {
+    autoNoteParts.push(`Electricity ₱${split.txAllocation.electricityPaid.toFixed(2)}`);
+  }
+  if (split.txAllocation.latePenaltyPaid > 0) {
+    autoNoteParts.push(`Penalty ₱${split.txAllocation.latePenaltyPaid.toFixed(2)}`);
+  }
+  if (split.txAllocation.carryOverPaid > 0) {
+    autoNoteParts.push(`Carry-Over ₱${split.txAllocation.carryOverPaid.toFixed(2)}`);
+  }
+  const allocationSummaryNote =
+    autoNoteParts.length > 0 ? `Applied to: ${autoNoteParts.join(', ')}` : undefined;
 
   const newPaymentTx: PaymentTransaction = {
     id: idempotencyKey || createUniqueId('tx'),
@@ -732,10 +1283,12 @@ export function executeRecordPaymentTransaction(
     method,
     paidAt: nowIso,
     referenceNo: referenceNo?.trim() || undefined,
+    allocationTarget,
+    componentAllocation: split.txAllocation,
     note:
       overpaymentCents > 0
         ? `Excess ₱${overpaymentPeso.toFixed(2)} credited to Advance Payment Balance`
-        : note,
+        : note || allocationSummaryNote,
   };
 
   const nextAdvCents = currentAdvCents + overpaymentCents;
@@ -749,6 +1302,14 @@ export function executeRecordPaymentTransaction(
     ),
     advanceBalanceAfter: nextAdvanceBalance,
     remainingBalance: fromCentavos(newRemainingCents),
+    rentPaid: fromCentavos(split.nextPaid.rentPaidCents),
+    rentRemaining: fromCentavos(split.nextRemaining.rentRemCents),
+    electricityPaid: fromCentavos(split.nextPaid.elecPaidCents),
+    electricityRemaining: fromCentavos(split.nextRemaining.elecRemCents),
+    latePenaltyPaid: fromCentavos(split.nextPaid.penPaidCents),
+    latePenaltyRemaining: fromCentavos(split.nextRemaining.penRemCents),
+    carryOverPaid: fromCentavos(split.nextPaid.carryPaidCents),
+    carryOverRemaining: fromCentavos(split.nextRemaining.carryRemCents),
     status: nextStatus,
     paymentMethod: method,
     paidAt: nextStatus === 'paid' ? bill.paidAt || nowIso : bill.paidAt,
@@ -799,6 +1360,7 @@ export function executeRecordPaymentTransaction(
     updatedRoom,
     overpaymentCredited: overpaymentPeso,
     ledgerEntry,
+    componentAllocation: split.txAllocation,
   };
 }
 
@@ -1208,10 +1770,11 @@ export function recalculateUnlockedBillsForRates(
     const nextRate = resolveRateFn(settings, b.billingPeriod);
     const nextElecCents = Math.round(b.consumptionKwh * toCentavos(nextRate));
     const baseRentCents = Math.max(0, toCentavos(b.baseRent));
+    const latePenaltyCents = Math.max(0, toCentavos(b.latePenalty));
     const carryOverCents = Math.max(0, toCentavos(b.previousBalanceCarryOver));
     const otherCents = Math.max(0, toCentavos(b.otherCharges));
     const nextGrossCents =
-      baseRentCents + nextElecCents + carryOverCents + otherCents;
+      baseRentCents + latePenaltyCents + nextElecCents + carryOverCents + otherCents;
 
     const prevSecCents = Math.max(0, toCentavos(b.securityDepositApplied));
     const prevAdvCents = Math.max(0, toCentavos(b.advanceApplied));
@@ -1320,7 +1883,7 @@ export function recalculateUnlockedBillsForRates(
       nextBillAdvanceAfter !== b.advanceBalanceAfter
     ) {
       updatedCount += 1;
-      return {
+      const draftUpdated: BillRecord = {
         ...b,
         electricRate: nextRateRounded,
         electricTotal: nextElecTotal,
@@ -1341,6 +1904,22 @@ export function recalculateUnlockedBillsForRates(
         paidAt: nextStatus === 'paid' ? b.paidAt || nowIso : b.paidAt,
         isLocked: nextStatus === 'paid' ? true : b.isLocked,
         updatedAt: nowIso,
+      };
+      const recomputedComp = computeBillComponentBalances({
+        ...draftUpdated,
+        rentPaid: undefined,
+        electricityPaid: undefined,
+      });
+      return {
+        ...draftUpdated,
+        rentPaid: recomputedComp.rentPaid,
+        rentRemaining: recomputedComp.rentRemaining,
+        electricityPaid: recomputedComp.electricityPaid,
+        electricityRemaining: recomputedComp.electricityRemaining,
+        latePenaltyPaid: recomputedComp.latePenaltyPaid,
+        latePenaltyRemaining: recomputedComp.latePenaltyRemaining,
+        carryOverPaid: recomputedComp.carryOverPaid,
+        carryOverRemaining: recomputedComp.carryOverRemaining,
       };
     }
 

@@ -26,6 +26,11 @@ import {
   maskPhoneNumber,
   normalizeMonthKey,
 } from '../../utils/billingCalculator';
+import {
+  calculateMonthlyRentSummary,
+  getBillingMonthSchedule,
+} from '../../utils/rentSchedule';
+import { loadSettings } from '../../services/storageService';
 import { openMessengerAppWithReceipt } from '../../services/notificationService';
 
 interface DueCalendarViewProps {
@@ -110,15 +115,19 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
     return new Date(currentYear, currentMonth, 1).getDay(); // 0 = Sun, 1 = Mon ...
   }, [currentYear, currentMonth]);
 
-  // Map each room to its due status for the selected month
+  // Map each room to its monthly schedule & due status for the selected billing month
+  const selectedMonthSchedule = useMemo(() => {
+    const targetMonthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+    return getBillingMonthSchedule(targetMonthKey, today);
+  }, [currentYear, currentMonth, today]);
+
   const roomDueMap = useMemo(() => {
     const targetMonthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+    const activeSettings = loadSettings();
 
     return occupiedRooms.map((room) => {
-      // Due day is usually 1 - 10, defaults to 5 if unset
-      const dueDay = room.tenant?.dueDayOfMonth
-        ? Math.min(Math.max(room.tenant.dueDayOfMonth, 1), daysInMonth)
-        : 5;
+      // Monthly payment period is 1st-10th (due on the 10th of the billing month; late penalty starts Day 11)
+      const dueDay = Math.min(10, daysInMonth);
 
       // Find matching bill for this month, room & active tenant using normalized billingPeriod
       const bill = bills.find(
@@ -126,12 +135,21 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
           b.roomId === room.id &&
           !b.isArchived &&
           (!room.tenant?.fullName || b.tenantName === room.tenant.fullName) &&
-          normalizeMonthKey(b.billingPeriod) === targetMonthKey
+          normalizeMonthKey(b.billingMonthKey || b.billingPeriod) === targetMonthKey
       );
 
+      const rentSummary = calculateMonthlyRentSummary({
+        monthlyRent: room.monthlyRent,
+        billingPeriod: targetMonthKey,
+        occupancyStartDate: room.tenant?.moveInDate,
+        occupancyEndDate: room.tenant?.moveOutDate,
+        latePenaltyConfig: activeSettings.latePenalty,
+        referenceDate: today,
+      });
+
       const status = bill ? bill.status : 'unpaid';
-      const totalDue = bill ? bill.totalAmountDue : room.monthlyRent;
-      const balanceDue = bill ? bill.remainingBalance : room.monthlyRent;
+      const totalDue = bill ? bill.totalAmountDue : rentSummary.totalRentDue;
+      const balanceDue = bill ? bill.remainingBalance : rentSummary.totalRentDue;
 
       return {
         room,
@@ -140,9 +158,10 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
         status,
         totalDue,
         balanceDue,
+        rentSummary,
       };
     });
-  }, [occupiedRooms, bills, currentYear, currentMonth, daysInMonth]);
+  }, [occupiedRooms, bills, currentYear, currentMonth, daysInMonth, today]);
 
   // Group rooms by due day
   const roomsByDay = useMemo(() => {
@@ -279,7 +298,7 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="hidden md:inline-flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 font-semibold text-xs">
               <span className="w-2 h-2 rounded-full bg-amber-400" />
-              <span>Due Window: Day 1–10</span>
+              <span>Payment Period: 1st–10th • Late Starts 11th</span>
             </span>
 
             {/* View Mode Switcher with Full Readable Labels on Mobile & Desktop */}
@@ -367,15 +386,17 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
 
           <div className="surface-card rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-amber-500/35 bg-gradient-to-br from-amber-500/10 to-[#121927] flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs text-amber-300 font-bold">
-              <span>Pay Window</span>
+              <span>Payment Schedule</span>
               <CalendarIcon className="w-4 h-4 text-amber-400 shrink-0" />
             </div>
             <div className="mt-2.5">
               <div className="text-lg sm:text-2xl font-black text-white">
-                Day 1–10
+                1st–10th
               </div>
               <div className="text-[11px] text-amber-200/80 mt-1">
-                Monthly rent grace period
+                {selectedMonthSchedule.isPastDue
+                  ? `Late Penalty Active (Day 11+)`
+                  : `Due ${selectedMonthSchedule.dueDateLabel} • Late starts 11th`}
               </div>
             </div>
           </div>

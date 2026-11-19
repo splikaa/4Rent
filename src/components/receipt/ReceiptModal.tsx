@@ -1,18 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { toPng } from 'html-to-image';
 import {
   CalendarClock,
   Check,
   ChevronDown,
   ChevronUp,
+  Copy,
   Download,
-  ExternalLink,
   Eye,
   EyeOff,
   FileDown,
   Loader2,
   Lock,
-  MessageCircle,
   Printer,
   Share2,
   X,
@@ -25,13 +23,14 @@ import {
   formatPeso,
   getElectricRateForPeriod,
   getScheduledMonthKeys,
-  isMobileDevice,
   isRunningInMobileApp,
   normalizeMonthKey,
 } from '../../utils/billingCalculator';
 import {
   buildA4ReceiptPdfFromElement,
   buildReceiptDocumentMeta,
+  captureReceiptPngFromElement,
+  copyReceiptElementAsPng,
 } from '../../utils/pdfReceiptGenerator';
 import {
   generateSimulatedSubMeterDataUrl,
@@ -62,7 +61,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     () => settings.maskReceiptContacts ?? true
   );
   const [isExporting, setIsExporting] = useState(false);
+  const [isCopyingPng, setIsCopyingPng] = useState(false);
+  const [copiedPngSuccess, setCopiedPngSuccess] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const [quickRateError, setQuickRateError] = useState<string | null>(null);
   const [showYtdSchedule, setShowYtdSchedule] = useState(false);
   const [quickRateMonthKey, setQuickRateMonthKey] = useState<string>(() =>
     normalizeMonthKey(bill?.billingPeriod)
@@ -158,37 +160,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     if (!printableRef.current) return null;
     try {
       setIsExporting(true);
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-
-      const node = printableRef.current;
-      const rect = node.getBoundingClientRect();
-      const fullWidth = Math.ceil(rect.width || node.scrollWidth || 794);
-      const fullHeight = Math.ceil(
-        Math.max(node.scrollHeight, node.offsetHeight, rect.height || 0)
-      );
-
-      const dataUrl = await toPng(node, {
-        cacheBust: true,
-        pixelRatio: 2,
-        skipFonts: true,
-        fontEmbedCSS: '',
-        backgroundColor: '#FFFFFF',
-        width: fullWidth,
-        height: fullHeight,
-        canvasWidth: fullWidth * 2,
-        canvasHeight: fullHeight * 2,
-        style: {
-          transform: 'none',
-          maxHeight: 'none',
-          maxWidth: 'none',
-          height: `${fullHeight}px`,
-          width: `${fullWidth}px`,
-          overflow: 'visible',
-          position: 'static',
-          margin: '0',
-        },
+      const result = await captureReceiptPngFromElement(printableRef.current, {
+        pixelRatio: 2.5,
       });
-      return dataUrl;
+      return result.dataUrl;
     } catch {
       return null;
     } finally {
@@ -385,49 +360,28 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }, 5500);
   };
 
-  const handleShareToMessenger = async () => {
+  const handleCopyReceiptAsPng = async () => {
+    if (!printableRef.current) return;
     setShareFeedback(null);
-
-    // Pre-open desktop tab synchronously inside click gesture to avoid async popup blocking
-    const isDesktopWeb = !isMobileDevice() && !isRunningInMobileApp();
-    let preOpenedWindow: Window | null = null;
-    if (isDesktopWeb) {
-      try {
-        preOpenedWindow = window.open('', '_blank');
-        if (preOpenedWindow && preOpenedWindow.document) {
-          preOpenedWindow.document.title = 'Opening Messenger...';
-          preOpenedWindow.document.body.innerHTML =
-            '<div style="font-family:system-ui,sans-serif;background:#0b111c;color:#f8fafc;height:100vh;display:flex;align-items:center;justify-content:center;margin:0;text-align:center;"><div><h2 style="margin:0 0 8px;">Preparing A4 PDF Receipt...</h2><p style="color:#94a3b8;font-size:14px;margin:0;">Downloading your PDF receipt and opening Messenger.</p></div></div>';
-        }
-      } catch {
-        preOpenedWindow = null;
+    setCopiedPngSuccess(false);
+    setIsCopyingPng(true);
+    try {
+      const res = await copyReceiptElementAsPng(printableRef.current, {
+        filename: receiptMeta.pngFilename,
+        shareTitle: receiptMeta.shareTitle,
+        pixelRatio: 2.5,
+      });
+      setShareFeedback(res.message);
+      if (res.ok && (res.method === 'electron_clipboard' || res.method === 'clipboard_api')) {
+        setCopiedPngSuccess(true);
+        setTimeout(() => setCopiedPngSuccess(false), 3000);
       }
+      setTimeout(() => {
+        setShareFeedback((prev) => (prev === res.message ? null : prev));
+      }, 5500);
+    } finally {
+      setIsCopyingPng(false);
     }
-
-    const pdfBundle = await captureA4PdfBundle();
-    const summaryText = formatMessengerBillSummary(
-      bill,
-      settings.apartmentName || '4Rent Management System',
-      settings
-    );
-
-    const res = await shareReceiptDocument({
-      mode: 'messenger',
-      textSummary: summaryText,
-      pdfBlob: pdfBundle?.blob,
-      pdfDataUrl: pdfBundle?.dataUrl,
-      pngDataUrl: pdfBundle?.pngDataUrl,
-      receiptNo: bill.receiptNo,
-      tenantName: bill.tenantName,
-      roomName: bill.roomName,
-      messengerHandle: bill.tenantMessenger,
-      shareUrl: window.location.href,
-      preOpenedWindow,
-    });
-    setShareFeedback(res.message);
-    setTimeout(() => {
-      setShareFeedback((prev) => (prev === res.message ? null : prev));
-    }, 5500);
   };
 
   const isRateLockedReceipt = Boolean(bill.isArchived || bill.status === 'paid');
@@ -529,25 +483,40 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   <div className="flex items-center h-8 rounded-lg bg-[#162030] border border-amber-500/40 px-2">
                     <span className="text-xs font-bold text-amber-400 mr-1">₱</span>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="12.50"
                       value={quickRateValue}
-                      onChange={(e) => setQuickRateValue(e.target.value)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/,/g, '');
+                        if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                        setQuickRateValue(raw);
+                        setQuickRateError(null);
+                      }}
                       className="w-18 bg-transparent text-xs font-extrabold font-mono-num text-amber-300 focus:outline-none"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      const parsed = parseFloat(quickRateValue);
-                      if (!Number.isFinite(parsed) || parsed < 0) return;
+                      const trimmed = quickRateValue.trim();
+                      const parsed = trimmed === '' ? Number.NaN : Number(trimmed);
+                      if (!Number.isFinite(parsed) || parsed < 0) {
+                        setQuickRateError('Enter a valid non-negative rate (e.g., 12.50).');
+                        return;
+                      }
+                      setQuickRateError(null);
                       onApplyMonthlyRate(quickRateMonthKey, parsed);
                     }}
                     className="h-8 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer transition"
                   >
                     Apply Rate
                   </button>
+                  {quickRateError && (
+                    <span className="w-full text-[11px] text-red-400">
+                      {quickRateError}
+                    </span>
+                  )}
                 </div>
               </>
             )}
@@ -664,23 +633,35 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleShareToMessenger}
-              disabled={isExporting}
-              className="flex-1 min-w-[180px] h-11 py-2 px-3 rounded-xl bg-[#0084FF] hover:bg-[#1890FF] text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition cursor-pointer btn-fluid"
+              onClick={handleCopyReceiptAsPng}
+              disabled={isExporting || isCopyingPng}
+              className={`flex-1 min-w-[180px] h-11 py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer btn-fluid ${
+                copiedPngSuccess
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
+                  : 'bg-[#0084FF] hover:bg-[#1890FF] text-white shadow-blue-500/20'
+              }`}
+              title="Copy high-resolution PNG receipt to clipboard for pasting into Messenger or any chat app"
             >
-              {isExporting ? (
+              {isCopyingPng ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
+              ) : copiedPngSuccess ? (
+                <Check className="w-4 h-4" />
               ) : (
-                <MessageCircle className="w-4 h-4 fill-white" />
+                <Copy className="w-4 h-4" />
               )}
-              <span>Share PDF to Messenger</span>
-              <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+              <span>
+                {isCopyingPng
+                  ? 'Copying PNG Receipt...'
+                  : copiedPngSuccess
+                  ? 'Copied PNG! Paste in Messenger'
+                  : 'Copy Receipt as PNG'}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={handleShareReceipt}
-              disabled={isExporting}
+              disabled={isExporting || isCopyingPng}
               className="h-11 py-2 px-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-indigo-500/20 transition cursor-pointer btn-fluid"
             >
               <Share2 className="w-4 h-4" />

@@ -26,8 +26,12 @@ import {
   clampDueDayOneToTen,
   formatPeso,
   formatPhoneNumber,
-  getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
+import {
+  calculateMonthlyRentSummary,
+  getBillingMonthSchedule,
+  getCurrentBillingMonthKey,
+} from '../../utils/rentSchedule';
 
 interface RoomFormModalProps {
   isOpen: boolean;
@@ -79,7 +83,8 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
   const [moveInDate, setMoveInDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
-  const [dueDayOfMonth, setDueDayOfMonth] = useState('5'); // Strictly 1 to 10
+  const [moveOutDate, setMoveOutDate] = useState('');
+  const [dueDayOfMonth, setDueDayOfMonth] = useState('10');
   const [confirmVacateInForm, setConfirmVacateInForm] = useState(false);
 
   useEffect(() => {
@@ -113,12 +118,12 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setMoveInDate(
         initialRoom.tenant?.moveInDate || new Date().toISOString().slice(0, 10)
       );
+      setMoveOutDate(initialRoom.tenant?.moveOutDate || '');
       setDueDayOfMonth(
-        String(clampDueDayOneToTen(initialRoom.tenant?.dueDayOfMonth || 5))
+        String(clampDueDayOneToTen(initialRoom.tenant?.dueDayOfMonth || 10))
       );
     } else {
       const todayIso = new Date().toISOString().slice(0, 10);
-      const autoDay = clampDueDayOneToTen(new Date().getDate());
       setName('');
       setMonthlyRent(String(defaultRent));
       setLastMeterReading('0');
@@ -134,7 +139,8 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       setValidIdVerified(true);
       setPrivacyConsentSigned(true);
       setMoveInDate(todayIso);
-      setDueDayOfMonth(String(autoDay));
+      setMoveOutDate('');
+      setDueDayOfMonth('10');
     }
   }, [initialRoom, defaultRent, isOpen]);
 
@@ -147,27 +153,18 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
       ? fromCentavos(toCentavos(paidDepNum) - toCentavos(reqDepNum))
       : 0;
 
-  const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOfMonth, 10) || 5);
-  const nextMonthDueDateIso = getNextDueDateInOneToTenWindow(
-    safeDueDay,
-    moveInDate
-  );
-  const nextMonthDueDateFormatted = new Date(
-    nextMonthDueDateIso
-  ).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+  const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOfMonth, 10) || 10);
+  const activeMonthKey = getCurrentBillingMonthKey();
+  const activeSchedule = getBillingMonthSchedule(activeMonthKey);
+  const currentMonthRentPreview = calculateMonthlyRentSummary({
+    monthlyRent: Math.max(0, parseFloat(monthlyRent) || 0),
+    billingPeriod: activeMonthKey,
+    occupancyStartDate: moveInDate || undefined,
+    occupancyEndDate: moveOutDate || undefined,
   });
 
   const handleMoveInDateChange = (newDate: string) => {
     setMoveInDate(newDate);
-    if (newDate) {
-      const d = new Date(newDate);
-      if (!Number.isNaN(d.getTime())) {
-        setDueDayOfMonth(String(clampDueDayOneToTen(d.getDate())));
-      }
-    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -288,6 +285,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
               validIdVerified,
               privacyConsentSigned,
               moveInDate,
+              moveOutDate: moveOutDate.trim() || undefined,
               dueDayOfMonth: safeDueDay,
             }
           : undefined,
@@ -579,7 +577,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             <div className="pt-4 border-t border-[#222E44] space-y-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
                 <User className="w-3.5 h-3.5" />
-                Tenant Profile, Safety Verification & Payment Window (Day 1–10)
+                Tenant Profile, Occupancy Dates &amp; Monthly Payment Schedule
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
                 <div className="flex flex-col">
@@ -633,10 +631,10 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white focus:border-amber-500 focus:outline-none"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3 sm:col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:col-span-2">
                   <div className="flex flex-col">
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Move-In Date
+                      Move-In Date (Proration Start)
                     </label>
                     <input
                       type="date"
@@ -646,20 +644,15 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                     />
                   </div>
                   <div className="flex flex-col">
-                    <label className="block text-xs font-bold text-amber-400 mb-1.5">
-                      Pay Day (Day 1 to 10) *
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Planned / Actual Move-Out Date (Optional)
                     </label>
-                    <select
-                      value={dueDayOfMonth}
-                      onChange={(e) => setDueDayOfMonth(e.target.value)}
-                      className="w-full h-11 rounded-2xl bg-[#0D121B] border border-amber-500/40 px-3.5 text-xs font-bold text-amber-400 focus:border-amber-500 focus:outline-none"
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
-                        <option key={d} value={d}>
-                          Day {d} of Month
-                        </option>
-                      ))}
-                    </select>
+                    <input
+                      type="date"
+                      value={moveOutDate}
+                      onChange={(e) => setMoveOutDate(e.target.value)}
+                      className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-3.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                    />
                   </div>
                 </div>
               </div>
@@ -707,14 +700,24 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                 </button>
               </div>
 
-              <div className="rounded-2xl bg-[#0D121B] border border-amber-500/30 px-4 py-3 flex items-center justify-between text-xs">
-                <span className="text-slate-300 flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-amber-400" />
-                  Auto-Scheduled Next Month Payment Due Date (1 to 10 Window):
-                </span>
-                <span className="font-bold text-amber-400">
-                  {nextMonthDueDateFormatted} (Day {safeDueDay})
-                </span>
+              <div className="rounded-2xl bg-[#0D121B] border border-amber-500/30 px-4 py-3 space-y-1 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+                    Monthly Payment Schedule ({activeSchedule.billingPeriodLabel}):
+                  </span>
+                  <span className="font-bold text-amber-400">
+                    1st–10th • Due {activeSchedule.dueDateLabel}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Late payment penalty applies starting on the 11th day (configured in Settings).
+                  {currentMonthRentPreview.isProrated && (
+                    <span className="text-amber-300 font-semibold ml-1">
+                      Prorated {activeSchedule.billingPeriodLabel} rent preview: {formatPeso(currentMonthRentPreview.chargeableRent)} ({currentMonthRentPreview.occupiedDays}/{currentMonthRentPreview.daysInMonth} days).
+                    </span>
+                  )}
+                </p>
               </div>
             </div>
           )}

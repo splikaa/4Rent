@@ -22,10 +22,13 @@ import { BillRecord, Room } from '../../types/rental';
 import {
   formatPeso,
   formatPesoPrivacy,
-  getNextDueDateInOneToTenWindow,
   getRoomMonthlyPaymentStatus,
   maskPhoneNumber,
 } from '../../utils/billingCalculator';
+import {
+  getBillingMonthSchedule,
+  getCurrentBillingMonthKey,
+} from '../../utils/rentSchedule';
 
 interface ManageRoomsViewProps {
   rooms: Room[];
@@ -142,18 +145,10 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
               const roomBillsCount = bills.filter(
                 (b) => b.roomId === room.id
               ).length;
-              const nextDueIso = getNextDueDateInOneToTenWindow(
-                room.tenant?.dueDayOfMonth || 5,
-                room.tenant?.moveInDate
+              const activeSchedule = getBillingMonthSchedule(
+                getCurrentBillingMonthKey()
               );
-              const nextDueFormatted = new Date(nextDueIso).toLocaleDateString(
-                'en-US',
-                {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                }
-              );
+              const nextDueFormatted = activeSchedule.dueDateLabel;
 
               return (
                 <div
@@ -341,8 +336,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           </div>
                           <span className="text-amber-400 font-semibold flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5" />
-                            Next Due: {nextDueFormatted} (Day{' '}
-                            {room.tenant.dueDayOfMonth})
+                            Due: {nextDueFormatted} (1st–10th)
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-3.5 text-slate-300 pt-0.5">

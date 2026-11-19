@@ -18,18 +18,31 @@ import {
   X,
   ZoomIn,
 } from 'lucide-react';
-import { AdvanceCapPolicyMode, BillRecord, Room } from '../../types/rental';
+import {
+  AdvanceCapPolicyMode,
+  BillRecord,
+  ComponentPaymentAllocation,
+  LatePenaltyConfig,
+  MonthlyMeterReading,
+  PaymentAllocationTarget,
+  Room,
+} from '../../types/rental';
 import {
   calculateBillBreakdown,
   calculateSubMeterDifference,
-  clampDueDayOneToTen,
   formatPeso,
   getBillingPeriodOptions,
   getElectricRateForPeriod,
-  getNextDueDateInOneToTenWindow,
+  isMobileDevice,
   isRunningInMobileApp,
   roundCurrency,
 } from '../../utils/billingCalculator';
+import {
+  calculateMonthlyRentSummary,
+  getBillingMonthSchedule,
+  normalizeBillingMonthKey,
+  validateMonthlyMeterReading,
+} from '../../utils/rentSchedule';
 import {
   formatKwhReading,
   fromCentavos,
@@ -56,24 +69,43 @@ import { MeterPhotoLightboxModal } from './MeterPhotoLightboxModal';
 interface SubMeterScannerModalProps {
   isOpen: boolean;
   rooms: Room[];
+  existingBills?: BillRecord[];
+  monthlyReadings?: MonthlyMeterReading[];
   initialRoom?: Room | null;
   advanceCapMode?: AdvanceCapPolicyMode;
   globalElectricRate: number;
   monthlyElectricRates?: Record<string, number>;
+  latePenaltyConfig?: LatePenaltyConfig;
   securityPin?: string;
   onClose: () => void;
-  onGenerateBill: (newBill: BillRecord) => boolean | Promise<boolean> | void;
+  onSaveVerifiedReading?: (
+    reading: MonthlyMeterReading
+  ) => { ok: boolean; error?: string; saved?: MonthlyMeterReading } | void;
+  onOpenExistingReceipt?: (bill: BillRecord) => void;
+  onGenerateBill: (
+    newBill: BillRecord,
+    options?: {
+      meterReading?: MonthlyMeterReading;
+      initialAllocationTarget?: PaymentAllocationTarget;
+      initialCustomAllocation?: Partial<ComponentPaymentAllocation>;
+    }
+  ) => boolean | Promise<boolean> | void;
 }
 
 export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   isOpen,
   rooms,
+  existingBills = [],
+  monthlyReadings = [],
   initialRoom,
   advanceCapMode = 'unlimited',
   globalElectricRate,
   monthlyElectricRates,
+  latePenaltyConfig,
   securityPin = '',
   onClose,
+  onSaveVerifiedReading,
+  onOpenExistingReceipt,
   onGenerateBill,
 }) => {
   const activeRooms = sortAndDeduplicateActiveRooms(rooms);
@@ -90,22 +122,40 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   // Sub-meter & billing fields
   const [prevReading, setPrevReading] = useState('0');
-  const [currReading, setCurrReading] = useState('0');
+  const [currReading, setCurrReading] = useState('');
   const [baseRent, setBaseRent] = useState('4500');
+  const [isCustomRentOverride, setIsCustomRentOverride] = useState(false);
+  const [occupancyStartDate, setOccupancyStartDate] = useState<string>('');
+  const [occupancyEndDate, setOccupancyEndDate] = useState<string>('');
   const [carryOverBalance, setCarryOverBalance] = useState('0');
   const [reqDepositApplied, setReqDepositApplied] = useState('0');
   const [depositApplied, setDepositApplied] = useState('0');
   const [billingPeriod, setBillingPeriod] = useState(() =>
     new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
   );
-  const [dueDayOneToTen, setDueDayOneToTen] = useState('5');
   const [initialPayStatus, setInitialPayStatus] = useState<
     'unpaid' | 'paid' | 'partial'
   >('unpaid');
+  const [initialAllocationTarget, setInitialAllocationTarget] =
+    useState<PaymentAllocationTarget>('auto');
   const [initialAmountPaid, setInitialAmountPaid] = useState('0');
   const [paymentMethod, setPaymentMethod] = useState<
     'Cash' | 'GCash' | 'Maya' | 'Bank Transfer'
   >('GCash');
+
+  // Mandatory OCR Verification & Authorized Correction State
+  const [ocrExtractedCurrKwh, setOcrExtractedCurrKwh] = useState<number | null>(
+    null
+  );
+  const [isCurrentReadingVerified, setIsCurrentReadingVerified] =
+    useState(false);
+  const [verifiedAtIso, setVerifiedAtIso] = useState<string | null>(null);
+  const [correctionNote, setCorrectionNote] = useState('');
+  const [pinAuthorizedCorrection, setPinAuthorizedCorrection] = useState(false);
+  const [savedMonthlyReadingId, setSavedMonthlyReadingId] = useState<
+    string | null
+  >(null);
+  const [meterResetReason, setMeterResetReason] = useState('');
 
   // Reading Protection & PIN Modification State (auto-inserted values are protected by default)
   const [isReadingsLocked, setIsReadingsLocked] = useState(true);
@@ -132,7 +182,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   const [rolloverType, setRolloverType] = useState<'dial_rollover' | 'meter_reset'>('dial_rollover');
   const [dialDigits, setDialDigits] = useState<number>(5);
 
-  const isMobileApp = isRunningInMobileApp();
+  // Allow live snapshot camera on ALL mobile devices (Android APK, iOS Home Screen PWA, mobile browsers)
+  const isMobileApp = isRunningInMobileApp() || isMobileDevice();
 
   // OCR, Inspection & Snapshot Camera state
   const [scanTab, setScanTab] = useState<'upload' | 'camera'>('upload');
@@ -253,17 +304,71 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   useEffect(() => {
     if (!isOpen || !selectedRoom) return;
-    const prev = selectedRoom.lastMeterReading || 0;
+    const monthKey = normalizeBillingMonthKey(billingPeriod);
+    const existingVerifiedReading = monthlyReadings.find(
+      (r) =>
+        r.roomId === selectedRoom.id &&
+        normalizeBillingMonthKey(r.billingMonthKey || r.billingPeriod) ===
+          monthKey &&
+        r.isVerified
+    );
+
+    const prev = existingVerifiedReading
+      ? existingVerifiedReading.previousReadingKwh
+      : selectedRoom.lastMeterReading || 0;
     setPrevReading(String(prev));
-    // Current reading starts ready for new month's reading
-    setCurrReading(String(prev));
-    setBaseRent(String(selectedRoom.monthlyRent || 0));
+
+    if (existingVerifiedReading) {
+      setCurrReading(String(existingVerifiedReading.currentReadingKwh));
+      setOcrExtractedCurrKwh(
+        existingVerifiedReading.ocrExtractedReadingKwh ?? null
+      );
+      setIsCurrentReadingVerified(true);
+      setVerifiedAtIso(existingVerifiedReading.verifiedAt);
+      setSavedMonthlyReadingId(existingVerifiedReading.id);
+      setCorrectionNote(existingVerifiedReading.correctionNote || '');
+      setPinAuthorizedCorrection(
+        Boolean(existingVerifiedReading.correctionAuthorized)
+      );
+      setCurrMeterSnapshotUrl(
+        peekCachedMeterImage(existingVerifiedReading.currPhotoDataUrl) || ''
+      );
+      setCurrMeterCropUrl(
+        peekCachedMeterImage(existingVerifiedReading.currCropDataUrl) || ''
+      );
+      if (existingVerifiedReading.currPhotoDataUrl?.startsWith('idb:meter:')) {
+        void resolveMeterImageSrc(existingVerifiedReading.currPhotoDataUrl).then(
+          (resolved) => {
+            if (resolved) setCurrMeterSnapshotUrl(resolved);
+          }
+        );
+      }
+      if (existingVerifiedReading.currCropDataUrl?.startsWith('idb:meter:')) {
+        void resolveMeterImageSrc(existingVerifiedReading.currCropDataUrl).then(
+          (resolved) => {
+            if (resolved) setCurrMeterCropUrl(resolved);
+          }
+        );
+      }
+    } else {
+      // Leave current reading blank until OCR extraction or PIN-authorized entry is verified
+      setCurrReading('');
+      setOcrExtractedCurrKwh(null);
+      setIsCurrentReadingVerified(false);
+      setVerifiedAtIso(null);
+      setSavedMonthlyReadingId(null);
+      setCorrectionNote('');
+      setPinAuthorizedCorrection(false);
+      setCurrMeterSnapshotUrl('');
+      setCurrMeterCropUrl('');
+    }
+
+    setOccupancyStartDate(selectedRoom.tenant?.moveInDate || '');
+    setOccupancyEndDate(selectedRoom.tenant?.moveOutDate || '');
+    setIsCustomRentOverride(false);
     setCarryOverBalance(String(selectedRoom.unpaidBalance || 0));
     setReqDepositApplied(String(selectedRoom.securityDepositPaid || 0));
     setDepositApplied(String(selectedRoom.advanceRent || 0));
-    setDueDayOneToTen(
-      String(clampDueDayOneToTen(selectedRoom.tenant?.dueDayOfMonth || 5))
-    );
 
     // Previous slot has previous photo and value crop (resolve cached IDB references cleanly)
     const cachedPrevSnap = peekCachedMeterImage(selectedRoom.lastMeterPhotoDataUrl);
@@ -275,29 +380,31 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       cachedPrevCrop || generateSimulatedValueCropDataUrl(prev)
     );
 
-    // Current slot is clean and waiting for the new month's photo/reading
-    setCurrMeterSnapshotUrl('');
-    setCurrMeterCropUrl('');
     setTargetMeterSlot('curr');
-
-    setOcrStatusMsg(null);
-    setOcrConfidence(null);
+    setOcrStatusMsg(
+      existingVerifiedReading
+        ? `Verified monthly reading loaded for ${billingPeriod}: ${formatKwhReading(existingVerifiedReading.currentReadingKwh)} kWh.`
+        : null
+    );
+    setOcrConfidence(existingVerifiedReading?.ocrConfidence ?? null);
     setMeterInspection(null);
     setCollectedSnapshots([]);
     setInitialPayStatus('unpaid');
+    setInitialAllocationTarget('auto');
     setInitialAmountPaid('0');
-    setBillSessionKey(`gen-${selectedRoom.id}-${Date.now()}`);
+    setBillSessionKey(`gen-${selectedRoom.id}-${monthKey}-${Date.now()}`);
     isSubmittingBillRef.current = false;
 
-    // Reset rollover override state and reading lock when switching rooms or reopening
-    setIsRollover(false);
-    setRolloverType('dial_rollover');
-    setDialDigits(5);
+    // Reset rollover override state and reading lock when switching rooms or billing periods
+    setIsRollover(Boolean(existingVerifiedReading?.meterResetOrReplacement));
+    setRolloverType(existingVerifiedReading?.meterResetType || 'dial_rollover');
+    setDialDigits(existingVerifiedReading?.dialDigits || 5);
+    setMeterResetReason(existingVerifiedReading?.meterResetDocumentedReason || '');
     setIsReadingsLocked(true);
     setShowPinUnlockModal(false);
     setPinInput('');
     setPinError(null);
-  }, [isOpen, selectedRoom?.id]);
+  }, [isOpen, selectedRoom?.id, billingPeriod]);
 
   useEffect(() => {
     const win = window as any;
@@ -767,6 +874,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         setPrevMeterCropUrl(result.registerCropDataUrl);
         if (isRecognized) {
           setPrevReading(String(detectedVal));
+          setIsCurrentReadingVerified(false);
         }
         // Automatically switch focus to Current slot for convenient next snapshot
         setTargetMeterSlot('curr');
@@ -776,6 +884,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         setCurrMeterCropUrl(result.registerCropDataUrl);
         if (isRecognized) {
           setCurrReading(String(detectedVal));
+          setOcrExtractedCurrKwh(detectedVal);
+          setIsCurrentReadingVerified(false);
+          setVerifiedAtIso(null);
+        } else {
+          setOcrExtractedCurrKwh(null);
+          setIsCurrentReadingVerified(false);
         }
       }
 
@@ -786,19 +900,19 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
       if (isRecognized && result.needsVerification) {
         setOcrStatusMsg(
-          `⚠️ Detected ${formatKwhReading(detectedVal)} kWh (${slot === 'prev' ? 'Previous' : 'Current'}) | ${result.unclearReason || 'Verify digits before saving'}.`
+          `Detected ${formatKwhReading(detectedVal)} kWh (${slot === 'prev' ? 'Previous' : 'Current'}) | ${result.unclearReason || 'Verify digits or unlock with PIN to correct before saving'}.`
         );
       } else if (isRecognized) {
         setOcrStatusMsg(
-          `✓ Detected ${formatKwhReading(detectedVal)} kWh for ${
+          `OCR extracted ${formatKwhReading(detectedVal)} kWh for ${
             slot === 'prev' ? 'Previous Slot' : 'Current Slot'
-          }.`
+          }. Confirm & Verify below before generating the bill.`
         );
       } else {
         setOcrStatusMsg(
           result.unclearReason
-            ? `⚠️ ${result.unclearReason}`
-            : '⚠️ Sub-meter captured, but digits are unclear. Enter kWh manually.'
+            ? `${result.unclearReason}`
+            : 'Sub-meter captured, but digits are unclear. Unlock with PIN to enter verified kWh.'
         );
       }
     } catch {
@@ -815,6 +929,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     const cleanPin = (securityPin || '').trim();
     if (cleanPin && cleanInput === cleanPin) {
       setIsReadingsLocked(false);
+      setPinAuthorizedCorrection(true);
       setShowPinUnlockModal(false);
       setPinInput('');
       setPinError(null);
@@ -1027,15 +1142,70 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     setMonthlyElectricRate(String(resolvedRate || 15.0));
   }, [billingPeriod, globalElectricRate, monthlyElectricRates, isOpen]);
 
+  // Keep chargeable rent synced with monthly proration whenever room, billing period, or occupancy dates change
+  useEffect(() => {
+    if (!isOpen || !selectedRoom || isCustomRentOverride) return;
+    const monthKey = normalizeBillingMonthKey(billingPeriod);
+    const summary = calculateMonthlyRentSummary({
+      monthlyRent: selectedRoom.monthlyRent || 0,
+      billingPeriod: monthKey,
+      occupancyStartDate: occupancyStartDate || undefined,
+      occupancyEndDate: occupancyEndDate || undefined,
+      latePenaltyConfig,
+    });
+    setBaseRent(String(summary.chargeableRent));
+  }, [
+    isOpen,
+    selectedRoom?.id,
+    selectedRoom?.monthlyRent,
+    billingPeriod,
+    occupancyStartDate,
+    occupancyEndDate,
+    isCustomRentOverride,
+    latePenaltyConfig,
+  ]);
+
   if (!isOpen || !selectedRoom) return null;
 
-  const prevNum = parseFloat(prevReading) || 0;
-  const currNum = parseFloat(currReading) || 0;
-  const rateNum = Math.max(0, parseFloat(monthlyElectricRate) || 0);
-  const rentNum = parseFloat(baseRent) || 0;
-  const carryNum = parseFloat(carryOverBalance) || 0;
+  const billingMonthKey = normalizeBillingMonthKey(billingPeriod);
+  const billingSchedule = getBillingMonthSchedule(billingMonthKey);
+  const rentSummary = calculateMonthlyRentSummary({
+    monthlyRent: selectedRoom.monthlyRent || 0,
+    billingPeriod: billingMonthKey,
+    occupancyStartDate: occupancyStartDate || undefined,
+    occupancyEndDate: occupancyEndDate || undefined,
+    latePenaltyConfig,
+  });
+
+  // Duplicate active bill check for (roomId, billingMonthKey)
+  const existingPeriodBill = existingBills.find(
+    (b) =>
+      b.roomId === selectedRoom.id &&
+      !b.isArchived &&
+      normalizeBillingMonthKey(b.billingMonthKey || b.billingPeriod) ===
+        billingMonthKey
+  );
+
+  const prevTrimmed = prevReading.trim();
+  const currTrimmed = currReading.trim();
+  const prevParsed = prevTrimmed === '' ? null : Number(prevTrimmed);
+  const currParsed = currTrimmed === '' ? null : Number(currTrimmed);
+  const prevNum =
+    prevParsed !== null && Number.isFinite(prevParsed) ? prevParsed : 0;
+  const currNum =
+    currParsed !== null && Number.isFinite(currParsed) ? currParsed : 0;
+  const hasBothReadings =
+    prevParsed !== null &&
+    Number.isFinite(prevParsed) &&
+    currParsed !== null &&
+    Number.isFinite(currParsed);
+  const rateNum = Math.max(0, Number(monthlyElectricRate) || 0);
+  const rentNum = Math.max(0, Number(baseRent) || 0);
+  const latePenaltyNum = rentSummary.latePenalty;
+  const totalRentDue = roundCurrency(rentNum + latePenaltyNum);
+  const carryNum = Math.max(0, Number(carryOverBalance) || 0);
   const isReset = rolloverType === 'meter_reset';
-  const isRolloverActive = isRollover && currNum < prevNum;
+  const isRolloverActive = isRollover && hasBothReadings && currNum < prevNum;
 
   const subMeterCheck = calculateSubMeterDifference({
     prevReading: prevNum,
@@ -1046,8 +1216,35 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     isReset: isRolloverActive && isReset,
   });
 
+  const meterReadingValidation = validateMonthlyMeterReading({
+    roomId: selectedRoom.id,
+    roomName: selectedRoom.name,
+    tenantName: selectedRoom.tenant?.fullName,
+    billingPeriod,
+    previousReadingKwh: prevParsed,
+    currentReadingKwh: currParsed,
+    electricRate: rateNum,
+    isVerified: isCurrentReadingVerified,
+    meterResetOrReplacement: isRolloverActive,
+    meterResetType: rolloverType,
+    meterResetDocumentedReason: meterResetReason,
+    dialDigits,
+    existingMonthlyReadings: monthlyReadings.filter(
+      (r) => r.id !== savedMonthlyReadingId
+    ),
+    editingReadingId: savedMonthlyReadingId || undefined,
+  });
+
+  const isNegativeWithoutDoc =
+    hasBothReadings &&
+    currNum < prevNum &&
+    (!isRollover || !meterResetReason.trim());
+
   const grossBeforeCredit = roundCurrency(
-    Math.max(0, rentNum) + subMeterCheck.electricTotal + Math.max(0, carryNum)
+    Math.max(0, rentNum) +
+      latePenaltyNum +
+      (hasBothReadings && subMeterCheck.isValid ? subMeterCheck.electricTotal : 0) +
+      Math.max(0, carryNum)
   );
   const availablePaidDeposit = Math.max(0, selectedRoom.securityDepositPaid || 0);
   const reqDepUsedNum = roundCurrency(
@@ -1074,8 +1271,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
   const billBreakdown = calculateBillBreakdown({
     baseRent: rentNum,
+    latePenalty: latePenaltyNum,
     prevReading: prevNum,
-    currReading: currNum,
+    currReading: hasBothReadings ? currNum : prevNum,
     electricRate: rateNum,
     previousBalanceCarryOver: carryNum,
     depositApplied: depNum,
@@ -1084,20 +1282,152 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     isReset: isRolloverActive && isReset,
   });
 
-  const safeDueDay = clampDueDayOneToTen(parseInt(dueDayOneToTen, 10) || 5);
-  const computedDueDateIso = getNextDueDateInOneToTenWindow(safeDueDay);
-  const computedDueDateLabel = new Date(computedDueDateIso).toLocaleDateString(
-    'en-US',
-    {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+  const computedDueDateIso = billingSchedule.paymentDueDate;
+  const computedDueDateLabel = billingSchedule.dueDateLabel;
+
+  const canVerifyCurrentReading =
+    hasBothReadings &&
+    subMeterCheck.isValid &&
+    !isNegativeWithoutDoc &&
+    (ocrExtractedCurrKwh !== null || pinAuthorizedCorrection || Boolean(currMeterSnapshotUrl));
+
+  const buildVerifiedMonthlyReadingPayload = (
+    billId?: string
+  ): MonthlyMeterReading => {
+    const nowIso = new Date().toISOString();
+    const readingId =
+      savedMonthlyReadingId || `mread-${selectedRoom.id}-${billingMonthKey}`;
+    const wasCorrectedFromOcr =
+      ocrExtractedCurrKwh !== null &&
+      Math.abs(ocrExtractedCurrKwh - currNum) > 0.001;
+    const source: MonthlyMeterReading['source'] =
+      ocrExtractedCurrKwh !== null
+        ? wasCorrectedFromOcr
+          ? 'ocr_corrected'
+          : 'ocr_verified'
+        : 'manual_authorized';
+
+    return {
+      id: readingId,
+      roomId: selectedRoom.id,
+      roomName: selectedRoom.name,
+      tenantName: selectedRoom.tenant?.fullName,
+      billingPeriod,
+      billingMonthKey,
+      previousReadingKwh: prevNum,
+      currentReadingKwh: currNum,
+      consumptionKwh: billBreakdown.consumptionKwh,
+      electricRate: rateNum,
+      electricCharge: billBreakdown.electricTotal,
+      source,
+      ocrExtractedReadingKwh: ocrExtractedCurrKwh,
+      ocrConfidence: ocrConfidence ?? undefined,
+      isVerified: true,
+      verifiedAt: verifiedAtIso || nowIso,
+      correctionAuthorized: wasCorrectedFromOcr || pinAuthorizedCorrection,
+      correctionNote: correctionNote.trim() || undefined,
+      meterResetOrReplacement: isRolloverActive || undefined,
+      meterResetType: isRolloverActive ? rolloverType : undefined,
+      meterResetDocumentedReason: isRolloverActive
+        ? meterResetReason.trim()
+        : undefined,
+      dialDigits: isRolloverActive ? dialDigits : undefined,
+      prevPhotoDataUrl:
+        prevMeterSnapshotUrl || generateSimulatedSubMeterDataUrl(prevNum),
+      prevCropDataUrl:
+        prevMeterCropUrl || generateSimulatedValueCropDataUrl(prevNum),
+      currPhotoDataUrl:
+        currMeterSnapshotUrl || generateSimulatedSubMeterDataUrl(currNum),
+      currCropDataUrl:
+        currMeterCropUrl || generateSimulatedValueCropDataUrl(currNum),
+      billId,
+      createdAt: verifiedAtIso || nowIso,
+      updatedAt: nowIso,
+    };
+  };
+
+  const handleConfirmVerifyReading = () => {
+    if (!hasBothReadings) {
+      setOcrStatusMsg(
+        'Enter or scan both Previous and Current sub-meter readings before verifying.'
+      );
+      return;
     }
-  );
+    if (isNegativeWithoutDoc) {
+      setOcrStatusMsg(
+        'Negative consumption is rejected unless Rollover/Reset override is enabled with a documented reason.'
+      );
+      return;
+    }
+    if (!canVerifyCurrentReading) {
+      setPinError(null);
+      setPinInput('');
+      setShowPinUnlockModal(true);
+      setOcrStatusMsg(
+        'Upload/capture a meter photo for OCR OR unlock with your Landlord PIN to authorize a verified manual reading.'
+      );
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    setIsCurrentReadingVerified(true);
+    setVerifiedAtIso(nowIso);
+    setIsReadingsLocked(true);
+    setOcrStatusMsg(
+      `Verified ${billingPeriod} sub-meter reading: ${formatKwhReading(prevNum)} -> ${formatKwhReading(currNum)} kWh (${formatKwhReading(billBreakdown.consumptionKwh)} kWh x ${formatPeso(rateNum)} = ${formatPeso(billBreakdown.electricTotal)}).`
+    );
+  };
+
+  const handleSaveVerifiedMonthlyReadingOnly = () => {
+    if (!isCurrentReadingVerified) {
+      handleConfirmVerifyReading();
+    }
+    const check = validateMonthlyMeterReading({
+      roomId: selectedRoom.id,
+      roomName: selectedRoom.name,
+      tenantName: selectedRoom.tenant?.fullName,
+      billingPeriod,
+      previousReadingKwh: prevParsed,
+      currentReadingKwh: currParsed,
+      electricRate: rateNum,
+      isVerified: true,
+      meterResetOrReplacement: isRolloverActive,
+      meterResetType: rolloverType,
+      meterResetDocumentedReason: meterResetReason,
+      dialDigits,
+      existingMonthlyReadings: monthlyReadings.filter(
+        (r) => r.id !== savedMonthlyReadingId
+      ),
+      editingReadingId: savedMonthlyReadingId || undefined,
+    });
+    if (!check.isValid) {
+      setOcrStatusMsg(check.errorMessage || 'Cannot save monthly meter reading.');
+      return;
+    }
+    const payload = buildVerifiedMonthlyReadingPayload();
+    const res = onSaveVerifiedReading?.(payload);
+    if (res && !res.ok) {
+      setOcrStatusMsg(res.error || 'Could not save verified reading.');
+      return;
+    }
+    setSavedMonthlyReadingId(payload.id);
+    setIsCurrentReadingVerified(true);
+    setVerifiedAtIso(payload.verifiedAt);
+    setOcrStatusMsg(
+      `Saved verified reading for ${selectedRoom.name} (${billingPeriod}): ${formatKwhReading(payload.consumptionKwh)} kWh (${formatPeso(payload.electricCharge)}).`
+    );
+  };
+
+  const canGenerateMonthlyBill =
+    selectedRoom.status === 'occupied' &&
+    !existingPeriodBill &&
+    hasBothReadings &&
+    subMeterCheck.isValid &&
+    isCurrentReadingVerified &&
+    meterReadingValidation.isValid;
 
   const handleConfirmGenerateBill = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subMeterCheck.isValid || isSubmittingBillRef.current) return;
+    if (!canGenerateMonthlyBill || isSubmittingBillRef.current) return;
     isSubmittingBillRef.current = true;
 
     try {
@@ -1116,6 +1446,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         : Number.POSITIVE_INFINITY;
 
       let paidAmount = 0;
+      const effectiveAllocTarget: PaymentAllocationTarget =
+        initialPayStatus === 'partial' ? initialAllocationTarget : 'auto';
+
       if (initialPayStatus === 'paid') {
         const customEntered = parseFloat(initialAmountPaid) || 0;
         const requestedPaid = customEntered >= totalDue ? customEntered : totalDue;
@@ -1128,6 +1461,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       }
 
       const overpaymentAddedToAdvance =
+        effectiveAllocTarget === 'auto' &&
         toCentavos(paidAmount) > toCentavos(totalDue)
           ? fromCentavos(toCentavos(paidAmount) - toCentavos(totalDue))
           : 0;
@@ -1143,10 +1477,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
             ? 'partial'
             : 'unpaid';
 
-      const receiptCode = `4R-${new Date()
-        .toISOString()
-        .slice(0, 7)
-        .replace('-', '')}-${selectedRoom.name.replace(/\D/g, '') || '101'}`;
+      const receiptCode = `4R-${billingMonthKey.replace('-', '')}-${
+        selectedRoom.name.replace(/\D/g, '') || '101'
+      }`;
 
       const finalPrevPhoto =
         prevMeterSnapshotUrl || generateSimulatedSubMeterDataUrl(prevNum);
@@ -1165,6 +1498,20 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         saveMeterMasterImage(`${billId}_curr`, finalCurrPhoto).catch(() => {});
       }
 
+      const verifiedReadingPayload = buildVerifiedMonthlyReadingPayload(billId);
+
+      const notesParts: string[] = [];
+      if (isRolloverActive) {
+        notesParts.push(
+          isReset
+            ? `[Meter Reset Baseline Verified] ${meterResetReason.trim()}. Current: ${formatKwhReading(currNum)} kWh, Delta: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh.`
+            : `[Dial Rollover Verified] ${meterResetReason.trim()} (${dialDigits}-digit dial). Prev: ${formatKwhReading(prevNum)} kWh, Curr: ${formatKwhReading(currNum)} kWh, Delta: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh.`
+        );
+      }
+      if (correctionNote.trim()) {
+        notesParts.push(`[OCR Correction Note] ${correctionNote.trim()}`);
+      }
+
       const newBill: BillRecord = {
         id: billId,
         receiptNo: receiptCode,
@@ -1174,22 +1521,36 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         tenantPhone: selectedRoom.tenant?.phone,
         tenantMessenger: selectedRoom.tenant?.messengerUsername,
         billingPeriod,
+        billingMonthKey,
         createdAt: nowIso,
-        dueDate: new Date(computedDueDateIso).toISOString(),
-        paymentWindowLabel: `Every 1st to 10th of the Month (Day ${safeDueDay})`,
+        dueDate: new Date(`${computedDueDateIso}T12:00:00`).toISOString(),
+        paymentWindowLabel: `Payment Period: ${billingSchedule.paymentPeriodLabel} (Late Penalty starts ${billingSchedule.lateStartLabel})`,
         prevReading: prevNum,
         currReading: currNum,
         consumptionKwh: billBreakdown.consumptionKwh,
         electricRate: rateNum,
         electricTotal: billBreakdown.electricTotal,
+        electricityVerified: true,
+        meterReadingId: verifiedReadingPayload.id,
         prevMeterPhotoDataUrl: finalPrevPhoto,
         meterPhotoDataUrl: finalCurrPhoto,
         prevMeterCropDataUrl: finalPrevCrop,
         currMeterCropDataUrl: finalCurrCrop,
         ocrConfidence: ocrConfidence ?? undefined,
         baseRent: rentNum,
+        monthlyRentFull: rentSummary.monthlyRent,
+        isProrated: !isCustomRentOverride && rentSummary.isProrated,
+        occupiedDays: rentSummary.occupiedDays,
+        daysInBillingMonth: rentSummary.daysInMonth,
+        dailyRentRate: rentSummary.dailyRate,
+        occupancyStartDate: occupancyStartDate || undefined,
+        occupancyEndDate: occupancyEndDate || undefined,
+        latePenalty: latePenaltyNum,
+        latePenaltyLabel: rentSummary.latePenaltyLabel,
+        daysPastDue: rentSummary.daysPastDue,
+        totalRentDue,
         grossCharges: billBreakdown.grossTotal,
-        securityDepositRequired: selectedRoom.securityDeposit || rentNum,
+        securityDepositRequired: selectedRoom.securityDeposit || rentSummary.monthlyRent,
         securityDepositApplied: reqDepUsedNum,
         securityDepositRemainingAfterBill: remainingDepositAfterBill,
         advanceApplied: advUsedNum,
@@ -1215,6 +1576,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       : undefined,
                   method: paymentMethod,
                   paidAt: nowIso,
+                  allocationTarget: effectiveAllocTarget,
                   note:
                     overpaymentAddedToAdvance > 0
                       ? `Paid ${formatPeso(paidAmount)} (Excess ${formatPeso(
@@ -1222,19 +1584,22 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         )} credited to Advance)`
                       : finalStatus === 'paid'
                       ? 'Full payment upon billing'
+                      : effectiveAllocTarget === 'rent'
+                      ? 'Initial Rent-only payment (Electricity balance remains unpaid)'
+                      : effectiveAllocTarget === 'electricity'
+                      ? 'Initial Electricity-only payment'
                       : 'Initial partial payment',
                 },
               ]
             : [],
-        notes: isRolloverActive
-          ? isReset
-            ? `[Meter Reset Baseline Verified] Current reading ${formatKwhReading(currNum)} kWh recorded after sub-meter replacement/zero-reset. Delta: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh.`
-            : `[Dial Rollover Verified] Meter mechanical rollover processed (${dialDigits}-digit dial capacity). Previous: ${formatKwhReading(prevNum)} kWh, Current: ${formatKwhReading(currNum)} kWh, Delta: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh.`
-          : undefined,
+        notes: notesParts.length > 0 ? notesParts.join(' | ') : undefined,
         updatedAt: nowIso,
       };
 
-      const generated = await onGenerateBill(newBill);
+      const generated = await onGenerateBill(newBill, {
+        meterReading: verifiedReadingPayload,
+        initialAllocationTarget: effectiveAllocTarget,
+      });
       if (generated !== false) {
         onClose();
       }
@@ -1344,21 +1709,57 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
               <div className="flex flex-col">
                 <label className="block text-xs font-bold text-amber-400 mb-1">
-                  Due Day (1–10)
+                  Payment Schedule (1st-10th)
                 </label>
-                <select
-                  value={dueDayOneToTen}
-                  onChange={(e) => setDueDayOneToTen(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-[#0D1119] border border-amber-500/40 px-3 text-xs font-bold text-amber-400 focus:border-amber-500 focus:outline-none"
+                <div
+                  className={`w-full min-h-10 rounded-xl bg-[#0D1119] border px-3 py-2 text-xs flex flex-col justify-center ${
+                    billingSchedule.isPastDue
+                      ? 'border-red-500/50 text-red-300'
+                      : 'border-amber-500/40 text-amber-300'
+                  }`}
                 >
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
-                    <option key={d} value={d}>
-                      Day {d} ({computedDueDateLabel})
-                    </option>
-                  ))}
-                </select>
+                  <span className="font-bold leading-tight">
+                    Due: {computedDueDateLabel}
+                  </span>
+                  <span className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                    {billingSchedule.isPastDue
+                      ? `Late period (${billingSchedule.daysPastDue}d past 10th)`
+                      : 'Window: 1st to 10th (Late from 11th)'}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {/* Duplicate Monthly Bill Guard Banner */}
+            {existingPeriodBill && (
+              <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/40 text-left space-y-2 animate-card-in">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="text-xs font-bold text-red-300 block">
+                        Duplicate Billing Period Blocked ({billingPeriod})
+                      </strong>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        Receipt #{existingPeriodBill.receiptNo} already exists for {selectedRoom.name} ({billingPeriod}). Record payments on the existing bill instead of creating a duplicate.
+                      </p>
+                    </div>
+                  </div>
+                  {onOpenExistingReceipt && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenExistingReceipt(existingPeriodBill);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-[11px] font-bold text-red-200 shrink-0 cursor-pointer"
+                    >
+                      Open Receipt
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Dedicated Selected Room Information Panel */}
             {selectedRoomInfo && (
@@ -2112,8 +2513,9 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     )}
                   </div>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0.0"
                     value={prevReading}
                     readOnly={isReadingsLocked}
                     onClick={() => {
@@ -2123,7 +2525,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         setShowPinUnlockModal(true);
                       }
                     }}
-                    onChange={(e) => setPrevReading(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/,/g, '');
+                      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                      setPrevReading(raw);
+                      setIsCurrentReadingVerified(false);
+                    }}
                     className={`mt-1 w-full bg-transparent text-base font-extrabold font-mono-num focus:outline-none ${
                       isReadingsLocked
                         ? 'text-slate-400 cursor-pointer'
@@ -2133,27 +2540,34 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
 
                 <div className={`rounded-xl border-2 p-3 transition ${
-                  isReadingsLocked
+                  isCurrentReadingVerified
+                    ? 'bg-emerald-950/25 border-emerald-500/70'
+                    : isReadingsLocked
                     ? 'bg-[#15140F] border-amber-500/40'
                     : 'bg-[#1A1812] border-amber-500/80 ring-1 ring-amber-500/50'
                 }`}>
-                  <div className="flex flex-wrap items-center justify-between gap-1.5">
-                    <label className="block text-[11px] font-bold text-amber-400 whitespace-nowrap">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <label className="block text-[11px] font-bold text-amber-400 truncate">
                       2. Current (kWh) *
                     </label>
-                    {isReadingsLocked ? (
+                    {isCurrentReadingVerified ? (
+                      <span className="text-[10px] text-emerald-400 font-bold inline-flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>Verified</span>
+                      </span>
+                    ) : isReadingsLocked ? (
                       <span className="text-[10px] text-amber-400/90 font-semibold inline-flex items-center gap-1 shrink-0 whitespace-nowrap">
                         <Lock className="w-3 h-3" />
-                        <span>Protected</span>
+                        <span>Locked</span>
                       </span>
                     ) : (
                       <span className="text-[10px] text-emerald-400 font-semibold shrink-0">Editable</span>
                     )}
                   </div>
                   <input
-                    type="number"
-                    step="0.01"
-                    required
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Scan or enter kWh"
                     value={currReading}
                     readOnly={isReadingsLocked}
                     onClick={() => {
@@ -2163,9 +2577,17 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                         setShowPinUnlockModal(true);
                       }
                     }}
-                    onChange={(e) => setCurrReading(e.target.value)}
-                    className={`mt-1 w-full bg-transparent text-base font-extrabold font-mono-num focus:outline-none ${
-                      isReadingsLocked
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/,/g, '');
+                      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                      setCurrReading(raw);
+                      setIsCurrentReadingVerified(false);
+                      setVerifiedAtIso(null);
+                    }}
+                    className={`mt-1 w-full bg-transparent text-base font-extrabold font-mono-num focus:outline-none placeholder:text-slate-600 placeholder:text-xs ${
+                      isCurrentReadingVerified
+                        ? 'text-emerald-300'
+                        : isReadingsLocked
                         ? 'text-amber-300 cursor-pointer'
                         : 'text-amber-400'
                     }`}
@@ -2173,58 +2595,165 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
 
                 <div className="rounded-xl bg-[#0D1119] border border-amber-500/50 p-3">
-                  <label className="block text-[11px] font-bold text-amber-400">
+                  <label className="block text-[11px] font-bold text-amber-400 truncate">
                     3. Rate ({billingPeriod}) *
                   </label>
                   <div className="flex items-center mt-1">
                     <span className="text-sm font-bold text-amber-400 mr-1">₱</span>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="12.50"
                       value={monthlyElectricRate}
-                      onChange={(e) => setMonthlyElectricRate(e.target.value)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/,/g, '');
+                        if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                        setMonthlyElectricRate(raw);
+                      }}
                       className="w-full bg-transparent text-base font-extrabold text-amber-400 font-mono-num focus:outline-none"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Negative Reading / Rollover Handling UI */}
-              {currNum < prevNum && !isRollover && (
-                <div className="mt-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 p-3 text-xs text-amber-200 space-y-2">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+              {/* Mandatory OCR Sub-Meter Reading Verification Bar */}
+              <div
+                className={`mt-2.5 rounded-2xl border p-3 space-y-2.5 text-xs ${
+                  isCurrentReadingVerified
+                    ? 'bg-emerald-500/10 border-emerald-500/40'
+                    : 'bg-amber-500/10 border-amber-500/35'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {isCurrentReadingVerified ? (
+                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    )}
                     <div>
-                      <p className="font-bold text-amber-300">
-                        Current reading ({formatKwhReading(currNum)} kWh) is lower than previous ({formatKwhReading(prevNum)} kWh).
+                      <span
+                        className={`font-extrabold block ${
+                          isCurrentReadingVerified
+                            ? 'text-emerald-300'
+                            : 'text-amber-300'
+                        }`}
+                      >
+                        {isCurrentReadingVerified
+                          ? `Verified Monthly Reading (${billingPeriod})`
+                          : 'Mandatory Electricity Reading Verification Required'}
+                      </span>
+                      <span className="text-[11px] text-slate-300">
+                        {!hasBothReadings
+                          ? 'Upload/capture the sub-meter photo or unlock with PIN to enter the current reading.'
+                          : ocrExtractedCurrKwh !== null
+                          ? `OCR Extracted: ${formatKwhReading(ocrExtractedCurrKwh)} kWh | Current Value: ${formatKwhReading(currNum)} kWh | Consumption: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh (${formatPeso(billBreakdown.electricTotal)})`
+                          : `Prev ${formatKwhReading(prevNum)} kWh -> Curr ${formatKwhReading(currNum)} kWh | Consumption: ${formatKwhReading(billBreakdown.consumptionKwh)} kWh (${formatPeso(billBreakdown.electricTotal)})`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {!isReadingsLocked && (
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                      Authorized Correction Note (optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Clarified glare on tenths red drum"
+                      value={correctionNote}
+                      onChange={(e) => setCorrectionNote(e.target.value)}
+                      className="w-full h-8 rounded-lg bg-[#0D1119] border border-[#263248] px-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {!isCurrentReadingVerified ? (
+                    <button
+                      type="button"
+                      onClick={handleConfirmVerifyReading}
+                      disabled={!hasBothReadings || isNegativeWithoutDoc}
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer transition"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Verify &amp; Confirm Reading</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCurrentReadingVerified(false);
+                        setPinError(null);
+                        setPinInput('');
+                        setShowPinUnlockModal(true);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#161E2E] hover:bg-[#1E2940] border border-[#2B3A54] text-amber-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition"
+                    >
+                      <Lock className="w-3 h-3" />
+                      <span>Correct Reading (PIN)</span>
+                    </button>
+                  )}
+
+                  {onSaveVerifiedReading && (
+                    <button
+                      type="button"
+                      onClick={handleSaveVerifiedMonthlyReadingOnly}
+                      disabled={!hasBothReadings || isNegativeWithoutDoc || !canVerifyCurrentReading}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-40 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition"
+                    >
+                      <FileCheck2 className="w-3.5 h-3.5" />
+                      <span>
+                        {savedMonthlyReadingId
+                          ? 'Update Saved Reading'
+                          : 'Save Verified Reading'}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Negative Reading / Rollover Handling UI */}
+              {hasBothReadings && currNum < prevNum && !isRollover && (
+                <div className="mt-2.5 rounded-xl bg-red-500/15 border border-red-500/35 p-3 text-xs text-red-200 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-red-300">
+                        Negative Consumption Rejected: Current ({formatKwhReading(currNum)} kWh) is lower than Previous ({formatKwhReading(prevNum)} kWh).
                       </p>
                       <p className="text-slate-300 mt-0.5">
-                        Enable rollover if meter completed its dial cycle or was replaced/reset.
+                        Only enable override if an authorized meter replacement or dial rollover occurred (documented reason required).
                       </p>
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsRollover(true)}
+                    onClick={() => {
+                      setIsRollover(true);
+                      setIsCurrentReadingVerified(false);
+                    }}
                     className="w-full py-1.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
-                    <span>Enable Rollover / Reset Override</span>
+                    <span>Document Authorized Meter Replacement / Rollover</span>
                   </button>
                 </div>
               )}
 
-              {currNum < prevNum && isRollover && (
+              {hasBothReadings && currNum < prevNum && isRollover && (
                 <div className="mt-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 p-3 text-xs text-emerald-200 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 font-bold text-emerald-300">
                       <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      <span>Rollover / Reset Mode Enabled</span>
+                      <span>Rollover / Meter Replacement Mode Enabled</span>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setIsRollover(false)}
+                      onClick={() => {
+                        setIsRollover(false);
+                        setIsCurrentReadingVerified(false);
+                      }}
                       className="text-[11px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
                     >
                       Disable Override
@@ -2280,13 +2809,26 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     </div>
                   )}
 
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-300 mb-1">
+                      Documented Reset / Replacement Reason (Required) *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Replaced faulty sub-meter on Nov 4, 2026"
+                      value={meterResetReason}
+                      onChange={(e) => setMeterResetReason(e.target.value)}
+                      className="w-full h-9 rounded-lg bg-[#0D1119] border border-emerald-500/40 px-3 text-xs text-white focus:border-emerald-400 focus:outline-none"
+                    />
+                  </div>
+
                   <div className="text-[11px] text-emerald-300/90 bg-emerald-950/40 rounded-lg p-2 font-mono-num">
                     Calculated Delta: <strong className="text-emerald-200">{formatKwhReading(billBreakdown.consumptionKwh)} kWh</strong>
                   </div>
                 </div>
               )}
 
-              {!subMeterCheck.isValid && currNum >= prevNum && (
+              {!subMeterCheck.isValid && hasBothReadings && currNum >= prevNum && (
                 <div className="mt-2 rounded-xl bg-red-500/15 border border-red-500/30 p-2 text-xs text-red-300 flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{subMeterCheck.errorMessage}</span>
@@ -2334,16 +2876,87 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 </div>
               </div>
 
+              {/* Monthly Rent Proration & Occupancy Period */}
+              <div className="rounded-2xl bg-[#161D2B] border border-[#263248] p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300">
+                    Rent Proration &amp; Occupancy ({billingPeriod})
+                  </span>
+                  {rentSummary.isProrated && !isCustomRentOverride ? (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/35 text-[10px] font-bold text-amber-300">
+                      Prorated ({rentSummary.occupiedDays}/{rentSummary.daysInMonth}d)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400">
+                      {rentSummary.daysInMonth} days in month
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">
+                      Move-In / Start Date
+                    </label>
+                    <input
+                      type="date"
+                      value={occupancyStartDate}
+                      onChange={(e) => {
+                        setOccupancyStartDate(e.target.value);
+                        setIsCustomRentOverride(false);
+                      }}
+                      className="w-full h-8 rounded-lg bg-[#0D1119] border border-[#263248] px-2 text-[11px] text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">
+                      Move-Out / End Date (opt.)
+                    </label>
+                    <input
+                      type="date"
+                      value={occupancyEndDate}
+                      onChange={(e) => {
+                        setOccupancyEndDate(e.target.value);
+                        setIsCustomRentOverride(false);
+                      }}
+                      className="w-full h-8 rounded-lg bg-[#0D1119] border border-[#263248] px-2 text-[11px] text-white"
+                    />
+                  </div>
+                </div>
+                {rentSummary.isProrated && !isCustomRentOverride && (
+                  <p className="text-[10px] text-amber-300/90 font-mono-num">
+                    {formatPeso(rentSummary.monthlyRent)} / {rentSummary.daysInMonth} days = {formatPeso(rentSummary.dailyRate)}/day x {rentSummary.occupiedDays} days = {formatPeso(rentSummary.proratedRent || rentSummary.chargeableRent)}
+                  </p>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-start">
                 <div className="flex flex-col">
-                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    Base Rent (₱)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-slate-300">
+                      {rentSummary.isProrated && !isCustomRentOverride
+                        ? 'Prorated Rent (₱)'
+                        : 'Monthly Rent (₱)'}
+                    </label>
+                    {isCustomRentOverride && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomRentOverride(false)}
+                        className="text-[10px] text-amber-400 hover:underline cursor-pointer"
+                      >
+                        Reset Auto
+                      </button>
+                    )}
+                  </div>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={baseRent}
-                    onChange={(e) => setBaseRent(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/,/g, '');
+                      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                      setIsCustomRentOverride(true);
+                      setBaseRent(raw);
+                    }}
                     className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-white font-mono-num"
                   />
                 </div>
@@ -2352,10 +2965,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     Prev Unpaid Carry-Over (₱)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={carryOverBalance}
-                    onChange={(e) => setCarryOverBalance(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/,/g, '');
+                      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                      setCarryOverBalance(raw);
+                    }}
                     className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-red-400 font-mono-num"
                   />
                 </div>
@@ -2364,12 +2981,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     Req. Deposit Deducted ({formatPeso(availablePaidDeposit)} avail)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max={availablePaidDeposit}
+                    type="text"
+                    inputMode="decimal"
                     value={reqDepositApplied}
-                    onChange={(e) => setReqDepositApplied(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/,/g, '');
+                      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                      setReqDepositApplied(raw);
+                    }}
                     className="w-full h-9 rounded-xl bg-[#161D2B] border border-emerald-500/40 px-3 text-xs font-bold text-emerald-400 font-mono-num"
                   />
                   {remainingDepositAfterBill > 0 && (
@@ -2383,12 +3002,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     Advance Balance Deducted ({formatPeso(availableAdvance)})
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max={availableAdvance}
+                    type="text"
+                    inputMode="decimal"
                     value={depositApplied}
-                    onChange={(e) => setDepositApplied(e.target.value)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/,/g, '');
+                      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                      setDepositApplied(raw);
+                    }}
                     className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-emerald-400 font-mono-num"
                   />
                 </div>
@@ -2397,20 +3018,57 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               <div className="rounded-2xl bg-[#111724] border border-[#263248] p-3.5 space-y-2.5 text-xs">
                 <div>
                   <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-300 mb-1.5">
-                    1. Charges Breakdown (What Is Billed)
+                    1. Charges Breakdown (Rent Schedule + Electricity)
                   </div>
                   <div className="space-y-1 text-slate-300">
                     <div className="flex justify-between">
-                      <span>Monthly Base Rent</span>
-                      <span className="font-mono-num font-bold text-white">
-                        {formatPeso(Math.max(0, rentNum))}
+                      <span>Monthly Rent (Full Rate)</span>
+                      <span className="font-mono-num font-bold text-slate-200">
+                        {formatPeso(rentSummary.monthlyRent)}
                       </span>
+                    </div>
+                    {rentSummary.isProrated && !isCustomRentOverride && (
+                      <div className="flex justify-between text-amber-300">
+                        <span>
+                          Prorated Rent ({rentSummary.occupiedDays}/{rentSummary.daysInMonth} days)
+                        </span>
+                        <span className="font-mono-num font-bold">
+                          {formatPeso(rentNum)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-slate-400">
+                      <span>Payment Due Date (1st-10th Window)</span>
+                      <span className="font-semibold text-slate-200">
+                        {computedDueDateLabel}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className={latePenaltyNum > 0 ? 'text-red-300' : 'text-slate-400'}>
+                        Late Payment Penalty
+                        {rentSummary.latePenaltyLabel
+                          ? ` (${rentSummary.latePenaltyLabel})`
+                          : billingSchedule.isPastDue
+                          ? ' (Not configured in Settings)'
+                          : ' (Starts Day 11)'}
+                      </span>
+                      <span
+                        className={`font-mono-num font-bold ${
+                          latePenaltyNum > 0 ? 'text-red-300' : 'text-slate-400'
+                        }`}
+                      >
+                        {formatPeso(latePenaltyNum)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-bold text-white border-t border-[#1E293D] pt-1">
+                      <span>Total Rent Due</span>
+                      <span className="font-mono-num">{formatPeso(totalRentDue)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>
                         Electricity ({formatKwhReading(billBreakdown.consumptionKwh)} kWh x {formatPeso(rateNum)}/kWh)
                       </span>
-                      <span className="font-mono-num font-bold text-white">
+                      <span className="font-mono-num font-bold text-amber-300">
                         {formatPeso(billBreakdown.electricTotal)}
                       </span>
                     </div>
@@ -2488,7 +3146,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     Net Total Amount Due
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    Due: Day {safeDueDay} ({computedDueDateLabel})
+                    Due: {computedDueDateLabel} (1st-10th Window)
                   </span>
                 </div>
                 <div className="text-xl font-black text-white font-mono-num">
@@ -2498,13 +3156,13 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Payment Status
+                  Initial Payment Status
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {(
                     [
                       { id: 'unpaid', label: 'Unpaid' },
-                      { id: 'partial', label: 'Partial' },
+                      { id: 'partial', label: 'Partial / Split' },
                       { id: 'paid', label: 'Paid in Full' },
                     ] as const
                   ).map((opt) => (
@@ -2514,9 +3172,12 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                       onClick={() => {
                         setInitialPayStatus(opt.id);
                         if (opt.id === 'paid') {
+                          setInitialAllocationTarget('auto');
                           setInitialAmountPaid(
                             String(billBreakdown.totalAmountDue)
                           );
+                        } else if (opt.id === 'partial') {
+                          setInitialAmountPaid(String(Math.min(rentNum, billBreakdown.totalAmountDue)));
                         }
                       }}
                       className={`py-2 px-1 text-xs font-bold border rounded-xl transition cursor-pointer ${
@@ -2530,6 +3191,55 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   ))}
                 </div>
 
+                {initialPayStatus === 'partial' && (
+                  <div className="mt-2 space-y-2">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(
+                        [
+                          { id: 'auto', label: 'All Unpaid' },
+                          { id: 'rent', label: 'Rent Only' },
+                          { id: 'electricity', label: 'Electricity Only' },
+                        ] as const
+                      ).map((alloc) => (
+                        <button
+                          key={alloc.id}
+                          type="button"
+                          onClick={() => {
+                            setInitialAllocationTarget(alloc.id);
+                            if (alloc.id === 'rent') {
+                              setInitialAmountPaid(
+                                String(Math.min(rentNum, billBreakdown.totalAmountDue))
+                              );
+                            } else if (alloc.id === 'electricity') {
+                              setInitialAmountPaid(
+                                String(
+                                  Math.min(
+                                    billBreakdown.electricTotal,
+                                    billBreakdown.totalAmountDue
+                                  )
+                                )
+                              );
+                            }
+                          }}
+                          className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border cursor-pointer transition ${
+                            initialAllocationTarget === alloc.id
+                              ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                              : 'bg-[#0D1119] border-[#263248] text-slate-400'
+                          }`}
+                        >
+                          {alloc.label}
+                        </button>
+                      ))}
+                    </div>
+                    {initialAllocationTarget === 'rent' &&
+                      billBreakdown.electricTotal > 0 && (
+                        <p className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
+                          Rent-only payment keeps Electricity ({formatPeso(billBreakdown.electricTotal)}) unpaid. This bill stays PARTIAL until electricity is also settled.
+                        </p>
+                      )}
+                  </div>
+                )}
+
                 {initialPayStatus !== 'unpaid' && (
                   <div className="grid grid-cols-2 gap-2 mt-2.5">
                     <div>
@@ -2539,10 +3249,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                           : 'Cash / Transfer Received (₱)'}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={initialAmountPaid}
-                        onChange={(e) => setInitialAmountPaid(e.target.value)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/,/g, '');
+                          if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                          setInitialAmountPaid(raw);
+                        }}
                         className="w-full h-9 rounded-xl bg-[#161D2B] border border-[#263248] px-3 text-xs font-bold text-emerald-400 font-mono-num"
                       />
                     </div>
@@ -2574,10 +3288,21 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               </div>
             </div>
 
-            {currNum < prevNum && !isRollover && (
-              <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-xs text-amber-300 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-                <span>Action Blocked: Current reading is lower than previous. Enable Rollover/Reset above to proceed.</span>
+            {selectedRoom.status === 'occupied' && !canGenerateMonthlyBill && (
+              <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/35 text-xs text-amber-200 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <span>
+                  {existingPeriodBill
+                    ? `Bill already exists for ${billingPeriod} (Receipt #${existingPeriodBill.receiptNo}).`
+                    : !hasBothReadings
+                    ? 'Mandatory Electricity Billing: Scan or enter both Previous and Current kWh readings to generate this bill.'
+                    : isNegativeWithoutDoc
+                    ? 'Action Blocked: Negative consumption requires Rollover/Reset override with a documented reason.'
+                    : !isCurrentReadingVerified
+                    ? 'Mandatory Verification: Click "Verify & Confirm Reading" on the left panel before generating the final bill.'
+                    : meterReadingValidation.errorMessage ||
+                      'Complete and verify the monthly electricity reading before billing.'}
+                </span>
               </div>
             )}
 
@@ -2598,8 +3323,8 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
             ) : (
               <button
                 type="submit"
-                disabled={!subMeterCheck.isValid}
-                className={`w-full py-3 px-4 rounded-2xl disabled:opacity-40 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl transition cursor-pointer ${
+                disabled={!canGenerateMonthlyBill}
+                className={`w-full py-3 px-4 rounded-2xl disabled:opacity-40 disabled:cursor-not-allowed font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl transition cursor-pointer ${
                   isRolloverActive
                     ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
                     : 'bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 shadow-amber-500/20'
@@ -2609,7 +3334,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                 <span>
                   {isRolloverActive
                     ? 'Save & Generate Receipt (Rollover Verified)'
-                    : 'Save & Generate Receipt'}
+                    : 'Save & Generate Verified Receipt'}
                 </span>
               </button>
             )}

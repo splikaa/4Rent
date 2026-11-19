@@ -30,16 +30,23 @@ import {
   TenantHistoryEntry,
 } from '../../types/rental';
 import {
-  clampDueDayOneToTen,
   formatPeso,
   formatPesoPrivacy,
   formatPhoneNumber,
   getRoomMonthlyPaymentStatus,
   maskPhoneNumber,
-  getNextDueDateInOneToTenWindow,
 } from '../../utils/billingCalculator';
+import {
+  calculateMonthlyRentSummary,
+  getBillingMonthSchedule,
+  getCurrentBillingMonthKey,
+} from '../../utils/rentSchedule';
 import { formatKwhReading } from '../../utils/financialEngine';
-import { loadReadingLogs } from '../../services/storageService';
+import {
+  getMonthlyMeterReading,
+  loadReadingLogs,
+  loadSettings,
+} from '../../services/storageService';
 import { useResolvedMeterImage } from '../../utils/resolveMeterImage';
 import { AdvanceLedgerList } from '../advance/AdvanceLedgerList';
 
@@ -110,17 +117,21 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
     ? getRoomMonthlyPaymentStatus(room, roomBills)
     : null;
   const meterLogs = loadReadingLogs(room.id);
-
-  const safeDueDay = clampDueDayOneToTen(room.tenant?.dueDayOfMonth || 5);
-  const nextDueIso = getNextDueDateInOneToTenWindow(
-    safeDueDay,
-    room.tenant?.moveInDate
-  );
-  const formattedDueDate = new Date(nextDueIso).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const currentMonthKey = getCurrentBillingMonthKey();
+  const billingSchedule = getBillingMonthSchedule(currentMonthKey);
+  const currentSettings = loadSettings();
+  const rentSummary = isOccupied
+    ? calculateMonthlyRentSummary({
+        monthlyRent: room.monthlyRent,
+        billingPeriod: currentMonthKey,
+        occupancyStartDate: room.tenant?.moveInDate,
+        occupancyEndDate: room.tenant?.moveOutDate,
+        latePenaltyConfig: currentSettings.latePenalty,
+      })
+    : null;
+  const currentVerifiedReading = isOccupied
+    ? getMonthlyMeterReading(room.id, currentMonthKey)
+    : undefined;
 
   const advanceHistory = isOccupied ? room.advanceHistory || [] : [];
   const roomTitle = /^\d+$/.test(room.name.trim())
@@ -360,20 +371,47 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 )}
               </div>
 
-              {/* Right Column: Next-Month Due Schedule Card (5 cols on Desktop) */}
-              <div className="lg:col-span-5 bg-[#121927] border border-amber-500/25 rounded-2xl p-4 flex flex-col justify-center">
+              {/* Right Column: Current Monthly Payment Schedule & Meter Status Card */}
+              <div className="lg:col-span-5 bg-[#121927] border border-amber-500/25 rounded-2xl p-4 flex flex-col justify-center space-y-1.5">
                 <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Auto Next-Month Due</span>
+                  <span>{billingSchedule.billingPeriodLabel} Payment Schedule</span>
                 </span>
-                <p className="text-base sm:text-lg font-black text-amber-400 mt-1 font-mono-num">
-                  {isOccupied ? formattedDueDate : 'Day 1 to 10 Window'}
+                <p className="text-base sm:text-lg font-black text-amber-400 font-mono-num">
+                  Due {billingSchedule.dueDateLabel}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">
+                <p className="text-[11px] text-slate-300 leading-snug">
                   {isOccupied
-                    ? `Scheduled Day ${safeDueDay} (1st–10th Payment Window)`
-                    : 'Auto-schedules Day 1–10 upon tenant move-in'}
+                    ? billingSchedule.isPastDue
+                      ? `1st–10th Period Ended • Late Penalty Window (${billingSchedule.daysPastDue}d past 10th)`
+                      : 'Payment Period: 1st–10th • Late penalty starts on Day 11'
+                    : 'Monthly schedule: 1st–10th payment period (late starts Day 11)'}
                 </p>
+                {isOccupied && rentSummary && (
+                  <div className="pt-1.5 border-t border-[#22304A] space-y-0.5 text-[11px]">
+                    {rentSummary.isProrated && (
+                      <div className="text-amber-300 font-semibold font-mono-num">
+                        Prorated Rent: {formatPeso(rentSummary.chargeableRent)} ({rentSummary.occupiedDays}/{rentSummary.daysInMonth} days)
+                      </div>
+                    )}
+                    {rentSummary.latePenalty > 0 && (
+                      <div className="text-rose-300 font-semibold font-mono-num">
+                        Late Penalty: {formatPeso(rentSummary.latePenalty)}
+                      </div>
+                    )}
+                    <div
+                      className={`font-semibold ${
+                        currentVerifiedReading?.isVerified
+                          ? 'text-emerald-400'
+                          : 'text-amber-300'
+                      }`}
+                    >
+                      {currentVerifiedReading?.isVerified
+                        ? `Electricity Reading Verified (${formatKwhReading(currentVerifiedReading.consumptionKwh)} kWh)`
+                        : 'Electricity Reading Pending Verification'}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

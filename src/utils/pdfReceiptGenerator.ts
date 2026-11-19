@@ -451,3 +451,226 @@ export async function buildA4ReceiptPdfFromElement(
 
   return { blob, dataUrl, pngDataUrl, pageCount };
 }
+
+function pngDataUrlToBlob(dataUrl: string): Blob {
+  const bytes = base64DataUrlToBytes(dataUrl);
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return new Blob([buffer], { type: 'image/png' });
+}
+
+/**
+ * Captures the dedicated `PrintableA4Receipt` element as a high-resolution PNG
+ * preserving all business details, tenant details, payment breakdown, electricity charges,
+ * meter proofs, and totals.
+ */
+export async function captureReceiptPngFromElement(
+  containerEl: HTMLElement,
+  options?: { pixelRatio?: number }
+): Promise<{
+  blob: Blob;
+  dataUrl: string;
+  width: number;
+  height: number;
+}> {
+  const pixelRatio = options?.pixelRatio ?? 2.5;
+
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+  const containerRect = containerEl.getBoundingClientRect();
+  const fullWidth = Math.ceil(containerRect.width || containerEl.scrollWidth || 794);
+  const fullHeight = Math.ceil(
+    Math.max(containerEl.scrollHeight, containerEl.offsetHeight, containerRect.height || 0)
+  );
+
+  const dataUrl = await toPng(containerEl, {
+    cacheBust: true,
+    pixelRatio,
+    skipFonts: true,
+    fontEmbedCSS: '',
+    backgroundColor: '#FFFFFF',
+    width: fullWidth,
+    height: fullHeight,
+    canvasWidth: Math.round(fullWidth * pixelRatio),
+    canvasHeight: Math.round(fullHeight * pixelRatio),
+    style: {
+      transform: 'none',
+      maxHeight: 'none',
+      maxWidth: 'none',
+      height: `${fullHeight}px`,
+      width: `${fullWidth}px`,
+      overflow: 'visible',
+      position: 'static',
+      margin: '0',
+    },
+  });
+
+  const blob = pngDataUrlToBlob(dataUrl);
+  return {
+    blob,
+    dataUrl,
+    width: Math.round(fullWidth * pixelRatio),
+    height: Math.round(fullHeight * pixelRatio),
+  };
+}
+
+export interface CopyReceiptPngResult {
+  ok: boolean;
+  method:
+    | 'electron_clipboard'
+    | 'clipboard_api'
+    | 'share_fallback'
+    | 'download_fallback'
+    | 'failed';
+  message: string;
+  dataUrl?: string;
+}
+
+/**
+ * Copies a high-resolution PNG of the receipt directly to the system clipboard
+ * so users can paste straight into Messenger, WhatsApp, Viber, email, or docs.
+ *
+ * Uses synchronous ClipboardItem Promise<Blob> for Safari/iOS gesture compliance
+ * and native Electron clipboard IPC when running inside the Desktop app.
+ */
+export async function copyReceiptElementAsPng(
+  containerEl: HTMLElement,
+  options?: {
+    filename?: string;
+    shareTitle?: string;
+    pixelRatio?: number;
+  }
+): Promise<CopyReceiptPngResult> {
+  const filename = options?.filename || '4Rent_Receipt.png';
+  const shareTitle = options?.shareTitle || '4Rent Official Receipt';
+  const pixelRatio = options?.pixelRatio ?? 2.5;
+
+  const win = typeof window !== 'undefined'
+    ? (window as unknown as {
+        electronDesktop?: {
+          copyPngToClipboard?: (pngDataUrl: string) => Promise<boolean> | boolean;
+        };
+      })
+    : undefined;
+
+  // Start high-res PNG capture immediately inside user click gesture
+  const capturePromise = captureReceiptPngFromElement(containerEl, { pixelRatio });
+
+  // 1. Electron Desktop native clipboard bridge (macOS / Windows / Linux)
+  if (win?.electronDesktop && typeof win.electronDesktop.copyPngToClipboard === 'function') {
+    try {
+      const captured = await capturePromise;
+      const wrote = await win.electronDesktop.copyPngToClipboard(captured.dataUrl);
+      if (wrote) {
+        return {
+          ok: true,
+          method: 'electron_clipboard',
+          message: 'Receipt PNG copied to clipboard! Paste directly into Messenger (Cmd/Ctrl+V).',
+          dataUrl: captured.dataUrl,
+        };
+      }
+    } catch {
+      // Fall through to Web Clipboard API
+    }
+  }
+
+  // 2. Web Clipboard API with Promise<Blob> (preserves user gesture on Safari macOS & iOS Safari)
+  const canUseClipboardItem =
+    typeof navigator !== 'undefined' &&
+    Boolean(navigator.clipboard?.write) &&
+    typeof ClipboardItem !== 'undefined';
+
+  if (canUseClipboardItem) {
+    try {
+      const item = new ClipboardItem({
+        'image/png': capturePromise.then((res) => res.blob),
+      });
+      await navigator.clipboard.write([item]);
+      const captured = await capturePromise;
+      return {
+        ok: true,
+        method: 'clipboard_api',
+        message: 'Receipt PNG copied to clipboard! Paste directly into Messenger or any app.',
+        dataUrl: captured.dataUrl,
+      };
+    } catch {
+      // 3. Fallback: wait for resolved Blob for browsers that reject Promise-backed ClipboardItem
+      try {
+        const captured = await capturePromise;
+        const item = new ClipboardItem({ 'image/png': captured.blob });
+        await navigator.clipboard.write([item]);
+        return {
+          ok: true,
+          method: 'clipboard_api',
+          message: 'Receipt PNG copied to clipboard! Paste directly into Messenger or any app.',
+          dataUrl: captured.dataUrl,
+        };
+      } catch {
+        // Proceed to graceful fallback below
+      }
+    }
+  }
+
+  // 4. Graceful fallback when clipboard image write is blocked (e.g., insecure HTTP or legacy WebView)
+  try {
+    const captured = await capturePromise;
+    if (
+      typeof File !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      typeof navigator.share === 'function'
+    ) {
+      const pngFile = new File([captured.blob], filename, { type: 'image/png' });
+      if (navigator.canShare?.({ files: [pngFile] })) {
+        try {
+          await navigator.share({
+            files: [pngFile],
+            title: shareTitle,
+          });
+          return {
+            ok: true,
+            method: 'share_fallback',
+            message: 'Opened PNG share sheet (direct clipboard image copy unavailable in this browser).',
+            dataUrl: captured.dataUrl,
+          };
+        } catch (err: any) {
+          if (err?.name === 'AbortError') {
+            return {
+              ok: false,
+              method: 'failed',
+              message: 'Receipt share cancelled.',
+            };
+          }
+        }
+      }
+    }
+
+    // Final fallback: save PNG file cleanly so user always gets their receipt image
+    if (typeof document !== 'undefined') {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = captured.dataUrl;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return {
+        ok: true,
+        method: 'download_fallback',
+        message: `Browser blocked image clipboard; downloaded high-res PNG (${filename}) instead.`,
+        dataUrl: captured.dataUrl,
+      };
+    }
+
+    return {
+      ok: false,
+      method: 'failed',
+      message: 'Clipboard image copy is not supported in this environment.',
+    };
+  } catch {
+    return {
+      ok: false,
+      method: 'failed',
+      message: 'Could not render receipt PNG. Please try Download PNG or Share Receipt.',
+    };
+  }
+}

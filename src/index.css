@@ -478,3 +478,30 @@ video::-webkit-media-controls-enclosure {
   will-change: transform;
   pointer-events: none;
 }
+
+/* iOS Safari Home Screen / Standalone App Feel & Safe-Area Handling */
+@supports (padding: max(0px)) {
+  html.ios-pwa-standalone body {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    overscroll-behavior-y: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  html.ios-pwa-standalone input,
+  html.ios-pwa-standalone textarea,
+  html.ios-pwa-standalone select,
+  html.ios-pwa-standalone [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  @media (display-mode: standalone) {
+    body {
+      padding-top: env(safe-area-inset-top);
+      overscroll-behavior-y: none;
+    }
+  }
+}
