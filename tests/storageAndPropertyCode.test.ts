@@ -891,67 +891,51 @@ test('mergeDatabaseSnapshots synchronizes newer remote Configurations across Mob
   assert.equal(merged.settings.security.pinCode, '7777');
 });
 
-test('applyPropertyCodeAndSync on Mobile merges offline-created Mobile rooms with Desktop cloud space and pushes merged snapshot to Firebase', async () => {
+test('applyPropertyCodeAndSync on Mobile and Desktop clears 1st Space Code payment history (bills) and archived data when creating a 2nd Space Code, while merging offline rooms on the same Space Code', async () => {
   const mockLs = installMockLocalStorage();
   const mockIdb = installMockIndexedDb();
   try {
-    const seededMobile = seedLocalWorkspace('4R-MOB111', 'Mobile Offline Workspace');
+    // 1. Seed 1st Space Code (4R-SPACE1) with active rooms, archived rooms, payment history bills, archived bills, and tenant history
+    const seededSpace1 = seedLocalWorkspace('4R-SPACE1', 'First Testing Space');
     saveRooms([
-      makeRoom('room-mobile-offline-A', 'Mobile Offline Room A', 'Offline Tenant A'),
-      makeRoom('room-mobile-offline-B', 'Mobile Offline Room B', 'Offline Tenant B'),
+      makeRoom('room-s1-active', 'Space 1 Active Room', 'Tenant S1'),
+      { ...makeRoom('room-s1-archived', 'Space 1 Archived Room', 'Past Tenant S1'), isArchived: true },
     ]);
+    saveBills([
+      makeBill('bill-s1-active', 'room-s1-active', 'Space 1 Active Room', 'Tenant S1'),
+      { ...makeBill('bill-s1-archived', 'room-s1-archived', 'Space 1 Archived Room', 'Past Tenant S1'), isArchived: true },
+    ]);
+    // Also seed legacy localStorage keys to verify they are purged on Space Code switch
+    localStorage.setItem('4rent_bills_v2', JSON.stringify(loadBills()));
+    localStorage.setItem('4rent_tenant_history_v2', JSON.stringify(loadTenantHistory()));
 
-    const remoteDesktopSnap: AppDatabaseSnapshot = {
-      version: '1.0.1',
-      exportedAt: '2026-11-20T12:00:00.000Z',
-      rooms: [makeRoom('room-desktop-101', 'Desktop Room 101', 'Desktop Tenant')],
-      bills: [],
-      inquiries: [],
-      tenantHistory: [],
-      settings: {
-        ...DEFAULT_SETTINGS,
-        apartmentName: 'Desktop Master Property',
-        defaultElectricRate: 17.25,
-        updatedAt: '2026-11-20T12:00:00.000Z',
-        cloudSync: {
-          enabled: true,
-          provider: 'firebase',
-          firebaseDatabaseUrl: 'https://example-default-rtdb.firebaseio.com',
-          propertyCode: '4R-DSK999',
-        },
-      },
-    };
-
-    let pushedSnap = null as AppDatabaseSnapshot | null;
-    const res = await applyPropertyCodeAndSync({
-      previousCode: seededMobile.settings.cloudSync.propertyCode,
+    // 2. Switch to a brand-new 2nd Space Code (4R-SPACE2) on Mobile or Desktop
+    let pushedNewSpaceSnap = null as AppDatabaseSnapshot | null;
+    const switchToNewRes = await applyPropertyCodeAndSync({
+      previousCode: '4R-SPACE1',
       targetCloudSync: {
-        ...seededMobile.settings.cloudSync,
-        propertyCode: '4R-DSK999',
+        ...seededSpace1.settings.cloudSync,
+        propertyCode: '4R-SPACE2',
       },
       isOnline: true,
       networkLabel: 'Wi-Fi (Active)',
       isMobile: true,
       deps: {
         pull: async () => ({
-          ok: true,
-          message: 'Pulled Desktop space',
-          snapshot: remoteDesktopSnap,
-          updatedAt: '2026-11-20T12:00:00.000Z',
+          ok: false,
+          notFound: true,
+          message: 'No cloud snapshot found for 4R-SPACE2',
         }),
         push: async (_cfg, snap) => {
-          pushedSnap = snap;
+          pushedNewSpaceSnap = snap;
           return {
             ok: true,
-            message: 'Pushed merged Mobile + Desktop snapshot',
-            syncedAt: '2026-11-20T12:01:00.000Z',
+            message: 'Initialized 4R-SPACE2',
+            syncedAt: '2026-11-20T13:00:00.000Z',
           };
         },
         exportSnapshot: exportDatabaseSnapshot,
-        importSnapshot: (snap) => {
-          saveRooms(snap.rooms);
-          saveSettings(snap.settings);
-        },
+        importSnapshot: () => {},
         mergeSnapshots: mergeDatabaseSnapshots,
         applyClean: applyCloudSnapshotCleanly,
         resetWorkspace: resetWorkspaceForPropertyCode,
@@ -959,14 +943,25 @@ test('applyPropertyCodeAndSync on Mobile merges offline-created Mobile rooms wit
       },
     });
 
-    assert.equal(res.ok, true);
-    assert.ok(pushedSnap, 'Mobile must push merged offline rooms to Firebase');
-    assert.equal(pushedSnap!.rooms.length, 3);
-    assert.ok(pushedSnap!.rooms.some((r) => r.id === 'room-mobile-offline-A'));
-    assert.ok(pushedSnap!.rooms.some((r) => r.id === 'room-mobile-offline-B'));
-    assert.ok(pushedSnap!.rooms.some((r) => r.id === 'room-desktop-101'));
-    assert.equal(pushedSnap!.settings.defaultElectricRate, 17.25);
-    assert.equal(pushedSnap!.settings.apartmentName, 'Desktop Master Property');
+    assert.equal(switchToNewRes.ok, true);
+    assert.equal(switchToNewRes.mode, 'switched-new');
+    // All 1st Space Code rooms, payment history (bills), and archived data MUST be 100% cleared in 4R-SPACE2
+    assert.deepEqual(loadRooms(), []);
+    assert.deepEqual(loadBills(), []);
+    assert.deepEqual(loadTenantHistory(), []);
+    assert.deepEqual(loadInquiries(), []);
+    assert.deepEqual(loadReadingLogs(), []);
+    assert.ok(pushedNewSpaceSnap);
+    assert.deepEqual(pushedNewSpaceSnap!.rooms, []);
+    assert.deepEqual(pushedNewSpaceSnap!.bills, []);
+    assert.deepEqual(pushedNewSpaceSnap!.tenantHistory, []);
+
+    // IndexedDB master_snapshot must also be empty for 4R-SPACE2 so adding new rooms never resurrects 4R-SPACE1 payment history or archives
+    const idbSnapAfterReset = mockIdb.snapshots.get('master_snapshot');
+    assert.ok(idbSnapAfterReset);
+    assert.deepEqual(idbSnapAfterReset!.bills, []);
+    assert.deepEqual(idbSnapAfterReset!.tenantHistory, []);
+    assert.equal(idbSnapAfterReset!.settings.cloudSync.propertyCode, '4R-SPACE2');
   } finally {
     mockIdb.restore();
     mockLs.restore();

@@ -528,7 +528,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                           onClick={() => setAmountDepositPaidByTenant(String(reqDepNum))}
                           className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 cursor-pointer"
                         >
-                          Full Paid
+                          Full Pay
                         </button>
                       )}
                     </div>

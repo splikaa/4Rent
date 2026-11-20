@@ -790,7 +790,7 @@ export const PrintableA4Receipt = React.forwardRef(
             {/* Separate Component Payment Tracking Summary */}
             <div className="rounded bg-white border border-slate-200 px-2.5 py-2 space-y-1 text-[10px]">
               <div className="font-extrabold uppercase tracking-wider text-slate-600 text-[9px]">
-                Component Payment Tracking (Rent vs. Electricity{latePenalty > 0 ? ' vs. Late Charges' : ''})
+                Component Payment Tracking
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <div>

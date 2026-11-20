@@ -399,15 +399,30 @@ export function App() {
         if (!appliedPendingCloud) {
           const idbSnap = await loadSnapshotFromIndexedDb();
           if (!mounted || !idbSnap) return;
+          const currentSettingsNow = loadSettings();
+          const activeSpaceCode = resolveConfiguredPropertyCode(
+            currentSettingsNow.cloudSync?.propertyCode
+          );
+          const idbSpaceCode = normalizePropertyCode(
+            idbSnap.settings?.cloudSync?.propertyCode || ''
+          );
+          const isMatchingSpaceCode =
+            !idbSpaceCode || idbSpaceCode === activeSpaceCode;
+
           const currentRooms = loadRooms();
           const currentBills = loadBills();
           const currentHistory = loadTenantHistory();
-          const needsIdbRestore =
-            (currentRooms.length === 0 && Boolean(idbSnap.rooms?.length)) ||
-            (currentBills.length === 0 && Boolean(idbSnap.bills?.length)) ||
-            (currentHistory.length === 0 && Boolean(idbSnap.tenantHistory?.length));
+          // Only restore from IndexedDB when localStorage was completely wiped AND the snapshot belongs to the active Property Space Code
+          const isLocalWorkspaceCompletelyEmpty =
+            currentRooms.length === 0 &&
+            currentBills.length === 0 &&
+            currentHistory.length === 0;
+          const hasIdbData =
+            Boolean(idbSnap.rooms?.length) ||
+            Boolean(idbSnap.bills?.length) ||
+            Boolean(idbSnap.tenantHistory?.length);
 
-          if (needsIdbRestore) {
+          if (isMatchingSpaceCode && isLocalWorkspaceCompletelyEmpty && hasIdbData) {
             const restored = mergeDatabaseSnapshots(exportDatabaseSnapshot(), idbSnap);
             importDatabaseSnapshot(restored);
             setRooms(loadRooms());
@@ -531,9 +546,24 @@ export function App() {
 
   useEffect(() => {
     if (isCloudConfigured(settings.cloudSync)) {
+      const subscribedCode = resolveConfiguredPropertyCode(
+        settings.cloudSync.propertyCode
+      );
       const unsubscribe = subscribeToRealtimeSync(
         settings.cloudSync,
         (remoteSnap) => {
+          const currentStoredCode = resolveConfiguredPropertyCode(
+            loadSettings().cloudSync?.propertyCode
+          );
+          const remoteSnapCode = normalizePropertyCode(
+            remoteSnap?.settings?.cloudSync?.propertyCode || ''
+          );
+          if (
+            currentStoredCode !== subscribedCode ||
+            (remoteSnapCode && remoteSnapCode !== currentStoredCode)
+          ) {
+            return;
+          }
           const merged = mergeDatabaseSnapshots(
             exportDatabaseSnapshot(),
             remoteSnap
@@ -565,12 +595,28 @@ export function App() {
     let isSyncInFlight = false;
 
     const syncBidirectionalWithCloud = async () => {
-      if (isSyncInFlight || !isCloudConfigured(settings.cloudSync)) return;
+      const activeCloudSync = loadSettings().cloudSync;
+      if (isSyncInFlight || !isCloudConfigured(activeCloudSync)) return;
+      const codeAtStart = resolveConfiguredPropertyCode(
+        activeCloudSync.propertyCode
+      );
       isSyncInFlight = true;
       try {
         const localBefore = exportDatabaseSnapshot();
-        const res = await pullSnapshotFromCloud(settings.cloudSync);
+        const res = await pullSnapshotFromCloud(activeCloudSync);
+        const codeAfterPull = resolveConfiguredPropertyCode(
+          loadSettings().cloudSync?.propertyCode
+        );
+        if (codeAfterPull !== codeAtStart) {
+          return;
+        }
         if (res.ok && res.snapshot) {
+          const remoteCode = normalizePropertyCode(
+            res.snapshot.settings?.cloudSync?.propertyCode || ''
+          );
+          if (remoteCode && remoteCode !== codeAtStart) {
+            return;
+          }
           const merged = mergeDatabaseSnapshots(localBefore, res.snapshot);
           importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
           clearPendingCloudApply();
@@ -603,7 +649,7 @@ export function App() {
             (merged.settings?.updatedAt || '') !==
               (res.snapshot.settings?.updatedAt || '');
           if (hasLocalDiffFromRemote) {
-            const pushRes = await pushSnapshotToCloud(settings.cloudSync, merged);
+            const pushRes = await pushSnapshotToCloud(activeCloudSync, merged);
             if (pushRes.ok) {
               try {
                 localStorage.removeItem('4rent_pending_offline_sync');
@@ -611,7 +657,7 @@ export function App() {
             }
           }
         } else if (res.notFound) {
-          const pushRes = await pushSnapshotToCloud(settings.cloudSync, localBefore);
+          const pushRes = await pushSnapshotToCloud(activeCloudSync, localBefore);
           if (pushRes.ok) {
             try {
               localStorage.removeItem('4rent_pending_offline_sync');
@@ -701,12 +747,35 @@ export function App() {
     try {
       localStorage.setItem('4rent_pending_offline_sync', 'true');
     } catch {}
-    if (isCloudConfigured(settings.cloudSync)) {
+    const activeCloudSync = loadSettings().cloudSync;
+    if (isCloudConfigured(activeCloudSync)) {
+      const expectedCode = resolveConfiguredPropertyCode(
+        activeCloudSync.propertyCode
+      );
       setTimeout(async () => {
+        const currentCloudSync = loadSettings().cloudSync;
+        const currentCode = resolveConfiguredPropertyCode(
+          currentCloudSync?.propertyCode
+        );
+        if (currentCode !== expectedCode || !isCloudConfigured(currentCloudSync)) {
+          return;
+        }
         const localSnap = exportDatabaseSnapshot();
-        const pullRes = await pullSnapshotFromCloud(settings.cloudSync);
+        const pullRes = await pullSnapshotFromCloud(currentCloudSync);
+        if (
+          resolveConfiguredPropertyCode(loadSettings().cloudSync?.propertyCode) !==
+          expectedCode
+        ) {
+          return;
+        }
         let snapToPush = localSnap;
         if (pullRes.ok && pullRes.snapshot) {
+          const remoteCode = normalizePropertyCode(
+            pullRes.snapshot.settings?.cloudSync?.propertyCode || ''
+          );
+          if (remoteCode && remoteCode !== expectedCode) {
+            return;
+          }
           snapToPush = mergeDatabaseSnapshots(localSnap, pullRes.snapshot);
           importDatabaseSnapshot(snapToPush, { preserveLocalSecurity: true });
           setRooms(loadRooms());
@@ -716,7 +785,7 @@ export function App() {
           setMonthlyReadings(loadMonthlyReadings());
           setSettings(loadSettings());
         }
-        const pushRes = await pushSnapshotToCloud(settings.cloudSync, snapToPush);
+        const pushRes = await pushSnapshotToCloud(currentCloudSync, snapToPush);
         if (pushRes.ok) {
           try {
             localStorage.removeItem('4rent_pending_offline_sync');

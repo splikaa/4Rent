@@ -1155,10 +1155,19 @@ function persistMasterIndexedDb(): void {
         if (isCandidateEmpty) {
           try {
             const existing = await loadSnapshotFromIndexedDb();
+            const existingCode = normalizePropertyCode(
+              existing?.settings?.cloudSync?.propertyCode || ''
+            );
+            const candidateCode = normalizePropertyCode(
+              snap.settings?.cloudSync?.propertyCode || ''
+            );
+            const isSamePropertySpace =
+              !existingCode || !candidateCode || existingCode === candidateCode;
             if (
-              (existing?.rooms && existing.rooms.length > 0) ||
-              (existing?.bills && existing.bills.length > 0) ||
-              (existing?.tenantHistory && existing.tenantHistory.length > 0)
+              isSamePropertySpace &&
+              ((existing?.rooms && existing.rooms.length > 0) ||
+                (existing?.bills && existing.bills.length > 0) ||
+                (existing?.tenantHistory && existing.tenantHistory.length > 0))
             ) {
               console.warn(
                 '[4Rent Storage Guard] Blocked empty snapshot overwrite of populated IndexedDB backup.'
@@ -1291,6 +1300,28 @@ export function clearPendingCloudApply(): void {
   }
 }
 
+function clearLegacyAndPendingStorageKeys(): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const legacyKeys = [
+      '4rent_rooms_v2',
+      '4rent_rooms_v1',
+      '4rent_bills_v2',
+      '4rent_bills_v1',
+      '4rent_inquiries_v2',
+      '4rent_tenant_history_v2',
+      '4rent_tenant_history_v1',
+      '4rent_meter_logs_v1',
+      '4rent_pending_offline_sync',
+    ];
+    for (const key of legacyKeys) {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // ignore storage cleanup errors
+  }
+}
+
 export async function flushMasterIndexedDbNow(): Promise<void> {
   if (_idbPersistTimer) {
     clearTimeout(_idbPersistTimer);
@@ -1299,11 +1330,15 @@ export async function flushMasterIndexedDbNow(): Promise<void> {
   if (_pendingImageOffloads.size > 0) {
     await Promise.allSettled(Array.from(_pendingImageOffloads));
   }
-  const snap = exportDatabaseSnapshot();
-  await saveSnapshotToIndexedDb(snap);
-  if (Array.isArray(snap.monthlyReadings)) {
-    await syncMonthlyReadingsToIndexedDb(snap.monthlyReadings);
-  }
+  const writeTask = _idbWriteChain.then(async () => {
+    const snap = exportDatabaseSnapshot();
+    await saveSnapshotToIndexedDb(snap);
+    if (Array.isArray(snap.monthlyReadings)) {
+      await syncMonthlyReadingsToIndexedDb(snap.monthlyReadings);
+    }
+  });
+  _idbWriteChain = writeTask.catch(() => {});
+  await writeTask;
 }
 
 /**
@@ -1314,6 +1349,7 @@ export async function applyCloudSnapshotCleanly(
   snapshot: AppDatabaseSnapshot,
   cloudSyncOverride: AppSettings['cloudSync']
 ): Promise<void> {
+  clearLegacyAndPendingStorageKeys();
   saveRooms(Array.isArray(snapshot.rooms) ? snapshot.rooms : []);
   saveBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
   saveInquiries(Array.isArray(snapshot.inquiries) ? snapshot.inquiries : []);
@@ -1368,6 +1404,7 @@ export async function resetWorkspaceForPropertyCode(
   cloudSyncOverride: AppSettings['cloudSync']
 ): Promise<void> {
   clearPendingCloudApply();
+  clearLegacyAndPendingStorageKeys();
   saveRooms([]);
   saveBills([]);
   saveInquiries([]);
