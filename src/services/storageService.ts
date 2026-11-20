@@ -1350,12 +1350,27 @@ export async function applyCloudSnapshotCleanly(
   cloudSyncOverride: AppSettings['cloudSync']
 ): Promise<void> {
   clearLegacyAndPendingStorageKeys();
-  saveRooms(Array.isArray(snapshot.rooms) ? snapshot.rooms : []);
-  saveBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
+  const cleanRooms = Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
+  const cleanHistory = Array.isArray(snapshot.tenantHistory)
+    ? snapshot.tenantHistory
+    : [];
+  const rawBills = Array.isArray(snapshot.bills) ? snapshot.bills : [];
+  const validRoomIds = new Set<string>();
+  for (const r of cleanRooms) {
+    if (r?.id) validRoomIds.add(r.id);
+  }
+  for (const h of cleanHistory) {
+    if (h?.roomId) validRoomIds.add(h.roomId);
+  }
+  const cleanBills =
+    cleanRooms.length > 0
+      ? rawBills.filter((b) => b && b.roomId && validRoomIds.has(b.roomId))
+      : rawBills;
+
+  saveRooms(cleanRooms);
+  saveBills(cleanBills);
   saveInquiries(Array.isArray(snapshot.inquiries) ? snapshot.inquiries : []);
-  saveTenantHistory(
-    Array.isArray(snapshot.tenantHistory) ? snapshot.tenantHistory : []
-  );
+  saveTenantHistory(cleanHistory);
   saveReadingLogs(Array.isArray(snapshot.meterLogs) ? snapshot.meterLogs : []);
   if (Array.isArray(snapshot.monthlyReadings)) {
     saveMonthlyReadings(snapshot.monthlyReadings);

@@ -29,7 +29,9 @@ import {
 } from '../src/services/storageService';
 import {
   mergeDatabaseSnapshots,
+  pruneOrphanCrossSpaceBills,
   pullSnapshotFromFirebase,
+  pushSnapshotToFirebase,
 } from '../src/services/firebaseSync';
 import { applyPropertyCodeAndSync } from '../src/services/propertySpaceSwitch';
 import type {
@@ -967,5 +969,61 @@ test('applyPropertyCodeAndSync on Mobile and Desktop clears 1st Space Code payme
     mockLs.restore();
   }
 });
+
+test('pushSnapshotToFirebase only writes /properties/<CODE>.json (never /system_registry) and mergeDatabaseSnapshots prunes cross-space orphan bills', async () => {
+  const originalFetch = globalThis.fetch;
+  const calledUrls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const urlStr = typeof input === 'string' ? input : input.toString();
+    calledUrls.push(urlStr);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const validRoom = makeRoom('room-tester-1', '1', 'Joseph');
+    const validBill = makeBill('bill-tester-1', 'room-tester-1', '1', 'Joseph');
+    const leakedActiveBill = makeBill('bill-leaked-1', 'room-old-space-99', '5', 'Zuri');
+    const leakedArchivedBill: BillRecord = {
+      ...makeBill('bill-leaked-2', 'room-old-space-88', 'Room 2', 'Michael'),
+      isArchived: true,
+    };
+
+    const snap: AppDatabaseSnapshot = {
+      version: '1.0.1',
+      exportedAt: new Date().toISOString(),
+      rooms: [validRoom],
+      bills: [validBill, leakedActiveBill, leakedArchivedBill],
+      inquiries: [],
+      tenantHistory: [],
+      settings: {
+        ...DEFAULT_SETTINGS,
+        cloudSync: {
+          ...DEFAULT_SETTINGS.cloudSync,
+          propertyCode: '4R-TESTER',
+        },
+      },
+    };
+
+    const merged = mergeDatabaseSnapshots(snap, snap);
+    assert.equal(merged.bills.length, 1);
+    assert.equal(merged.bills[0].id, 'bill-tester-1');
+    assert.equal(
+      pruneOrphanCrossSpaceBills(snap.rooms, snap.bills, snap.tenantHistory).length,
+      1
+    );
+
+    const pushRes = await pushSnapshotToFirebase(snap.settings.cloudSync, merged);
+    assert.equal(pushRes.ok, true);
+    assert.equal(calledUrls.length, 1);
+    assert.ok(calledUrls[0].includes('/properties/4R-TESTER.json'));
+    assert.ok(!calledUrls.some((u) => u.includes('system_registry')));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 
 

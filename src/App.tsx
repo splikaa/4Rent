@@ -19,6 +19,7 @@ import {
   clearPendingCloudApply,
   commitBillingTransaction,
   exportDatabaseSnapshot,
+  flushMasterIndexedDbNow,
   importDatabaseSnapshot,
   isAppHydrated,
   loadBills,
@@ -47,6 +48,7 @@ import {
   isCloudConfigured,
   mergeDatabaseSnapshots,
   normalizePropertyCode,
+  pruneOrphanCrossSpaceBills,
   pullSnapshotFromCloud,
   pushSnapshotToCloud,
   subscribeToRealtimeSync,
@@ -443,6 +445,19 @@ export function App() {
         console.warn('[4Rent] IndexedDB hydration error:', err);
       } finally {
         if (mounted) {
+          const hydratedRooms = loadRooms();
+          const hydratedBills = loadBills();
+          const hydratedHistory = loadTenantHistory();
+          const cleanedBills = pruneOrphanCrossSpaceBills(
+            hydratedRooms,
+            hydratedBills,
+            hydratedHistory
+          );
+          if (cleanedBills.length !== hydratedBills.length) {
+            saveBills(cleanedBills);
+            setBills(cleanedBills);
+            void flushMasterIndexedDbNow();
+          }
           const mig = migrateDatabaseIfNeeded();
           if (mig.migrated) {
             setBills(loadBills());
@@ -589,18 +604,24 @@ export function App() {
     settings.cloudSync.propertyCode,
   ]);
 
+  const isCloudSyncInFlightRef = useRef(false);
+  const cloudSyncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
   // Automatic Desktop <-> Mobile Bidirectional Cloud Sync when window gains focus, device reconnects from Offline to Online, or pending offline changes exist
   useEffect(() => {
     let wasOnline = getNetworkStatus().isOnline;
-    let isSyncInFlight = false;
 
     const syncBidirectionalWithCloud = async () => {
       const activeCloudSync = loadSettings().cloudSync;
-      if (isSyncInFlight || !isCloudConfigured(activeCloudSync)) return;
+      if (isCloudSyncInFlightRef.current || !isCloudConfigured(activeCloudSync)) {
+        return;
+      }
       const codeAtStart = resolveConfiguredPropertyCode(
         activeCloudSync.propertyCode
       );
-      isSyncInFlight = true;
+      isCloudSyncInFlightRef.current = true;
       try {
         const localBefore = exportDatabaseSnapshot();
         const res = await pullSnapshotFromCloud(activeCloudSync);
@@ -665,7 +686,7 @@ export function App() {
           }
         }
       } finally {
-        isSyncInFlight = false;
+        isCloudSyncInFlightRef.current = false;
       }
     };
 
@@ -691,7 +712,12 @@ export function App() {
           return false;
         }
       })();
-      if (netNow.isOnline && (!wasOnline || hasPendingOffline)) {
+      if (
+        netNow.isOnline &&
+        !cloudSyncDebounceRef.current &&
+        !isCloudSyncInFlightRef.current &&
+        (!wasOnline || hasPendingOffline)
+      ) {
         void syncBidirectionalWithCloud();
       }
       wasOnline = netNow.isOnline;
@@ -752,7 +778,15 @@ export function App() {
       const expectedCode = resolveConfiguredPropertyCode(
         activeCloudSync.propertyCode
       );
-      setTimeout(async () => {
+      if (cloudSyncDebounceRef.current) {
+        clearTimeout(cloudSyncDebounceRef.current);
+      }
+      cloudSyncDebounceRef.current = setTimeout(async () => {
+        cloudSyncDebounceRef.current = null;
+        if (isCloudSyncInFlightRef.current) {
+          // Another sync is currently in flight; leave 4rent_pending_offline_sync='true' so pollTimer or follow-up flushes cleanly
+          return;
+        }
         const currentCloudSync = loadSettings().cloudSync;
         const currentCode = resolveConfiguredPropertyCode(
           currentCloudSync?.propertyCode
@@ -760,38 +794,43 @@ export function App() {
         if (currentCode !== expectedCode || !isCloudConfigured(currentCloudSync)) {
           return;
         }
-        const localSnap = exportDatabaseSnapshot();
-        const pullRes = await pullSnapshotFromCloud(currentCloudSync);
-        if (
-          resolveConfiguredPropertyCode(loadSettings().cloudSync?.propertyCode) !==
-          expectedCode
-        ) {
-          return;
-        }
-        let snapToPush = localSnap;
-        if (pullRes.ok && pullRes.snapshot) {
-          const remoteCode = normalizePropertyCode(
-            pullRes.snapshot.settings?.cloudSync?.propertyCode || ''
-          );
-          if (remoteCode && remoteCode !== expectedCode) {
+        isCloudSyncInFlightRef.current = true;
+        try {
+          const localSnap = exportDatabaseSnapshot();
+          const pullRes = await pullSnapshotFromCloud(currentCloudSync);
+          if (
+            resolveConfiguredPropertyCode(loadSettings().cloudSync?.propertyCode) !==
+            expectedCode
+          ) {
             return;
           }
-          snapToPush = mergeDatabaseSnapshots(localSnap, pullRes.snapshot);
-          importDatabaseSnapshot(snapToPush, { preserveLocalSecurity: true });
-          setRooms(loadRooms());
-          setBills(loadBills());
-          setInquiries(loadInquiries());
-          setTenantHistory(loadTenantHistory());
-          setMonthlyReadings(loadMonthlyReadings());
-          setSettings(loadSettings());
+          let snapToPush = localSnap;
+          if (pullRes.ok && pullRes.snapshot) {
+            const remoteCode = normalizePropertyCode(
+              pullRes.snapshot.settings?.cloudSync?.propertyCode || ''
+            );
+            if (remoteCode && remoteCode !== expectedCode) {
+              return;
+            }
+            snapToPush = mergeDatabaseSnapshots(localSnap, pullRes.snapshot);
+            importDatabaseSnapshot(snapToPush, { preserveLocalSecurity: true });
+            setRooms(loadRooms());
+            setBills(loadBills());
+            setInquiries(loadInquiries());
+            setTenantHistory(loadTenantHistory());
+            setMonthlyReadings(loadMonthlyReadings());
+            setSettings(loadSettings());
+          }
+          const pushRes = await pushSnapshotToCloud(currentCloudSync, snapToPush);
+          if (pushRes.ok) {
+            try {
+              localStorage.removeItem('4rent_pending_offline_sync');
+            } catch {}
+          }
+        } finally {
+          isCloudSyncInFlightRef.current = false;
         }
-        const pushRes = await pushSnapshotToCloud(currentCloudSync, snapToPush);
-        if (pushRes.ok) {
-          try {
-            localStorage.removeItem('4rent_pending_offline_sync');
-          } catch {}
-        }
-      }, 200);
+      }, 250);
     }
   };
 
@@ -2125,8 +2164,16 @@ export function App() {
 
   const handleUpdateSettings = (nextSettings: AppSettings) => {
     try {
+      const currentStoredSettings = loadSettings();
       const stampedSettings: AppSettings = {
         ...nextSettings,
+        cloudSync: {
+          ...nextSettings.cloudSync,
+          propertyCode: resolveConfiguredPropertyCode(
+            currentStoredSettings.cloudSync?.propertyCode ||
+              settings.cloudSync?.propertyCode
+          ),
+        },
         updatedAt: new Date().toISOString(),
       };
       const ratesChanged =

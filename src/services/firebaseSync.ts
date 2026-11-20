@@ -1,7 +1,10 @@
 import {
   AppDatabaseSnapshot,
+  BillRecord,
   CloudSyncConfig,
   MonthlyMeterReading,
+  Room,
+  TenantHistoryEntry,
 } from '../types/rental';
 import {
   formatMonthKeyLabel,
@@ -66,12 +69,6 @@ export const DEFAULT_FIREBASE_DATABASE_URL =
 export const FIREBASE_RULES_JSON = `{
   "rules": {
     "properties": {
-      "$propertyCode": {
-        ".read": "auth != null",
-        ".write": "auth != null"
-      }
-    },
-    "system_registry": {
       "$propertyCode": {
         ".read": "auth != null",
         ".write": "auth != null"
@@ -212,35 +209,6 @@ export async function pushSnapshotToFirebase(
         ok: false,
         message: `Firebase Error (${response.status}): ${errText || response.statusText}`,
       };
-    }
-
-    // Best-effort registration in system_registry
-    try {
-      const regUrl = appendFirebaseAuthParam(
-        `${baseUrl}/system_registry/${encodeURIComponent(propCode)}.json`,
-        config
-      );
-      const regController = new AbortController();
-      const regTimeout = setTimeout(() => regController.abort(), 5000);
-      fetch(regUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          propertyCode: propCode,
-          apartmentName: snapshot.settings?.apartmentName || '4Rent Property',
-          landlordName: snapshot.settings?.landlordName || 'Administrator',
-          roomsCount: snapshot.rooms?.length || 0,
-          billsCount: snapshot.bills?.length || 0,
-          inquiriesCount: snapshot.inquiries?.length || 0,
-          lastActiveAt: syncedAt,
-          clientVersion: '1.0.1',
-        }),
-        signal: regController.signal,
-      })
-        .catch(() => undefined)
-        .finally(() => clearTimeout(regTimeout));
-    } catch {
-      // ignore non-critical registry write error
     }
 
     return {
@@ -450,6 +418,27 @@ export function getNetworkStatus(): {
 // Database Merge Helper
 // ---------------------------------------------------------------------------
 
+/**
+ * Removes cross-space orphaned bills whose roomId belongs to neither any room
+ * (active or archived) in the current workspace nor any tenantHistory entry.
+ */
+export function pruneOrphanCrossSpaceBills(
+  rooms: Room[],
+  bills: BillRecord[],
+  tenantHistory: TenantHistoryEntry[]
+): BillRecord[] {
+  if (!Array.isArray(bills) || bills.length === 0) return [];
+  if (!Array.isArray(rooms) || rooms.length === 0) return bills;
+  const validRoomIds = new Set<string>();
+  for (const r of rooms) {
+    if (r?.id) validRoomIds.add(r.id);
+  }
+  for (const h of tenantHistory || []) {
+    if (h?.roomId) validRoomIds.add(h.roomId);
+  }
+  return bills.filter((b) => b && b.roomId && validRoomIds.has(b.roomId));
+}
+
 export function mergeDatabaseSnapshots(
   local: AppDatabaseSnapshot,
   remote: AppDatabaseSnapshot
@@ -576,16 +565,24 @@ export function mergeDatabaseSnapshots(
     cloudSync: local.settings?.cloudSync || remote.settings?.cloudSync,
   };
 
+  const mergedRooms = Array.from(roomMap.values()).map((r) =>
+    r.status === 'vacant' ? r : reconcileRoomAdvanceLedger(r)
+  );
+  const mergedHistory = Array.from(historyMap.values());
+  const mergedBills = pruneOrphanCrossSpaceBills(
+    mergedRooms,
+    Array.from(billMap.values()),
+    mergedHistory
+  );
+
   return {
     version: '1.0.1',
     schemaVersion: Math.max(local.schemaVersion || 1, remote.schemaVersion || 1, 2),
     exportedAt: new Date().toISOString(),
-    rooms: Array.from(roomMap.values()).map((r) =>
-      r.status === 'vacant' ? r : reconcileRoomAdvanceLedger(r)
-    ),
-    bills: Array.from(billMap.values()),
+    rooms: mergedRooms,
+    bills: mergedBills,
     inquiries: Array.from(inquiryMap.values()),
-    tenantHistory: Array.from(historyMap.values()),
+    tenantHistory: mergedHistory,
     meterLogs: Array.from(meterLogMap.values()).sort((a, b) =>
       String(b.readingDate || '').localeCompare(String(a.readingDate || ''))
     ),

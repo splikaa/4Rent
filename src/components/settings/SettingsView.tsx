@@ -277,6 +277,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (hasUnsavedConfigEdits) {
         saveSettings({
           ...form,
+          cloudSync: settings.cloudSync,
           updatedAt: new Date().toISOString(),
         });
       }
@@ -565,8 +566,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const next: AppSettings = {
       ...form,
       ...patch,
+      cloudSync: settings.cloudSync,
     };
-    setForm(next);
+    setForm((prev) => ({ ...prev, ...patch }));
     onUpdateSettings(next);
   };
 
