@@ -27,6 +27,7 @@ import {
   formatPeso,
   formatPhoneNumber,
 } from '../../utils/billingCalculator';
+import { ModalPortal } from '../common/ModalPortal';
 import {
   calculateMonthlyRentSummary,
   getBillingMonthSchedule,
@@ -312,35 +313,43 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
     status === 'vacant';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl rounded-3xl bg-[#141B28] border border-[#26334D] shadow-2xl overflow-hidden my-6 animate-modal-pop">
-        <div className="flex items-center justify-between px-6 sm:px-7 py-5 bg-[#192233] border-b border-[#26334D]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
-              <DoorOpen className="w-5 h-5" />
+    <ModalPortal isOpen={isOpen}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label={initialRoom ? `Edit ${initialRoom.name}` : 'Create New Room'}
+      >
+        <div className="w-full max-w-2xl max-h-[calc(100dvh-32px)] rounded-3xl bg-[#141B28] border border-[#26334D] shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop">
+          <div className="flex items-center justify-between px-6 sm:px-7 py-5 bg-[#192233] border-b border-[#26334D] shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                <DoorOpen className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-lg font-extrabold text-white truncate">
+                  {initialRoom ? `Edit ${initialRoom.name}` : 'Create New Room'}
+                </h2>
+                <p className="text-xs text-slate-400 truncate">
+                  Room rate, sub-meter &amp; tenant details
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-extrabold text-white">
-                {initialRoom ? `Edit ${initialRoom.name}` : 'Create New Room'}
-              </h2>
-              <p className="text-xs text-slate-400">
-                Room rate, sub-meter &amp; tenant details
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close room modal"
+              className="w-9 h-9 rounded-2xl bg-[#10151F] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-9 h-9 rounded-2xl bg-[#10151F] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="p-6 sm:p-7 space-y-6 max-h-[82vh] overflow-y-auto"
-        >
+          <form
+            onSubmit={handleSubmit}
+            className="flex flex-col flex-1 min-h-0 overflow-hidden"
+          >
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 sm:p-7 space-y-6">
           {formError && (
             <div className="rounded-2xl bg-red-500/15 border border-red-500/30 p-3.5 text-xs text-red-300 font-semibold">
               {formError}
@@ -722,24 +731,27 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#222E44]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-5 py-3 rounded-2xl bg-[#1C2434] hover:bg-[#242E42] text-slate-300 font-semibold text-sm cursor-pointer btn-fluid"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer btn-fluid"
-            >
-              <Save className="w-4 h-4" />
-              <span>{initialRoom ? 'Save Changes' : 'Create Room'}</span>
-            </button>
-          </div>
-        </form>
+            </div>
+
+            <div className="shrink-0 flex items-center justify-end gap-3 px-6 sm:px-7 py-4 border-t border-[#222E44] bg-[#141B28]">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-5 py-3 rounded-2xl bg-[#1C2434] hover:bg-[#242E42] text-slate-300 font-semibold text-sm cursor-pointer btn-fluid"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-6 py-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer btn-fluid"
+              >
+                <Save className="w-4 h-4" />
+                <span>{initialRoom ? 'Save Changes' : 'Create Room'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

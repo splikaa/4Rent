@@ -35,6 +35,7 @@ import {
   getRoomDepositStatus,
 } from '../../utils/financialEngine';
 import { PaymentModalMode } from '../modals/RecordPaymentModal';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface AllPaymentsViewProps {
   bills: BillRecord[];
@@ -724,23 +725,34 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
       </div>
 
       {/* Record Payment / Overpayment Modal */}
-      {payingBill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-3xl bg-[#161C28] border border-[#28334A] p-6 sm:p-7 shadow-2xl animate-modal-pop">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-lg font-extrabold text-white">
-                Record Payment • {payingBill.roomName}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPayingBill(null)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <ModalPortal isOpen={Boolean(payingBill)}>
+        {payingBill && (
+          <div
+            className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-hidden overscroll-none"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Record Payment for ${payingBill.roomName}`}
+          >
+            <div className="w-full max-w-md max-h-[calc(100dvh-32px)] rounded-3xl bg-[#161C28] border border-[#28334A] shadow-2xl flex flex-col overflow-hidden min-w-0 animate-modal-pop">
+              <div className="flex items-center justify-between gap-3 px-5 sm:px-6 pt-5 pb-4 border-b border-[#222E44] shrink-0">
+                <h3 className="text-base sm:text-lg font-extrabold text-white truncate">
+                  Record Payment • {payingBill.roomName}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setPayingBill(null)}
+                  aria-label="Close payment modal"
+                  className="w-9 h-9 rounded-xl bg-[#0F1522] border border-[#253148] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-            <form onSubmit={handleConfirmPayment} className="space-y-4">
+              <form
+                onSubmit={handleConfirmPayment}
+                className="flex flex-col flex-1 min-h-0 overflow-hidden"
+              >
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4 space-y-4">
               <div className="rounded-2xl bg-[#0D121B] border border-[#222C3F] p-4 text-xs space-y-1.5">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Tenant:</span>
@@ -1012,26 +1024,29 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setPayingBill(null)}
-                  className="px-4 py-2.5 rounded-2xl bg-[#1F2738] text-slate-300 text-xs font-bold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer btn-fluid"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Save Payment</span>
-                </button>
-              </div>
-            </form>
+                </div>
+
+                <div className="shrink-0 px-5 sm:px-6 py-3.5 border-t border-[#222E44] bg-[#161C28] flex justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setPayingBill(null)}
+                    className="px-4 py-2.5 rounded-2xl bg-[#1F2738] hover:bg-[#273146] text-slate-300 text-xs font-bold cursor-pointer transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer btn-fluid shadow-lg shadow-emerald-500/20"
+                  >
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Save Payment</span>
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </ModalPortal>
     </div>
   );
 };

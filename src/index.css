@@ -55,7 +55,7 @@
   }
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: none;
   }
 }
 
@@ -66,7 +66,7 @@
   }
   100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -109,15 +109,15 @@
 }
 
 .animate-view-enter {
-  animation: viewEnter 0.42s var(--spring-ease) both;
+  animation: viewEnter 0.42s var(--spring-ease) backwards;
 }
 
 .animate-modal-pop {
-  animation: modalPop 0.36s var(--spring-ease) both;
+  animation: modalPop 0.36s var(--spring-ease) backwards;
 }
 
 .animate-card-in {
-  animation: cardFloatIn 0.45s var(--spring-ease) both;
+  animation: cardFloatIn 0.45s var(--spring-ease) backwards;
 }
 
 .animate-feedback-toast {

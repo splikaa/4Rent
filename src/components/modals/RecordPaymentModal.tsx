@@ -30,6 +30,7 @@ import {
   getBillTabStatusMeta,
   getDepositStatusMeta,
 } from '../../utils/depositStatusUi';
+import { ModalPortal } from '../common/ModalPortal';
 
 export type PaymentModalMode = 'current_month' | 'required_deposit';
 
@@ -267,142 +268,211 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     : room.name;
 
   return (
-    <div
-      className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Record Payment for ${roomDisplayTitle}`}
-    >
-      <div className="w-full max-w-lg rounded-3xl bg-[#161C28] border border-[#28334A] p-5 sm:p-7 shadow-2xl my-auto max-h-[92dvh] overflow-y-auto animate-modal-pop">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="min-w-0">
-            <h3 className="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
-              <CreditCard className="w-5 h-5 text-emerald-400 shrink-0" />
-              <span className="truncate">Record Payment • {roomDisplayTitle}</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {room.tenant?.fullName || activeBill?.tenantName || 'Occupied Tenant'} • Choose payment type below
-            </p>
+    <ModalPortal isOpen={isOpen}>
+      <div
+        className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Record Payment for ${roomDisplayTitle}`}
+      >
+        <div className="w-full max-w-lg max-h-[calc(100dvh-32px)] rounded-3xl bg-[#161C28] border border-[#28334A] shadow-2xl flex flex-col overflow-hidden min-w-0 animate-modal-pop">
+          {/* Pinned Header */}
+          <div className="flex items-start justify-between gap-3 px-5 sm:px-6 pt-5 pb-4 border-b border-[#222E44] shrink-0">
+            <div className="min-w-0">
+              <h3 className="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span className="truncate">Record Payment • {roomDisplayTitle}</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
+                {room.tenant?.fullName || activeBill?.tenantName || 'Occupied Tenant'} • Choose payment type below
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close payment modal"
+              className="w-9 h-9 rounded-xl bg-[#0F1522] border border-[#253148] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close payment modal"
-            className="w-9 h-9 rounded-xl bg-[#0F1522] border border-[#253148] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0 transition"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
 
-        {/* Clear Payment Type Selector: Current Month Bill vs Required Deposit */}
-        <div className="grid grid-cols-2 gap-2.5 mb-5" role="tablist" aria-label="Payment type">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'current_month'}
-            onClick={() => {
-              setMode('current_month');
-              setPayError(null);
-            }}
-            className={`rounded-2xl p-3 text-left border transition cursor-pointer ${
-              mode === 'current_month'
-                ? 'bg-emerald-500/15 border-emerald-400/70 shadow-lg shadow-emerald-500/10'
-                : 'bg-[#0D121B] border-[#243047] hover:border-slate-500'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-1.5">
-              <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-white">
-                <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>{currentPeriodLabel}</span>
-              </span>
-              <span
-                className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${billTabMeta.badgeClass}`}
-              >
-                {billTabMeta.label}
-              </span>
-            </div>
-            <div className="text-[11px] font-semibold text-slate-300 mt-1">
-              Current Month Bill
-            </div>
-            <div className="text-xs font-mono-num font-black text-amber-400 mt-0.5">
-              {billTabMeta.summaryText}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'required_deposit'}
-            onClick={() => {
-              setMode('required_deposit');
-              setPayError(null);
-            }}
-            className={`rounded-2xl p-3 text-left border transition cursor-pointer ${
-              mode === 'required_deposit'
-                ? 'bg-emerald-500/15 border-emerald-400/70 shadow-lg shadow-emerald-500/10'
-                : 'bg-[#0D121B] border-[#243047] hover:border-slate-500'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-1.5">
-              <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-white">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>Req. Deposit</span>
-              </span>
-              <span
-                className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${depositMeta.compactBadgeClass}`}
-              >
-                {depositMeta.shortLabel}
-              </span>
-            </div>
-            <div className="text-[11px] font-semibold text-slate-300 mt-1">
-              Security Deposit
-            </div>
-            <div className="text-xs font-mono-num font-black text-emerald-400 mt-0.5">
-              {depositStatus.remaining > 0
-                ? `${formatPeso(depositStatus.remaining)} due`
-                : `Paid (${formatPeso(depositStatus.paid)})`}
-            </div>
-          </button>
-        </div>
-
-        {/* Mode 1: Current Month Bill Payment */}
-        {mode === 'current_month' && !activeBill ? (
-          <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 text-center space-y-3">
-            <p className="text-sm font-bold text-white">
-              No active receipt yet for {currentPeriodLabel}
-            </p>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Generate the {currentPeriodLabel} bill first to record monthly rent &amp; electricity payments, or switch to the <strong className="text-emerald-300">Req. Deposit</strong> tab above to collect the tenant&apos;s Required Deposit now.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-              {onOpenGenerateBill && (
+          {/* Mode 1 Empty State vs Scrollable Form with Sticky Footer */}
+          {mode === 'current_month' && !activeBill ? (
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4 space-y-4">
+              {/* Clear Payment Type Selector: Current Month Bill vs Required Deposit */}
+              <div className="grid grid-cols-2 gap-2.5" role="tablist" aria-label="Payment type">
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={mode === 'current_month'}
                   onClick={() => {
-                    onClose();
-                    onOpenGenerateBill(room);
+                    setMode('current_month');
+                    setPayError(null);
                   }}
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
+                  className="rounded-2xl p-3 text-left border transition cursor-pointer bg-emerald-500/15 border-emerald-400/70 shadow-lg shadow-emerald-500/10"
                 >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Generate {currentPeriodLabel} Receipt</span>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-white min-w-0">
+                      <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">{currentPeriodLabel}</span>
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 ${billTabMeta.badgeClass}`}
+                    >
+                      {billTabMeta.label}
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-semibold text-slate-300 mt-1">
+                    Current Month Bill
+                  </div>
+                  <div className="text-xs font-mono-num font-black text-amber-400 mt-0.5 truncate">
+                    {billTabMeta.summaryText}
+                  </div>
                 </button>
-              )}
-              {depositStatus.remaining > 0 && (
+
                 <button
                   type="button"
-                  onClick={() => setMode('required_deposit')}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
+                  role="tab"
+                  aria-selected={false}
+                  onClick={() => {
+                    setMode('required_deposit');
+                    setPayError(null);
+                  }}
+                  className="rounded-2xl p-3 text-left border transition cursor-pointer bg-[#0D121B] border-[#243047] hover:border-slate-500"
                 >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Pay Required Deposit</span>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-white min-w-0">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="truncate">Req. Deposit</span>
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 ${depositMeta.compactBadgeClass}`}
+                    >
+                      {depositMeta.shortLabel}
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-semibold text-slate-300 mt-1">
+                    Security Deposit
+                  </div>
+                  <div className="text-xs font-mono-num font-black text-emerald-400 mt-0.5 truncate">
+                    {depositStatus.remaining > 0
+                      ? `${formatPeso(depositStatus.remaining)} due`
+                      : `Paid (${formatPeso(depositStatus.paid)})`}
+                  </div>
                 </button>
-              )}
+              </div>
+
+              <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-5 text-center space-y-3">
+                <p className="text-sm font-bold text-white">
+                  No active receipt yet for {currentPeriodLabel}
+                </p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Generate the {currentPeriodLabel} bill first to record monthly rent &amp; electricity payments, or switch to the <strong className="text-emerald-300">Req. Deposit</strong> tab above to collect the tenant&apos;s Required Deposit now.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  {onOpenGenerateBill && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenGenerateBill(room);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Generate {currentPeriodLabel} Receipt</span>
+                    </button>
+                  )}
+                  {depositStatus.remaining > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setMode('required_deposit')}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer transition"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Pay Required Deposit</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          ) : (
+            <form
+              onSubmit={handleSubmit}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4 space-y-4">
+                {/* Clear Payment Type Selector: Current Month Bill vs Required Deposit */}
+                <div className="grid grid-cols-2 gap-2.5" role="tablist" aria-label="Payment type">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'current_month'}
+                    onClick={() => {
+                      setMode('current_month');
+                      setPayError(null);
+                    }}
+                    className={`rounded-2xl p-3 text-left border transition cursor-pointer ${
+                      mode === 'current_month'
+                        ? 'bg-emerald-500/15 border-emerald-400/70 shadow-lg shadow-emerald-500/10'
+                        : 'bg-[#0D121B] border-[#243047] hover:border-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-white min-w-0">
+                        <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="truncate">{currentPeriodLabel}</span>
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 ${billTabMeta.badgeClass}`}
+                      >
+                        {billTabMeta.label}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-semibold text-slate-300 mt-1">
+                      Current Month Bill
+                    </div>
+                    <div className="text-xs font-mono-num font-black text-amber-400 mt-0.5 truncate">
+                      {billTabMeta.summaryText}
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === 'required_deposit'}
+                    onClick={() => {
+                      setMode('required_deposit');
+                      setPayError(null);
+                    }}
+                    className={`rounded-2xl p-3 text-left border transition cursor-pointer ${
+                      mode === 'required_deposit'
+                        ? 'bg-emerald-500/15 border-emerald-400/70 shadow-lg shadow-emerald-500/10'
+                        : 'bg-[#0D121B] border-[#243047] hover:border-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-white min-w-0">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="truncate">Req. Deposit</span>
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 ${depositMeta.compactBadgeClass}`}
+                      >
+                        {depositMeta.shortLabel}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-semibold text-slate-300 mt-1">
+                      Security Deposit
+                    </div>
+                    <div className="text-xs font-mono-num font-black text-emerald-400 mt-0.5 truncate">
+                      {depositStatus.remaining > 0
+                        ? `${formatPeso(depositStatus.remaining)} due`
+                        : `Paid (${formatPeso(depositStatus.paid)})`}
+                    </div>
+                  </button>
+                </div>
             {mode === 'current_month' && activeBill && billComponents ? (
               <>
                 <div className="rounded-2xl bg-[#0D121B] border border-[#222C3F] p-4 text-xs space-y-1.5">
@@ -834,29 +904,33 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-end gap-2.5 pt-3 border-t border-[#222E44]">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2.5 rounded-2xl bg-[#1F2738] hover:bg-[#273146] text-slate-300 text-xs font-bold cursor-pointer transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer btn-fluid shadow-lg shadow-emerald-500/20"
-              >
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>
-                  {mode === 'required_deposit'
-                    ? 'Save Required Deposit'
-                    : `Pay ${activeBill?.billingPeriod || currentPeriodLabel}`}
-                </span>
-              </button>
-            </div>
-          </form>
-        )}
+              </div>
+
+              {/* Sticky Footer: Always Visible Cancel & Save Action */}
+              <div className="shrink-0 px-5 sm:px-6 py-3.5 border-t border-[#222E44] bg-[#161C28] flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2.5 rounded-2xl bg-[#1F2738] hover:bg-[#273146] text-slate-300 text-xs font-bold cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer btn-fluid shadow-lg shadow-emerald-500/20"
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>
+                    {mode === 'required_deposit'
+                      ? 'Save Required Deposit'
+                      : `Pay ${activeBill?.billingPeriod || currentPeriodLabel}`}
+                  </span>
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

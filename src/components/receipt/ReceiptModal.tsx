@@ -47,6 +47,7 @@ import { useResolvedMeterImage } from '../../utils/resolveMeterImage';
 import { shareReceiptDocument } from '../../services/notificationService';
 import { MeterPhotoLightboxModal } from '../ocr/MeterPhotoLightboxModal';
 import { PrintableA4Receipt } from './PrintableA4Receipt';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface ReceiptModalProps {
   bill: BillRecord | null;
@@ -428,13 +429,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   );
 
   return (
-    <div
-      className="receipt-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 md:p-6 overflow-y-auto"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Official Statement and Receipt"
-    >
-      <div className="receipt-print-shell w-full max-w-3xl rounded-2xl sm:rounded-3xl bg-[#111724] border border-[#243148] shadow-2xl overflow-hidden my-auto flex flex-col max-h-[94dvh] animate-modal-pop relative">
+    <ModalPortal isOpen={Boolean(bill)} disablePortal>
+      <div
+        className="receipt-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Official Statement and Receipt"
+      >
+        <div className="receipt-print-shell w-full max-w-3xl max-h-[calc(100dvh-32px)] rounded-2xl sm:rounded-3xl bg-[#111724] border border-[#243148] shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop relative">
         {/* Modal Top Control Header (Hidden when printed) */}
         <div className="no-print flex items-center justify-between gap-2.5 px-4 sm:px-6 py-3 bg-[#162030] border-b border-[#243148] shrink-0">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -778,6 +780,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         roiCropUrl={lightboxState.roiCropUrl}
         readingValue={lightboxState.readingValue}
       />
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

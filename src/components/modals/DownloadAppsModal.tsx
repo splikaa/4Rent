@@ -18,6 +18,7 @@ import {
 import { BrandLogo } from '../BrandLogo';
 import { isIOSDevice, isMobileDevice } from '../../utils/billingCalculator';
 import { resolveConfiguredPropertyCode } from '../../utils/propertyCode';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface DownloadAppsModalProps {
   isOpen: boolean;
@@ -70,15 +71,16 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="download-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-md animate-fade-in"
-    >
+    <ModalPortal isOpen={isOpen}>
       <div
-        className="relative w-full max-w-2xl bg-[#0F1522] border border-[#243147] rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-view-enter text-slate-100"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="download-modal-title"
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md overflow-hidden overscroll-none animate-fade-in"
       >
+        <div
+          className="relative w-full max-w-2xl max-h-[calc(100dvh-32px)] bg-[#0F1522] border border-[#243147] rounded-3xl shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop text-slate-100"
+        >
         {/* Header Bar */}
         <div className="relative px-6 py-5 bg-gradient-to-r from-[#172033] via-[#1A2438] to-[#121927] border-b border-[#243147] flex items-center justify-between">
           <div className="flex items-center gap-3.5">
@@ -607,7 +609,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-[#0C111B] border-t border-[#202B3E] flex items-center justify-between">
+        <div className="shrink-0 px-6 py-4 bg-[#0C111B] border-t border-[#202B3E] flex items-center justify-between">
           <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span>Official 4Rent Builds • Verified &amp; Signed</span>
@@ -621,7 +623,8 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
             Close
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

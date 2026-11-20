@@ -55,6 +55,7 @@ import {
 } from '../../services/storageService';
 import { useResolvedMeterImage } from '../../utils/resolveMeterImage';
 import { AdvanceLedgerList } from '../advance/AdvanceLedgerList';
+import { ModalPortal } from '../common/ModalPortal';
 
 const MeterLogThumbnail: React.FC<{ cropUrl?: string; photoUrl?: string }> = ({
   cropUrl,
@@ -169,8 +170,14 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   const activeElectricRate = activeBill?.electricRate ?? globalElectricRate;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
-      <div className="w-full max-w-4xl bg-[#101622] border border-[#232F46] rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[94dvh] flex flex-col animate-modal-pop">
+    <ModalPortal isOpen={Boolean(room)}>
+      <div
+        className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Room Details for ${roomTitle}`}
+      >
+        <div className="w-full max-w-4xl max-h-[calc(100dvh-32px)] bg-[#101622] border border-[#232F46] rounded-3xl shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop">
         {/* Header: Aligned & Wrap-Proof for All Screen Sizes */}
         <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-[#202B3F] bg-[#141C2B] shrink-0">
           <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -793,7 +800,8 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             </div>
           )}
         </div>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

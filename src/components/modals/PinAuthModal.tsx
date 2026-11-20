@@ -7,6 +7,7 @@ import {
   verifyDeviceBiometrics,
 } from '../../services/authService';
 import { PinKeypad } from '../security/PinKeypad';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface PinAuthModalProps {
   isOpen: boolean;
@@ -112,13 +113,14 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
-      <div className="w-full max-w-sm rounded-2xl sm:rounded-3xl bg-[#151B26] border border-[#28334A] p-5 sm:p-6 shadow-2xl select-none animate-modal-pop my-auto">
+    <ModalPortal isOpen={isOpen}>
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="w-full max-w-sm max-h-[calc(100dvh-32px)] rounded-2xl sm:rounded-3xl bg-[#151B26] border border-[#28334A] p-5 sm:p-6 shadow-2xl select-none flex flex-col overflow-y-auto overscroll-contain min-w-0 animate-modal-pop">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
@@ -206,7 +208,8 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
           biometricActive={hasBioEnrolled}
           enableKeyboard={isOpen}
         />
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

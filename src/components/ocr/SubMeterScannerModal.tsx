@@ -63,6 +63,7 @@ import {
   SubMeterHardwareInspection,
 } from '../../services/ocrService';
 import { saveMeterMasterImage } from '../../services/idbDatabase';
+import { ModalPortal } from '../common/ModalPortal';
 import { computeLandscapeFrameProjection } from '../../utils/cameraGeometry';
 import { peekCachedMeterImage, resolveMeterImageSrc } from '../../utils/resolveMeterImage';
 import { MeterPhotoLightboxModal } from './MeterPhotoLightboxModal';
@@ -1637,8 +1638,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-5xl rounded-3xl bg-[#141A25] border border-[#263147] shadow-2xl overflow-hidden my-auto max-h-[94dvh] flex flex-col animate-modal-pop">
+    <ModalPortal isOpen={isOpen}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sub-Meter Scanner and Bill Generator"
+      >
+        <div className="w-full max-w-5xl max-h-[calc(100dvh-32px)] rounded-3xl bg-[#141A25] border border-[#263147] shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 bg-[#192130] border-b border-[#263147] shrink-0">
           <div className="flex items-center gap-3">
@@ -3386,19 +3393,24 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       </div>
 
       {/* Mechanical Cyclometer Register Guide Modal */}
-      {showRegisterGuide && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-3xl bg-[#141A25] border border-amber-500/40 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
+      <ModalPortal isOpen={showRegisterGuide}>
+        <div
+          className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-hidden overscroll-none"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mechanical Cyclometer Guide"
+        >
+          <div className="w-full max-w-md max-h-[calc(100dvh-32px)] rounded-3xl bg-[#141A25] border border-amber-500/40 shadow-2xl flex flex-col overflow-hidden min-w-0 animate-modal-pop">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-[#232F42] shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
                   <Info className="w-4 h-4" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-white">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-extrabold text-white truncate">
                     Mechanical Cyclometer Guide
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-400 truncate">
                     How sub-meter dials are read
                   </p>
                 </div>
@@ -3406,11 +3418,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowRegisterGuide(false)}
-                className="w-7 h-7 rounded-lg bg-[#1B2333] hover:bg-[#25324A] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition"
+                aria-label="Close register guide"
+                className="w-7 h-7 rounded-lg bg-[#1B2333] hover:bg-[#25324A] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-4 space-y-4">
 
             {/* Visual Drum Counter Demonstration */}
             <div className="rounded-2xl bg-[#090D14] border border-[#232F42] p-4 text-center space-y-3">
@@ -3467,16 +3482,20 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               </ul>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowRegisterGuide(false)}
-              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition"
-            >
-              Understood
-            </button>
+            </div>
+
+            <div className="shrink-0 px-6 py-4 border-t border-[#232F42] bg-[#141A25]">
+              <button
+                type="button"
+                onClick={() => setShowRegisterGuide(false)}
+                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition"
+              >
+                Understood
+              </button>
+            </div>
           </div>
         </div>
-      )}
+      </ModalPortal>
 
       {/* 1:1 Pixel Inspection Lightbox Modal */}
       <MeterPhotoLightboxModal
@@ -3516,6 +3535,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
           }}
         />
       )}
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

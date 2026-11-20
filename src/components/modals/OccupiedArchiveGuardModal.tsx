@@ -13,6 +13,7 @@ import {
   getBillingMonthSchedule,
   getCurrentBillingMonthKey,
 } from '../../utils/rentSchedule';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface OccupiedArchiveGuardModalProps {
   room: Room | null;
@@ -70,33 +71,44 @@ export const OccupiedArchiveGuardModal: React.FC<
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-lg rounded-3xl bg-[#151B26] border border-amber-500/40 shadow-2xl overflow-hidden my-6 animate-modal-pop">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 px-6 py-4 bg-[#1B2232] border-b border-[#28334A]">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/35 flex items-center justify-center text-amber-400 shrink-0">
-              <AlertTriangle className="w-5 h-5" />
+    <ModalPortal isOpen={Boolean(room)}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Occupied Room Direct Archive Blocked"
+      >
+        <div className="w-full max-w-lg max-h-[calc(100dvh-32px)] rounded-3xl bg-[#151B26] border border-amber-500/40 shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3 px-6 py-4 bg-[#1B2232] border-b border-[#28334A] shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/35 flex items-center justify-center text-amber-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-extrabold text-white">
+                  Occupied Room • Direct Archive Blocked
+                </h3>
+                <p className="text-xs text-amber-300 mt-0.5">
+                  {room.name} is currently occupied and still has active stay availability
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-base font-extrabold text-white">
-                Occupied Room • Direct Archive Blocked
-              </h3>
-              <p className="text-xs text-amber-300 mt-0.5">
-                {room.name} is currently occupied and still has active stay availability
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close archive guard modal"
+              className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
 
-        <form onSubmit={handleConfirm} className="p-6 space-y-4">
+          <form
+            onSubmit={handleConfirm}
+            className="flex flex-col flex-1 min-h-0 overflow-hidden"
+          >
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 space-y-4">
           {/* Active Tenant & Remaining Days Alert */}
           <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-4 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
@@ -204,24 +216,27 @@ export const OccupiedArchiveGuardModal: React.FC<
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2.5 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl bg-[#0E131C] hover:bg-[#192232] border border-[#252F42] text-xs font-bold text-slate-300 cursor-pointer"
-            >
-              Keep Room Active
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
-            >
-              <Archive className="w-3.5 h-3.5" />
-              <span>Confirm Archive with Reason</span>
-            </button>
-          </div>
-        </form>
+            </div>
+
+            <div className="shrink-0 flex items-center justify-end gap-2.5 px-6 py-4 border-t border-[#28334A] bg-[#151B26]">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 rounded-xl bg-[#0E131C] hover:bg-[#192232] border border-[#252F42] text-xs font-bold text-slate-300 cursor-pointer"
+              >
+                Keep Room Active
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>Confirm Archive with Reason</span>
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

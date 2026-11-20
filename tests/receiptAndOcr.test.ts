@@ -349,3 +349,146 @@ test('PrintableA4Receipt places Rate in Billing Period, includes cropped meter p
     'Locked historical receipt must never display a later tenant live deposit amount'
   );
 });
+
+test('Body scroll lock is reference-counted across stacked modals and restores original styles cleanly', async () => {
+  const {
+    acquireBodyScrollLock,
+    releaseBodyScrollLock,
+    getActiveScrollLockCount,
+    resetBodyScrollLockForTests,
+  } = await import('../src/utils/bodyScrollLock');
+
+  resetBodyScrollLockForTests();
+
+  const fakeDoc = {
+    documentElement: {
+      style: { overflow: 'auto', overscrollBehaviorY: '' },
+      clientWidth: 1264,
+    },
+    body: {
+      style: { overflow: '', paddingRight: '4px', overscrollBehaviorY: '' },
+    },
+  };
+  const fakeWin = { innerWidth: 1280 }; // 16px scrollbar width
+
+  // Modal 1 opens
+  acquireBodyScrollLock(fakeDoc as any, fakeWin as any);
+  assert.equal(getActiveScrollLockCount(), 1);
+  assert.equal(fakeDoc.documentElement.style.overflow, 'hidden');
+  assert.equal(fakeDoc.body.style.overflow, 'hidden');
+  assert.equal(fakeDoc.body.style.paddingRight, '16px');
+
+  // Modal 2 opens on top (stacked)
+  acquireBodyScrollLock(fakeDoc as any, fakeWin as any);
+  assert.equal(getActiveScrollLockCount(), 2);
+  assert.equal(fakeDoc.body.style.overflow, 'hidden');
+
+  // Modal 2 closes -> lock MUST remain active for Modal 1
+  releaseBodyScrollLock(fakeDoc as any);
+  assert.equal(getActiveScrollLockCount(), 1);
+  assert.equal(fakeDoc.documentElement.style.overflow, 'hidden');
+  assert.equal(fakeDoc.body.style.overflow, 'hidden');
+
+  // Modal 1 closes -> exact prior styles restored
+  releaseBodyScrollLock(fakeDoc as any);
+  assert.equal(getActiveScrollLockCount(), 0);
+  assert.equal(fakeDoc.documentElement.style.overflow, 'auto');
+  assert.equal(fakeDoc.body.style.overflow, '');
+  assert.equal(fakeDoc.body.style.paddingRight, '4px');
+
+  // Extra release never underflows
+  releaseBodyScrollLock(fakeDoc as any);
+  assert.equal(getActiveScrollLockCount(), 0);
+});
+
+test('Payment modals and view-hosted modals enforce viewport-fixed max-h-[calc(100dvh-32px)], internal scroll, sticky footer, and Portal isolation', async () => {
+  const React = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { RecordPaymentModal } = await import(
+    '../src/components/modals/RecordPaymentModal'
+  );
+
+  const sampleRoom = makeRoom({
+    id: 'room-modal-test',
+    securityDeposit: 4500,
+    securityDepositPaid: 1000,
+    unpaidBalance: 1754,
+  });
+  const sampleBill: import('../src/types/rental').BillRecord = {
+    id: 'bill-modal-test',
+    receiptNo: '4R-202611-99',
+    roomId: sampleRoom.id,
+    roomName: sampleRoom.name,
+    tenantName: 'Yuri Santos',
+    billingPeriod: 'Nov 2026',
+    createdAt: '2026-11-15T08:00:00.000Z',
+    dueDate: '2026-11-10T00:00:00.000Z',
+    baseRent: 500,
+    prevReading: 100,
+    currReading: 200,
+    consumptionKwh: 100,
+    electricRate: 12.54,
+    electricTotal: 1254,
+    previousBalanceCarryOver: 0,
+    securityDepositRequired: 4500,
+    depositApplied: 0,
+    totalAmountDue: 1754,
+    amountPaid: 0,
+    overpaymentToAdvance: 0,
+    remainingBalance: 1754,
+    status: 'unpaid',
+    paymentHistory: [],
+    updatedAt: '2026-11-15T08:00:00.000Z',
+  };
+
+  const modalHtml = renderToStaticMarkup(
+    React.createElement(RecordPaymentModal, {
+      isOpen: true,
+      room: sampleRoom,
+      activeBill: sampleBill,
+      initialMode: 'current_month',
+      onClose: () => {},
+      onRecordBillPayment: () => {},
+      onRecordRequiredDepositPayment: () => {},
+    })
+  );
+
+  assert.ok(modalHtml.includes('fixed inset-0'), 'Modal overlay must use viewport-relative fixed inset-0');
+  assert.ok(
+    modalHtml.includes('max-h-[calc(100dvh-32px)]'),
+    'Modal panel must constrain height to calc(100dvh - 32px)'
+  );
+  assert.ok(
+    modalHtml.includes('overflow-y-auto'),
+    'Modal body must scroll independently'
+  );
+  assert.ok(
+    modalHtml.includes('shrink-0'),
+    'Modal header and footer must remain pinned (shrink-0)'
+  );
+
+  // Verify view-hosted modals use ModalPortal & viewport height constraint
+  const allPaymentsSrc = fs.readFileSync(
+    path.join(process.cwd(), 'src/components/payments/AllPaymentsView.tsx'),
+    'utf8'
+  );
+  assert.ok(allPaymentsSrc.includes('ModalPortal'), 'AllPaymentsView modal must render through ModalPortal');
+  assert.ok(allPaymentsSrc.includes('max-h-[calc(100dvh-32px)]'), 'AllPaymentsView modal must use calc(100dvh - 32px)');
+
+  const inquiriesSrc = fs.readFileSync(
+    path.join(process.cwd(), 'src/components/inquiries/InquiriesBookingsView.tsx'),
+    'utf8'
+  );
+  assert.ok(inquiriesSrc.includes('ModalPortal'), 'InquiriesBookingsView modal must render through ModalPortal');
+  assert.ok(inquiriesSrc.includes('max-h-[calc(100dvh-32px)]'), 'InquiriesBookingsView modal must use calc(100dvh - 32px)');
+
+  const cssSrc = fs.readFileSync(path.join(process.cwd(), 'src/index.css'), 'utf8');
+  assert.ok(
+    cssSrc.includes('animation: viewEnter 0.42s var(--spring-ease) backwards;'),
+    '.animate-view-enter must use backwards fill mode so it never retains a fixed-positioning containing block'
+  );
+  assert.ok(
+    cssSrc.includes('animation: modalPop 0.36s var(--spring-ease) backwards;'),
+    '.animate-modal-pop must use backwards fill mode so it never traps nested overlays'
+  );
+});

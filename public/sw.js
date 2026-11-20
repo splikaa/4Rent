@@ -1,4 +1,4 @@
-const CACHE_NAME = '4rent-management-system-v1.0.3-pay-deposit';
+const CACHE_NAME = '4rent-management-system-v1.0.4-modal-viewport';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

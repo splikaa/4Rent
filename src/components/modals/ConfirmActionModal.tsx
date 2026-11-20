@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Archive, CheckCircle2, Trash2, UserMinus, X } from 'lucide-react';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface ConfirmActionModalProps {
   isOpen: boolean;
@@ -66,80 +67,91 @@ export const ConfirmActionModal: React.FC<ConfirmActionModalProps> = ({
   const Icon = ICON_MAP[iconType];
 
   return (
-    <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="w-full max-w-md rounded-3xl bg-[#151B26] border border-[#28334A] p-6 shadow-2xl animate-modal-pop">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <div
-              className={`w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 ${badgeStyle}`}
-            >
-              <Icon className="w-5 h-5" />
+    <ModalPortal isOpen={isOpen}>
+      <div
+        className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="w-full max-w-md max-h-[calc(100dvh-32px)] rounded-3xl bg-[#151B26] border border-[#28334A] shadow-2xl flex flex-col overflow-hidden min-w-0 animate-modal-pop">
+          <div className="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-[#222C3F] shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className={`w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 ${badgeStyle}`}
+              >
+                <Icon className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-extrabold text-white">{title}</h3>
+                <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                  {description}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-base font-extrabold text-white">{title}</h3>
-              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                {description}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
-            aria-label="Cancel confirmation"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {details.length > 0 && (
-          <ul className="mb-4 rounded-2xl bg-[#0E131C] border border-[#222C3F] p-3.5 space-y-1.5 text-xs text-slate-300">
-            {details.map((line, idx) => (
-              <li key={idx} className="flex items-start gap-2">
-                <span className="text-amber-400 font-bold">•</span>
-                <span>{line}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {reasonOptions && reasonOptions.length > 0 && onChangeReason && (
-          <div className="mb-4">
-            <label className="block text-xs font-bold text-slate-300 mb-1.5">
-              {reasonLabel || 'Select Reason'}
-            </label>
-            <select
-              value={selectedReason || reasonOptions[0]}
-              onChange={(e) => onChangeReason(e.target.value)}
-              className="w-full h-11 rounded-xl bg-[#0E131C] border border-[#253148] px-3 text-xs font-semibold text-white focus:border-amber-500 focus:outline-none"
+            <button
+              type="button"
+              onClick={onCancel}
+              className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
+              aria-label="Cancel confirmation"
             >
-              {reasonOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+              <X className="w-4 h-4" />
+            </button>
           </div>
-        )}
 
-        <div className="flex items-center justify-end gap-2.5 pt-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2.5 rounded-2xl bg-[#1F2738] hover:bg-[#28334A] text-slate-200 text-xs font-bold cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className={`px-5 py-2.5 rounded-2xl font-extrabold text-xs flex items-center gap-1.5 shadow-lg transition cursor-pointer ${buttonStyle}`}
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>{confirmLabel}</span>
-          </button>
+          {(details.length > 0 || (reasonOptions && reasonOptions.length > 0 && onChangeReason)) && (
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-4 space-y-4">
+              {details.length > 0 && (
+                <ul className="rounded-2xl bg-[#0E131C] border border-[#222C3F] p-3.5 space-y-1.5 text-xs text-slate-300">
+                  {details.map((line, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-amber-400 font-bold">•</span>
+                      <span>{line}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {reasonOptions && reasonOptions.length > 0 && onChangeReason && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    {reasonLabel || 'Select Reason'}
+                  </label>
+                  <select
+                    value={selectedReason || reasonOptions[0]}
+                    onChange={(e) => onChangeReason(e.target.value)}
+                    className="w-full h-11 rounded-xl bg-[#0E131C] border border-[#253148] px-3 text-xs font-semibold text-white focus:border-amber-500 focus:outline-none"
+                  >
+                    {reasonOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="shrink-0 flex items-center justify-end gap-2.5 px-6 py-4 border-t border-[#222C3F] bg-[#151B26]">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2.5 rounded-2xl bg-[#1F2738] hover:bg-[#28334A] text-slate-200 text-xs font-bold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              className={`px-5 py-2.5 rounded-2xl font-extrabold text-xs flex items-center gap-1.5 shadow-lg transition cursor-pointer ${buttonStyle}`}
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{confirmLabel}</span>
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

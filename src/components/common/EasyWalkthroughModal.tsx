@@ -20,6 +20,7 @@ import {
   GuideFlowId,
 } from '../../data/guideFlows';
 import { FlowSpriteStage, GuideBuddySprite } from '../guide/GuideSprites';
+import { ModalPortal } from './ModalPortal';
 
 interface EasyWalkthroughModalProps {
   isOpen: boolean;
@@ -142,8 +143,14 @@ export const EasyWalkthroughModal: React.FC<EasyWalkthroughModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-5 overflow-y-auto no-print">
-      <div className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl bg-[#131A28] border border-amber-500/35 shadow-2xl overflow-hidden animate-modal-pop">
+    <ModalPortal isOpen={isOpen}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4 overflow-hidden overscroll-none no-print"
+        role="dialog"
+        aria-modal="true"
+        aria-label="4Rent Quick Guide"
+      >
+        <div className="w-full max-w-4xl max-h-[calc(100dvh-32px)] flex flex-col rounded-3xl bg-[#131A28] border border-amber-500/35 shadow-2xl overflow-hidden min-w-0 animate-modal-pop">
         {/* Top Header */}
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 bg-[#182234] border-b border-[#26344E] shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -404,7 +411,8 @@ export const EasyWalkthroughModal: React.FC<EasyWalkthroughModalProps> = ({
             )}
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

@@ -21,6 +21,7 @@ import {
   toCentavos,
 } from '../../utils/financialEngine';
 import { AdvanceLedgerList } from '../advance/AdvanceLedgerList';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface AdvanceBalanceModalProps {
   room: Room | null;
@@ -131,13 +132,14 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-2.5 sm:p-4 overflow-y-auto"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Advance Balance | ${room.name}`}
-    >
-      <div className="w-full max-w-xl rounded-2xl sm:rounded-3xl bg-[#151B26] border border-[#263147] shadow-2xl overflow-hidden my-auto max-h-[94dvh] flex flex-col animate-modal-pop">
+    <ModalPortal isOpen={Boolean(room)}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-hidden overscroll-none"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Advance Balance | ${room.name}`}
+      >
+        <div className="w-full max-w-xl max-h-[calc(100dvh-32px)] rounded-2xl sm:rounded-3xl bg-[#151B26] border border-[#263147] shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop">
         {/* Header */}
         <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 bg-[#192130] border-b border-[#263147] shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -438,6 +440,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

@@ -11,6 +11,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { getMeterMasterImage } from '../../services/idbDatabase';
+import { ModalPortal } from '../common/ModalPortal';
 
 export interface MeterPhotoLightboxModalProps {
   isOpen: boolean;
@@ -244,13 +245,14 @@ export const MeterPhotoLightboxModal: React.FC<MeterPhotoLightboxModalProps> = (
   if (!isOpen) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      className="fixed inset-0 z-[120] bg-slate-950/95 backdrop-blur-md flex flex-col select-none overflow-hidden"
-      onMouseUp={handleMouseUp}
-    >
+    <ModalPortal isOpen={isOpen}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="fixed inset-0 z-[120] bg-slate-950/95 backdrop-blur-md flex flex-col select-none overflow-hidden overscroll-none no-print"
+        onMouseUp={handleMouseUp}
+      >
       {/* Top Header */}
       <header className="h-14 sm:h-16 px-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-white z-10 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
@@ -444,7 +446,8 @@ export const MeterPhotoLightboxModal: React.FC<MeterPhotoLightboxModalProps> = (
           )}
         </div>
       </footer>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };
 

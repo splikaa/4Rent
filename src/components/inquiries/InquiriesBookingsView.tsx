@@ -17,6 +17,7 @@ import {
   formatPhoneNumber,
   maskPhoneNumber,
 } from '../../utils/billingCalculator';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface InquiriesBookingsViewProps {
   rooms: Room[];
@@ -273,41 +274,53 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
       </div>
 
       {/* Add Inquiry / Booking Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-3xl bg-[#151B26] border border-[#28334A] p-6 sm:p-7 shadow-2xl animate-modal-pop">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-lg font-extrabold text-white">
+      <ModalPortal isOpen={isModalOpen}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-hidden overscroll-none"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Book Vacant Room or Log Inquiry"
+        >
+          <div className="w-full max-w-md max-h-[calc(100dvh-32px)] rounded-3xl bg-[#151B26] border border-[#28334A] shadow-2xl flex flex-col overflow-hidden min-w-0 animate-modal-pop">
+            <div className="flex items-center justify-between gap-3 px-5 sm:px-6 pt-5 pb-4 border-b border-[#222E44] shrink-0">
+              <h3 className="text-base sm:text-lg font-extrabold text-white truncate">
                 Book Vacant Room / Log Inquiry
               </h3>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-white cursor-pointer"
+                aria-label="Close inquiry modal"
+                className="w-9 h-9 rounded-xl bg-[#0E131C] border border-[#253148] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0 transition"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             {vacantRooms.length === 0 ? (
-              <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-5 text-center space-y-3">
-                <p className="text-xs font-bold text-amber-300">
-                  All rooms are currently Occupied!
-                </p>
-                <p className="text-xs text-slate-400">
-                  Occupied rooms are hidden from booking. Create a new room or
-                  mark a room as Vacant first to accept new bookings.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs cursor-pointer"
-                >
-                  Close
-                </button>
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-6">
+                <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-5 text-center space-y-3">
+                  <p className="text-xs font-bold text-amber-300">
+                    All rooms are currently Occupied!
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Occupied rooms are hidden from booking. Create a new room or
+                    mark a room as Vacant first to accept new bookings.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form
+                onSubmit={handleSubmit}
+                className="flex flex-col flex-1 min-h-0 overflow-hidden"
+              >
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4 space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     Select Available Vacant Room *
@@ -420,11 +433,13 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
                   </button>
                 </div>
 
-                <div className="flex justify-end gap-2.5 pt-3">
+                </div>
+
+                <div className="shrink-0 px-5 sm:px-6 py-3.5 border-t border-[#222E44] bg-[#151B26] flex justify-end gap-2.5">
                   <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className="px-4 py-2.5 rounded-2xl bg-[#1D2535] text-slate-300 text-xs font-bold cursor-pointer"
+                    className="px-4 py-2.5 rounded-2xl bg-[#1D2535] hover:bg-[#273146] text-slate-300 text-xs font-bold cursor-pointer transition"
                   >
                     Cancel
                   </button>
@@ -439,7 +454,7 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
             )}
           </div>
         </div>
-      )}
+      </ModalPortal>
     </div>
   );
 };
