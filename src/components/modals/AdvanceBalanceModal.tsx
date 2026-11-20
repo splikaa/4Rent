@@ -132,7 +132,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
   };
 
   return (
-    <ModalPortal isOpen={Boolean(room)}>
+    <ModalPortal isOpen={Boolean(room)} onRequestClose={onClose}>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-hidden overscroll-none"
         role="dialog"
@@ -168,7 +168,7 @@ export const AdvanceBalanceModal: React.FC<AdvanceBalanceModalProps> = ({
         </div>
 
         {/* Scrollable Content */}
-        <div className="p-4 sm:p-6 space-y-5 overflow-y-auto overscroll-contain min-w-0">
+        <div className="flex-1 min-h-0 p-4 sm:p-6 space-y-5 overflow-y-auto overscroll-contain min-w-0">
           {/* Balance Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-2xl bg-[#0E131C] border border-emerald-500/35 p-3.5 sm:p-4 min-w-0">

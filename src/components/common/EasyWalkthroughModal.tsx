@@ -143,7 +143,7 @@ export const EasyWalkthroughModal: React.FC<EasyWalkthroughModalProps> = ({
   };
 
   return (
-    <ModalPortal isOpen={isOpen}>
+    <ModalPortal isOpen={isOpen} onRequestClose={onClose}>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4 overflow-hidden overscroll-none no-print"
         role="dialog"

@@ -71,7 +71,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   };
 
   return (
-    <ModalPortal isOpen={isOpen}>
+    <ModalPortal isOpen={isOpen} onRequestClose={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -82,7 +82,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
           className="relative w-full max-w-2xl max-h-[calc(100dvh-32px)] bg-[#0F1522] border border-[#243147] rounded-3xl shadow-2xl overflow-hidden flex flex-col min-w-0 animate-modal-pop text-slate-100"
         >
         {/* Header Bar */}
-        <div className="relative px-6 py-5 bg-gradient-to-r from-[#172033] via-[#1A2438] to-[#121927] border-b border-[#243147] flex items-center justify-between">
+        <div className="shrink-0 relative px-6 py-5 bg-gradient-to-r from-[#172033] via-[#1A2438] to-[#121927] border-b border-[#243147] flex items-center justify-between">
           <div className="flex items-center gap-3.5">
             <BrandLogo size="sm" className="shadow-lg shadow-amber-500/20" />
             <div>
@@ -114,7 +114,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-[#202B3E] bg-[#0C111B] px-6">
+        <div className="shrink-0 flex border-b border-[#202B3E] bg-[#0C111B] px-6">
           <button
             type="button"
             onClick={() => setActiveTab('downloads')}
@@ -142,7 +142,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-5 sm:p-6 space-y-5 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-6 space-y-5">
           {activeTab === 'downloads' ? (
             <>
               {/* Option 1: 1-Click Native Desktop App (Zero Download • Zero Warnings - Desktop Only) */}

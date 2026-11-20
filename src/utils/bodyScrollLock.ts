@@ -19,6 +19,7 @@ interface ScrollLockDocument {
 
 interface ScrollLockWindow {
   innerWidth: number;
+  getComputedStyle?: (el: unknown) => { paddingRight?: string };
 }
 
 interface SavedScrollStyles {
@@ -71,13 +72,19 @@ export function acquireBodyScrollLock(
     const scrollbarWidth = targetWin
       ? Math.max(0, targetWin.innerWidth - targetDoc.documentElement.clientWidth)
       : 0;
+    const computedPaddingRight = targetWin?.getComputedStyle
+      ? parseFloat(targetWin.getComputedStyle(targetDoc.body)?.paddingRight || '0')
+      : parseFloat(targetDoc.body.style.paddingRight || '0');
+    const basePaddingRight = Number.isFinite(computedPaddingRight)
+      ? Math.max(0, computedPaddingRight)
+      : 0;
 
     targetDoc.documentElement.style.overflow = 'hidden';
     targetDoc.documentElement.style.overscrollBehaviorY = 'none';
     targetDoc.body.style.overflow = 'hidden';
     targetDoc.body.style.overscrollBehaviorY = 'none';
     if (scrollbarWidth > 0) {
-      targetDoc.body.style.paddingRight = `${scrollbarWidth}px`;
+      targetDoc.body.style.paddingRight = `${basePaddingRight + scrollbarWidth}px`;
     }
   }
 

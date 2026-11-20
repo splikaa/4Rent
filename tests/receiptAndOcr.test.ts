@@ -369,14 +369,21 @@ test('Body scroll lock is reference-counted across stacked modals and restores o
       style: { overflow: '', paddingRight: '4px', overscrollBehaviorY: '' },
     },
   };
-  const fakeWin = { innerWidth: 1280 }; // 16px scrollbar width
+  const fakeWin = {
+    innerWidth: 1280,
+    getComputedStyle: () => ({ paddingRight: '4px' }),
+  }; // 16px scrollbar width + 4px existing body padding -> 20px
 
   // Modal 1 opens
   acquireBodyScrollLock(fakeDoc as any, fakeWin as any);
   assert.equal(getActiveScrollLockCount(), 1);
   assert.equal(fakeDoc.documentElement.style.overflow, 'hidden');
   assert.equal(fakeDoc.body.style.overflow, 'hidden');
-  assert.equal(fakeDoc.body.style.paddingRight, '16px');
+  assert.equal(
+    fakeDoc.body.style.paddingRight,
+    '20px',
+    'Scrollbar compensation must add to existing body paddingRight instead of overwriting it'
+  );
 
   // Modal 2 opens on top (stacked)
   acquireBodyScrollLock(fakeDoc as any, fakeWin as any);
@@ -491,4 +498,86 @@ test('Payment modals and view-hosted modals enforce viewport-fixed max-h-[calc(1
     cssSrc.includes('animation: modalPop 0.36s var(--spring-ease) backwards;'),
     '.animate-modal-pop must use backwards fill mode so it never traps nested overlays'
   );
+
+  // Verify RecordPaymentModal renders the Payment Type tablist once (no duplicated tablist)
+  const recordPaymentSrc = fs.readFileSync(
+    path.join(process.cwd(), 'src/components/modals/RecordPaymentModal.tsx'),
+    'utf8'
+  );
+  const tablistMatches = recordPaymentSrc.match(/role="tablist"/g) || [];
+  assert.equal(
+    tablistMatches.length,
+    1,
+    'RecordPaymentModal must render role="tablist" once to preserve focus and avoid duplication'
+  );
+
+  // Verify flex-column scrollable body containers enforce flex-1 min-h-0 overscroll-contain
+  const flexBodyChecks: Array<{ file: string; needle: string }> = [
+    {
+      file: 'src/components/modals/DownloadAppsModal.tsx',
+      needle: 'flex-1 min-h-0 overflow-y-auto overscroll-contain',
+    },
+    {
+      file: 'src/components/ocr/SubMeterScannerModal.tsx',
+      needle: 'grid grid-cols-1 lg:grid-cols-12 overflow-y-auto overscroll-contain flex-1 min-h-0',
+    },
+    {
+      file: 'src/components/rooms/RoomDetailsModal.tsx',
+      needle: 'flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto overscroll-contain',
+    },
+    {
+      file: 'src/components/modals/AdvanceBalanceModal.tsx',
+      needle: 'flex-1 min-h-0 p-4 sm:p-6 space-y-5 overflow-y-auto overscroll-contain min-w-0',
+    },
+    {
+      file: 'src/components/receipt/ReceiptModal.tsx',
+      needle: 'flex-1 min-h-0 overflow-y-auto overscroll-contain',
+    },
+    {
+      file: 'src/components/modals/PinAuthModal.tsx',
+      needle: 'flex-1 min-h-0 overflow-y-auto overscroll-contain',
+    },
+  ];
+  for (const check of flexBodyChecks) {
+    const src = fs.readFileSync(path.join(process.cwd(), check.file), 'utf8');
+    assert.ok(
+      src.includes(check.needle),
+      `${check.file} scrollable body must include "${check.needle}"`
+    );
+  }
+});
+
+test('Modal Escape stack closes only the top-most open modal in LIFO order', async () => {
+  const {
+    pushModalEscapeHandler,
+    removeModalEscapeHandler,
+    dispatchTopModalEscape,
+    getModalEscapeStackSize,
+    resetModalEscapeStackForTests,
+  } = await import('../src/utils/modalStack');
+
+  resetModalEscapeStackForTests();
+  const closed: string[] = [];
+
+  const tokenA = pushModalEscapeHandler(() => closed.push('A'));
+  const tokenB = pushModalEscapeHandler(() => closed.push('B'));
+  const tokenC = pushModalEscapeHandler(() => closed.push('C'));
+  assert.equal(getModalEscapeStackSize(), 3);
+
+  // Escape closes only top-most modal C
+  assert.equal(dispatchTopModalEscape(), true);
+  assert.deepEqual(closed, ['C']);
+
+  // Unregister C and B out of order (e.g., B closes programmatically)
+  removeModalEscapeHandler(tokenB);
+  removeModalEscapeHandler(tokenC);
+  assert.equal(getModalEscapeStackSize(), 1);
+
+  // Next Escape closes A
+  assert.equal(dispatchTopModalEscape(), true);
+  assert.deepEqual(closed, ['C', 'A']);
+
+  removeModalEscapeHandler(tokenA);
+  assert.equal(getModalEscapeStackSize(), 0);
+  assert.equal(dispatchTopModalEscape(), false);
 });

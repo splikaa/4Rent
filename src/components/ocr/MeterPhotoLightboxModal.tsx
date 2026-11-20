@@ -245,7 +245,7 @@ export const MeterPhotoLightboxModal: React.FC<MeterPhotoLightboxModalProps> = (
   if (!isOpen) return null;
 
   return (
-    <ModalPortal isOpen={isOpen}>
+    <ModalPortal isOpen={isOpen} onRequestClose={onClose}>
       <div
         role="dialog"
         aria-modal="true"

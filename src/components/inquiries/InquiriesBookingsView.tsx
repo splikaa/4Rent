@@ -274,7 +274,10 @@ export const InquiriesBookingsView: React.FC<InquiriesBookingsViewProps> = ({
       </div>
 
       {/* Add Inquiry / Booking Modal */}
-      <ModalPortal isOpen={isModalOpen}>
+      <ModalPortal
+        isOpen={isModalOpen}
+        onRequestClose={() => setIsModalOpen(false)}
+      >
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-hidden overscroll-none"
           role="dialog"

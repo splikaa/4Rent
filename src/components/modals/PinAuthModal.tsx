@@ -70,19 +70,10 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
       }
     });
 
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopImmediatePropagation();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleEsc, true);
-
     return () => {
       active = false;
-      window.removeEventListener('keydown', handleEsc, true);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -113,37 +104,46 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
   };
 
   return (
-    <ModalPortal isOpen={isOpen}>
+    <ModalPortal
+      isOpen={isOpen}
+      onRequestClose={() => {
+        setPin('');
+        setError(null);
+        onClose();
+      }}
+    >
       <div
         className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-hidden overscroll-none"
         role="dialog"
         aria-modal="true"
         aria-label={title}
       >
-        <div className="w-full max-w-sm max-h-[calc(100dvh-32px)] rounded-2xl sm:rounded-3xl bg-[#151B26] border border-[#28334A] p-5 sm:p-6 shadow-2xl select-none flex flex-col overflow-y-auto overscroll-contain min-w-0 animate-modal-pop">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
-              <ShieldAlert className="w-5 h-5" />
+        <div className="w-full max-w-sm max-h-[calc(100dvh-32px)] rounded-2xl sm:rounded-3xl bg-[#151B26] border border-[#28334A] shadow-2xl select-none flex flex-col overflow-hidden min-w-0 animate-modal-pop">
+          <div className="shrink-0 flex items-start justify-between gap-3 px-5 sm:px-6 pt-5 pb-3.5 border-b border-[#222C3F]">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-extrabold text-white leading-snug">{title}</h3>
+                <p className="text-xs text-slate-400 mt-0.5 leading-snug">{description}</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h3 className="text-base font-extrabold text-white leading-snug">{title}</h3>
-              <p className="text-xs text-slate-400 mt-0.5 leading-snug">{description}</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setPin('');
+                setError(null);
+                onClose();
+              }}
+              aria-label="Close security modal"
+              className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setPin('');
-              setError(null);
-              onClose();
-            }}
-            aria-label="Close security modal"
-            className="w-8 h-8 rounded-xl bg-[#0E131C] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-6 py-4">
 
         {!security.pinCode && (
           <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-[11px] text-amber-300 flex items-center gap-2">
@@ -208,6 +208,7 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
           biometricActive={hasBioEnrolled}
           enableKeyboard={isOpen}
         />
+          </div>
         </div>
       </div>
     </ModalPortal>

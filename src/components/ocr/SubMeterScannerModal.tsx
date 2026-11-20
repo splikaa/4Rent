@@ -1638,7 +1638,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
   };
 
   return (
-    <ModalPortal isOpen={isOpen}>
+    <ModalPortal isOpen={isOpen} onRequestClose={onClose}>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-hidden overscroll-none"
         role="dialog"
@@ -1696,7 +1696,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
               e.preventDefault();
             }
           }}
-          className="grid grid-cols-1 lg:grid-cols-12 overflow-y-auto flex-1"
+          className="grid grid-cols-1 lg:grid-cols-12 overflow-y-auto overscroll-contain flex-1 min-h-0"
         >
           {/* Left Column: Dual Sub-Meter Scanner & Photo Proofs */}
           <div className="lg:col-span-7 p-4 sm:p-6 border-b lg:border-b-0 lg:border-r border-[#222C3F] space-y-4">
@@ -3393,7 +3393,10 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
       </div>
 
       {/* Mechanical Cyclometer Register Guide Modal */}
-      <ModalPortal isOpen={showRegisterGuide}>
+      <ModalPortal
+        isOpen={showRegisterGuide}
+        onRequestClose={() => setShowRegisterGuide(false)}
+      >
         <div
           className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-hidden overscroll-none"
           role="dialog"

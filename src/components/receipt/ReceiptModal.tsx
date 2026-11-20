@@ -114,15 +114,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     title: '',
   });
 
-  useEffect(() => {
-    if (!bill || suppressEscapeClose || lightboxState.isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [bill, suppressEscapeClose, lightboxState.isOpen, onClose]);
-
   const openLightbox = (
     imageUrl: string,
     title: string,
@@ -429,7 +420,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   );
 
   return (
-    <ModalPortal isOpen={Boolean(bill)} disablePortal>
+    <ModalPortal
+      isOpen={Boolean(bill)}
+      disablePortal
+      onRequestClose={
+        suppressEscapeClose || lightboxState.isOpen ? undefined : onClose
+      }
+    >
       <div
         className="receipt-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-2 sm:p-4 overflow-hidden overscroll-none"
         role="dialog"
@@ -569,7 +566,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         )}
 
         {/* Canonical Interactive Receipt Preview (Identical to Exported PDF/PNG/Print Document) */}
-        <div className="receipt-mobile-interactive receipt-sheet-container flex-1 overflow-y-auto p-2.5 sm:p-5 bg-[#090D15] space-y-3">
+        <div className="receipt-mobile-interactive receipt-sheet-container flex-1 min-h-0 overflow-y-auto overscroll-contain p-2.5 sm:p-5 bg-[#090D15] space-y-3">
           {/* Optional Non-Print YTD Monthly Electric Rate Lookup Drawer */}
           <div className="no-print max-w-[794px] mx-auto rounded-xl border border-[#243148] bg-[#141C2B] p-2.5 sm:px-4">
             <div className="flex flex-wrap items-center justify-between gap-2">

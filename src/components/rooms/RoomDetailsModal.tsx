@@ -170,7 +170,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   const activeElectricRate = activeBill?.electricRate ?? globalElectricRate;
 
   return (
-    <ModalPortal isOpen={Boolean(room)}>
+    <ModalPortal isOpen={Boolean(room)} onRequestClose={onClose}>
       <div
         className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden overscroll-none"
         role="dialog"
@@ -254,7 +254,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
         </div>
 
         {/* Scrollable Content Container */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5">
+        <div className="flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto overscroll-contain space-y-4 sm:space-y-5">
           {/* Summary Statistics Grid: Symmetrical on Mobile & Desktop (Never Clips Numbers) */}
           <div
             className={`grid ${

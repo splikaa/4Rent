@@ -725,7 +725,10 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
       </div>
 
       {/* Record Payment / Overpayment Modal */}
-      <ModalPortal isOpen={Boolean(payingBill)}>
+      <ModalPortal
+        isOpen={Boolean(payingBill)}
+        onRequestClose={() => setPayingBill(null)}
+      >
         {payingBill && (
           <div
             className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-hidden overscroll-none"

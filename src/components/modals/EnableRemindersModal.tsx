@@ -16,7 +16,7 @@ export const EnableRemindersModal: React.FC<EnableRemindersModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <ModalPortal isOpen={isOpen}>
+    <ModalPortal isOpen={isOpen} onRequestClose={onDeny}>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 overflow-hidden overscroll-none animate-fadeIn"
         role="dialog"
