@@ -1,4 +1,4 @@
-const CACHE_NAME = '4rent-management-system-v1.0.2-ios-macos';
+const CACHE_NAME = '4rent-management-system-v1.0.3-pay-deposit';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

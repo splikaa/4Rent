@@ -47,6 +47,7 @@ import {
   formatKwhReading,
   fromCentavos,
   getAdvancePolicyAllowance,
+  resolveCarryOverUnpaidBalance,
   toCentavos,
 } from '../../utils/financialEngine';
 import {
@@ -366,8 +367,14 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     setOccupancyStartDate(selectedRoom.tenant?.moveInDate || '');
     setOccupancyEndDate(selectedRoom.tenant?.moveOutDate || '');
     setIsCustomRentOverride(false);
-    setCarryOverBalance(String(selectedRoom.unpaidBalance || 0));
-    setReqDepositApplied(String(selectedRoom.securityDepositPaid || 0));
+    const resolvedCarryOver = resolveCarryOverUnpaidBalance(
+      selectedRoom,
+      existingBills,
+      monthKey
+    );
+    setCarryOverBalance(String(resolvedCarryOver));
+    // Hold paid Required Security Deposit intact by default; landlord can click "Apply Held" to deduct on final bill
+    setReqDepositApplied('0');
     setDepositApplied(String(selectedRoom.advanceRent || 0));
 
     // Previous slot has previous photo and value crop (resolve cached IDB references cleanly)
@@ -405,6 +412,27 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
     setPinInput('');
     setPinError(null);
   }, [isOpen, selectedRoom?.id, billingPeriod]);
+
+  // Keep financial balance pre-fills fresh if a background payment/sync updates room balances
+  // without wiping in-progress OCR scan readings, captured photos, or manual overrides.
+  useEffect(() => {
+    if (!isOpen || !selectedRoom) return;
+    const monthKey = normalizeBillingMonthKey(billingPeriod);
+    const resolvedCarryOver = resolveCarryOverUnpaidBalance(
+      selectedRoom,
+      existingBills,
+      monthKey
+    );
+    setCarryOverBalance(String(resolvedCarryOver));
+    setDepositApplied(String(selectedRoom.advanceRent || 0));
+  }, [
+    isOpen,
+    selectedRoom?.id,
+    selectedRoom?.unpaidBalance,
+    selectedRoom?.advanceRent,
+    billingPeriod,
+    existingBills,
+  ]);
 
   useEffect(() => {
     const win = window as any;
@@ -2977,9 +3005,24 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   />
                 </div>
                 <div className="flex flex-col">
-                  <label className="block text-[11px] font-semibold text-emerald-400 mb-1 leading-snug">
-                    Req. Deposit Deducted ({formatPeso(availablePaidDeposit)} avail)
-                  </label>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <label className="block text-[11px] font-semibold text-emerald-400 leading-snug">
+                      Req. Deposit Deducted ({formatPeso(availablePaidDeposit)} held)
+                    </label>
+                    {availablePaidDeposit > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setReqDepositApplied(
+                            reqDepUsedNum > 0 ? '0' : String(availablePaidDeposit)
+                          )
+                        }
+                        className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 cursor-pointer shrink-0"
+                      >
+                        {reqDepUsedNum > 0 ? 'Hold (₱0)' : 'Apply Held'}
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2993,7 +3036,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                   />
                   {remainingDepositAfterBill > 0 && (
                     <span className="text-[10px] text-emerald-300 mt-1">
-                      {formatPeso(remainingDepositAfterBill)} carries to next months
+                      {formatPeso(remainingDepositAfterBill)} held safely on account
                     </span>
                   )}
                 </div>

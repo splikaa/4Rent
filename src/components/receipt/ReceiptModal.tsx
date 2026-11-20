@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  CreditCard,
   Download,
   Eye,
   EyeOff,
@@ -13,10 +14,16 @@ import {
   Lock,
   Printer,
   Share2,
+  ShieldCheck,
   X,
   Zap,
 } from 'lucide-react';
-import { AppSettings, BillRecord } from '../../types/rental';
+import { AppSettings, BillRecord, Room } from '../../types/rental';
+import {
+  getRoomDepositStatus,
+  resolveReceiptLiveDepositProps,
+} from '../../utils/financialEngine';
+import { PaymentModalMode } from '../modals/RecordPaymentModal';
 import {
   formatMessengerBillSummary,
   formatMonthKeyLabel,
@@ -43,17 +50,27 @@ import { PrintableA4Receipt } from './PrintableA4Receipt';
 
 interface ReceiptModalProps {
   bill: BillRecord | null;
+  room?: Room | null;
   roomAdvanceBalance?: number;
   settings: AppSettings;
   onApplyMonthlyRate?: (monthKeyOrPeriod: string, rate: number) => void;
+  onOpenPaymentModal?: (
+    room: Room,
+    bill?: BillRecord | null,
+    mode?: PaymentModalMode
+  ) => void;
+  suppressEscapeClose?: boolean;
   onClose: () => void;
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   bill,
+  room,
   roomAdvanceBalance,
   settings,
   onApplyMonthlyRate,
+  onOpenPaymentModal,
+  suppressEscapeClose = false,
   onClose,
 }) => {
   const printableRef = useRef<HTMLDivElement | null>(null);
@@ -83,15 +100,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setQuickRateValue(String(liveRate));
   }, [bill?.id, bill?.electricRate, bill?.billingPeriod]);
 
-  useEffect(() => {
-    if (!bill) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [bill, onClose]);
-
   // 1:1 Pixel Inspection Lightbox State
   const [lightboxState, setLightboxState] = useState<{
     isOpen: boolean;
@@ -104,6 +112,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     imageUrl: '',
     title: '',
   });
+
+  useEffect(() => {
+    if (!bill || suppressEscapeClose || lightboxState.isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [bill, suppressEscapeClose, lightboxState.isOpen, onClose]);
 
   const openLightbox = (
     imageUrl: string,
@@ -386,6 +403,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const isRateLockedReceipt = Boolean(bill.isArchived || bill.status === 'paid');
   const billMonthKey = normalizeMonthKey(bill.billingPeriod);
+  const depositStatus = room ? getRoomDepositStatus(room) : null;
+  const liveDepositProps = resolveReceiptLiveDepositProps(bill, room);
+  const matchesCurrentTenant =
+    !room?.tenant?.fullName ||
+    !bill.tenantName ||
+    room.tenant.fullName.trim() === bill.tenantName.trim();
+  const canPayCurrentBill = Boolean(
+    room && onOpenPaymentModal && !bill.isArchived && bill.remainingBalance > 0
+  );
+  const canPayRequiredDeposit = Boolean(
+    room &&
+      room.status === 'occupied' &&
+      !bill.isArchived &&
+      matchesCurrentTenant &&
+      onOpenPaymentModal &&
+      depositStatus &&
+      depositStatus.remaining > 0
+  );
   const scheduledRateMonthKeys = getScheduledMonthKeys(
     billMonthKey,
     0,
@@ -606,6 +641,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             currMeterProofImg={currMeterProofImg}
             currMeterCropImg={currMeterCropImg}
             remainingAdvanceCredit={resolvedRemainingAdvance}
+            roomDepositPaid={liveDepositProps.roomDepositPaid}
+            roomDepositRequired={liveDepositProps.roomDepositRequired}
             onInspectPhoto={openLightbox}
           />
         </div>
@@ -625,11 +662,41 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             currMeterProofImg={currMeterProofImg}
             currMeterCropImg={currMeterCropImg}
             remainingAdvanceCredit={resolvedRemainingAdvance}
+            roomDepositPaid={liveDepositProps.roomDepositPaid}
+            roomDepositRequired={liveDepositProps.roomDepositRequired}
           />
         </div>
 
         {/* Modal Bottom Action Toolbar (Hidden when printed) */}
         <div className="no-print px-3 sm:px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#141C2B] border-t border-[#243148] flex flex-col gap-2 shrink-0">
+          {(canPayCurrentBill || canPayRequiredDeposit) && room && onOpenPaymentModal && (
+            <div className="flex flex-wrap items-center gap-2">
+              {canPayCurrentBill && (
+                <button
+                  type="button"
+                  onClick={() => onOpenPaymentModal(room, bill, 'current_month')}
+                  className="flex-1 min-w-[190px] h-11 py-2 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition cursor-pointer btn-fluid"
+                >
+                  <CreditCard className="w-4 h-4 shrink-0" />
+                  <span>
+                    Pay {bill.billingPeriod} Balance ({formatPeso(bill.remainingBalance)})
+                  </span>
+                </button>
+              )}
+              {canPayRequiredDeposit && depositStatus && (
+                <button
+                  type="button"
+                  onClick={() => onOpenPaymentModal(room, bill, 'required_deposit')}
+                  className="flex-1 min-w-[165px] h-11 py-2 px-3.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid"
+                >
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>
+                    Pay Req. Deposit ({formatPeso(depositStatus.remaining)})
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"

@@ -88,7 +88,8 @@ export interface Room {
   tenant?: TenantProfile;
   unpaidBalance: number; // Carried-over unpaid or partial balance in ₱
   securityDeposit: number; // Required Security deposit held in ₱
-  securityDepositPaid?: number; // Remaining paid required deposit credit in ₱ (auto-deducts from monthly bills)
+  securityDepositPaid?: number; // Paid required security deposit held on account in ₱
+  securityDepositHistory?: PaymentTransaction[]; // Tracked payments toward Required Security Deposit
   advanceRent: number; // Withdrawable Advance payment balance (includes overpayments) in ₱
   advanceHistory?: AdvanceBalanceTransaction[];
   activeReceiptId?: string; // 1 Room = 1 Active Official Receipt

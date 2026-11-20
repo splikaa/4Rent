@@ -5,6 +5,7 @@ import {
   Calendar,
   Camera,
   CheckCircle2,
+  CreditCard,
   Edit3,
   History,
   Home,
@@ -29,6 +30,12 @@ import {
   getBillingMonthSchedule,
   getCurrentBillingMonthKey,
 } from '../../utils/rentSchedule';
+import {
+  getRoomDepositStatus,
+  resolveActiveRoomReceipt,
+} from '../../utils/financialEngine';
+import { getDepositStatusMeta } from '../../utils/depositStatusUi';
+import { PaymentModalMode } from '../modals/RecordPaymentModal';
 
 interface ManageRoomsViewProps {
   rooms: Room[];
@@ -44,6 +51,11 @@ interface ManageRoomsViewProps {
   onOpenScanMeter: (room: Room) => void;
   onOpenRoomReceipt: (bill: BillRecord) => void;
   onOpenAdvanceBalanceModal: (room: Room) => void;
+  onOpenPaymentModal?: (
+    room: Room,
+    bill?: BillRecord | null,
+    mode?: PaymentModalMode
+  ) => void;
   onSelectRoomDetails: (room: Room) => void;
   onOpenArchiveCenter: () => void;
 }
@@ -62,19 +74,14 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
   onOpenScanMeter,
   onOpenRoomReceipt,
   onOpenAdvanceBalanceModal,
+  onOpenPaymentModal,
   onSelectRoomDetails,
   onOpenArchiveCenter,
 }) => {
   const activeRooms = rooms.filter((r) => !r.isArchived);
 
-  const getRoomActiveReceipt = (room: Room): BillRecord | undefined => {
-    if (room.status === 'vacant') return undefined;
-    if (room.activeReceiptId) {
-      const match = bills.find((b) => b.id === room.activeReceiptId);
-      if (match) return match;
-    }
-    return bills.find((b) => b.roomId === room.id && !b.isArchived);
-  };
+  const getRoomActiveReceipt = (room: Room): BillRecord | undefined =>
+    resolveActiveRoomReceipt(room, bills);
 
   return (
     <>
@@ -140,9 +147,18 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
               const monthPayStatus = isOccupied
                 ? getRoomMonthlyPaymentStatus(room, bills)
                 : null;
-              const paidDepositCredit = isOccupied
-                ? Math.max(0, room.securityDepositPaid || 0)
-                : 0;
+              const depositStatus = getRoomDepositStatus(room);
+              const depositMeta = getDepositStatusMeta(depositStatus.status);
+              let depositSubtext = 'Tap to Pay Deposit';
+              if (depositStatus.status === 'paid') {
+                depositSubtext = `Paid: ${formatPesoPrivacy(depositStatus.paid, privacyMaskEnabled)}`;
+              } else if (depositStatus.paid > 0) {
+                depositSubtext = `Paid ${formatPesoPrivacy(depositStatus.paid, privacyMaskEnabled)} • Due ${formatPesoPrivacy(depositStatus.remaining, privacyMaskEnabled)}`;
+              }
+              const hasUnpaidCurrentBill = Boolean(
+                isOccupied && activeReceipt && activeReceipt.remainingBalance > 0
+              );
+              const hasUnpaidDeposit = isOccupied && depositStatus.remaining > 0;
               const hasPaidOverallBalance =
                 isOccupied &&
                 (room.unpaidBalance || 0) <= 0 &&
@@ -246,28 +262,76 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           {room.lastMeterReading.toFixed(1)} kWh
                         </span>
                       </div>
-                      <div
-                        className={`rounded-2xl bg-[#0D121B] border border-[#202B40] p-3 sm:p-3.5 min-w-0 ${
-                          !isOccupied ? 'col-span-2 sm:col-span-1' : ''
-                        }`}
-                      >
-                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block truncate">
-                          Req. Deposit
-                        </span>
-                        <span className="text-sm sm:text-base font-extrabold text-emerald-400 font-mono-num mt-1 block truncate">
-                          {formatPesoPrivacy(
-                            room.securityDeposit > 0
-                              ? room.securityDeposit
-                              : room.monthlyRent,
-                            privacyMaskEnabled
-                          )}
-                        </span>
-                        {isOccupied && paidDepositCredit > 0 && (
-                          <span className="text-[10px] text-emerald-300 font-semibold block mt-0.5 leading-snug truncate">
-                            Credit: {formatPesoPrivacy(paidDepositCredit, privacyMaskEnabled)}
+                      {isOccupied && onOpenPaymentModal ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenPaymentModal(room, activeReceipt || null, 'required_deposit');
+                          }}
+                          className={`rounded-2xl bg-[#0D121B] border p-3 sm:p-3.5 min-w-0 text-left transition hover:bg-[#172234] cursor-pointer ${
+                            hasUnpaidDeposit
+                              ? 'border-amber-500/35'
+                              : 'border-emerald-500/30'
+                          }`}
+                          title="Click to record or view Required Security Deposit payment"
+                        >
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between gap-1">
+                            <span className="truncate">Req. Deposit</span>
+                            <span
+                              className={`text-[9px] font-extrabold uppercase px-1.5 rounded shrink-0 ${depositMeta.compactBadgeClass}`}
+                            >
+                              {depositMeta.shortLabel}
+                            </span>
                           </span>
-                        )}
-                      </div>
+                          <span className="text-sm sm:text-base font-extrabold text-emerald-400 font-mono-num mt-1 block truncate">
+                            {formatPesoPrivacy(
+                              room.securityDeposit > 0
+                                ? room.securityDeposit
+                                : room.monthlyRent,
+                              privacyMaskEnabled
+                            )}
+                          </span>
+                          <span
+                            className={`text-[10px] font-semibold block mt-0.5 leading-snug truncate ${depositMeta.subtextClass}`}
+                          >
+                            {depositSubtext}
+                          </span>
+                        </button>
+                      ) : (
+                        <div
+                          className={`rounded-2xl bg-[#0D121B] border border-[#202B40] p-3 sm:p-3.5 min-w-0 text-left ${
+                            !isOccupied ? 'col-span-2 sm:col-span-1' : ''
+                          }`}
+                          title="Required security deposit for this room"
+                        >
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between gap-1">
+                            <span className="truncate">Req. Deposit</span>
+                            {isOccupied && (
+                              <span
+                                className={`text-[9px] font-extrabold uppercase px-1.5 rounded shrink-0 ${depositMeta.compactBadgeClass}`}
+                              >
+                                {depositMeta.shortLabel}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-sm sm:text-base font-extrabold text-emerald-400 font-mono-num mt-1 block truncate">
+                            {formatPesoPrivacy(
+                              room.securityDeposit > 0
+                                ? room.securityDeposit
+                                : room.monthlyRent,
+                              privacyMaskEnabled
+                            )}
+                          </span>
+                          {isOccupied && (
+                            <span
+                              className={`text-[10px] font-semibold block mt-0.5 leading-snug truncate ${depositMeta.subtextClass}`}
+                            >
+                              {depositSubtext}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {hasPaidOverallBalance && (
                         <button
                           type="button"
@@ -393,7 +457,12 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                   >
                     <div
                       className={`grid gap-2 ${
-                        isOccupied ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'
+                        isOccupied &&
+                        (hasPaidOverallBalance ||
+                          (onOpenPaymentModal &&
+                            (hasUnpaidCurrentBill || hasUnpaidDeposit)))
+                          ? 'grid-cols-1 sm:grid-cols-2'
+                          : 'grid-cols-1'
                       }`}
                     >
                       {isOccupied ? (
@@ -416,6 +485,36 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           <span>Assign Tenant / Occupy</span>
                         </button>
                       )}
+
+                      {isOccupied &&
+                        onOpenPaymentModal &&
+                        (hasUnpaidCurrentBill || hasUnpaidDeposit) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPaymentModal(
+                                room,
+                                activeReceipt || null,
+                                hasUnpaidCurrentBill
+                                  ? 'current_month'
+                                  : 'required_deposit'
+                              )
+                            }
+                            className="w-full px-3.5 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md shadow-emerald-500/20 btn-fluid"
+                            title={
+                              hasUnpaidCurrentBill && activeReceipt
+                                ? `Record payment for ${activeReceipt.billingPeriod} or Required Deposit`
+                                : 'Record tenant Required Deposit payment'
+                            }
+                          >
+                            <CreditCard className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">
+                              {hasUnpaidCurrentBill && activeReceipt
+                                ? `Pay ${activeReceipt.billingPeriod}`
+                                : 'Pay Req. Deposit'}
+                            </span>
+                          </button>
+                        )}
 
                       {hasPaidOverallBalance && (
                         <button

@@ -543,7 +543,7 @@ export const RoomFormModal: React.FC<RoomFormModalProps> = ({
                       className="w-full h-11 rounded-2xl bg-[#0D121B] border border-[#253148] px-4 text-sm text-white font-bold font-mono-num focus:border-amber-500 focus:outline-none"
                     />
                     <span className="text-[10px] text-slate-400 block mt-1 leading-snug">
-                      Paid deposit deducts from current &amp; future bills until used.
+                      Paid Required Deposit held on account. Tenants can also pay this anytime via Pay → Required Deposit.
                     </span>
                     {excessDepositToAdvance > 0 && (
                       <span className="text-[10px] text-emerald-400 font-semibold block mt-1">

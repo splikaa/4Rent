@@ -16,7 +16,11 @@ import {
   sortAndDeduplicateActiveRooms,
 } from '../src/utils/roomSelection';
 import { calculateSubMeterDifference } from '../src/utils/billingCalculator';
-import { formatKwhReading, roundKwh } from '../src/utils/financialEngine';
+import {
+  formatKwhReading,
+  resolveReceiptLiveDepositProps,
+  roundKwh,
+} from '../src/utils/financialEngine';
 import type { Room } from '../src/types/rental';
 
 function makeRoom(overrides: Partial<Room>): Room {
@@ -312,4 +316,36 @@ test('PrintableA4Receipt places Rate in Billing Period, includes cropped meter p
   assert.ok(html.includes('Total Deductions Applied'));
   assert.ok(html.includes('Net Total Amount Due'));
   assert.ok(!html.includes('\u2014'));
+
+  // Historical locked/archived receipt must preserve its own deposit snapshot even if the room now has a new tenant with a different deposit
+  const newTenantRoom = makeRoom({
+    id: 'room-1',
+    securityDeposit: 6000,
+    securityDepositPaid: 6000,
+    tenant: {
+      id: 'ten-next',
+      fullName: 'Different Tenant',
+      phone: '0917-999-9999',
+      moveInDate: '2026-12-01',
+      dueDayOfMonth: 5,
+    },
+  });
+  const liveDepositProps = resolveReceiptLiveDepositProps(bill, newTenantRoom);
+  const historicalHtml = renderToStaticMarkup(
+    React.createElement(PrintableA4Receipt as any, {
+      bill,
+      settings,
+      maskContactsOnReceipt: true,
+      prevMeterProofImg: 'data:image/jpeg;base64,PREV_FULL',
+      prevMeterCropImg: 'data:image/jpeg;base64,PREV_CROP',
+      currMeterProofImg: 'data:image/jpeg;base64,CURR_FULL',
+      currMeterCropImg: 'data:image/jpeg;base64,CURR_CROP',
+      remainingAdvanceCredit: 0,
+      ...liveDepositProps,
+    })
+  );
+  assert.ok(
+    historicalHtml.includes('2,500.00') && !historicalHtml.includes('6,000.00'),
+    'Locked historical receipt must never display a later tenant live deposit amount'
+  );
 });

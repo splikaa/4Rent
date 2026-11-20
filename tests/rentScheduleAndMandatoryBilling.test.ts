@@ -35,6 +35,7 @@ import { SettingsView } from '../src/components/settings/SettingsView';
 import { SubMeterScannerModal } from '../src/components/ocr/SubMeterScannerModal';
 import { ManageRoomsView } from '../src/components/rooms/ManageRoomsView';
 import { AllPaymentsView } from '../src/components/payments/AllPaymentsView';
+import { RecordPaymentModal } from '../src/components/modals/RecordPaymentModal';
 import { AppSettings, BillRecord, Room } from '../src/types/rental';
 
 function installSimpleLocalStorage(failOnKey?: string) {
@@ -836,6 +837,7 @@ test('Task 7: Core UI Views (Settings, Scanner, ReceiptModal, AllPayments) rende
         onOpenScanMeter: () => {},
         onOpenRoomReceipt: () => {},
         onOpenAdvanceBalanceModal: () => {},
+        onOpenPaymentModal: () => {},
         onSelectRoomDetails: () => {},
         onOpenArchiveCenter: () => {},
       })
@@ -846,6 +848,40 @@ test('Task 7: Core UI Views (Settings, Scanner, ReceiptModal, AllPayments) rende
       roomsHtml.endsWith('</button>'),
       'Floating Room Action Button must be rendered as a top-level sibling outside the .animate-view-enter div'
     );
+    assert.ok(
+      roomsHtml.includes('Pay Jan 2026'),
+      'ManageRoomsView must render a clear current-month Pay button when a room has an unpaid/partial bill'
+    );
+
+    // 6. RecordPaymentModal renders clear Current Month and Required Deposit payment types
+    const payModalBillHtml = renderToStaticMarkup(
+      React.createElement(RecordPaymentModal, {
+        isOpen: true,
+        room,
+        activeBill: partialBill,
+        initialMode: 'current_month',
+        onClose: () => {},
+        onRecordBillPayment: () => {},
+        onRecordRequiredDepositPayment: () => {},
+      })
+    );
+    assert.ok(payModalBillHtml.includes('Current Month Bill'));
+    assert.ok(payModalBillHtml.includes('Req. Deposit'));
+    assert.ok(payModalBillHtml.includes('Pay Jan 2026'));
+
+    const payModalDepHtml = renderToStaticMarkup(
+      React.createElement(RecordPaymentModal, {
+        isOpen: true,
+        room,
+        activeBill: partialBill,
+        initialMode: 'required_deposit',
+        onClose: () => {},
+        onRecordBillPayment: () => {},
+        onRecordRequiredDepositPayment: () => {},
+      })
+    );
+    assert.ok(payModalDepHtml.includes('Assigned Required Security Deposit'));
+    assert.ok(payModalDepHtml.includes('Save Required Deposit'));
   } finally {
     if (prevWindow === undefined) {
       delete (globalThis as { window?: unknown }).window;

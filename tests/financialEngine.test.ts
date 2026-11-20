@@ -3,17 +3,23 @@ import assert from 'node:assert/strict';
 import {
   allocateChargesAndCredits,
   applyRoomSecurityDepositToActiveBills,
+  buildCustomSplitAllocation,
   buildRoomSaveAdvanceHistory,
   computeBillComponentBalances,
   executeAdvanceDepositTransaction,
   executeAdvanceRefundTransaction,
   executeGenerateBillTransaction,
   executeRecordPaymentTransaction,
+  executeRequiredDepositPaymentTransaction,
   formatKwhReading,
   fromCentavos,
   getAdvancePolicyAllowance,
+  getRoomDepositStatus,
   recalculateUnlockedBillsForRates,
   reconcileRoomAdvanceLedger,
+  resolveActiveRoomReceipt,
+  resolveCarryOverUnpaidBalance,
+  resolveReceiptLiveDepositProps,
   roundKwh,
   toCentavos,
 } from '../src/utils/financialEngine';
@@ -889,4 +895,358 @@ test('Component balances sync when Advance or Security Deposit credits auto-appl
   assert.equal(compSettled.isRentPaid, true);
   assert.equal(compSettled.isElectricityPaid, true);
 });
+
+test('Current-month unpaid balance accepts partial payment and carries remaining unpaid balance into next month bill', () => {
+  const room = makeRoom({
+    id: 'room-carry-1',
+    monthlyRent: 4500,
+    unpaidBalance: 0,
+    securityDeposit: 4500,
+    securityDepositPaid: 0,
+    advanceRent: 0,
+  });
+
+  // 1. Month 1 (Oct 2026): Generate unpaid receipt (₱4,500 rent + ₱500 electricity = ₱5,000 due)
+  const octGen = executeGenerateBillTransaction({
+    room,
+    existingBills: [],
+    billDraft: makeBillDraft({
+      id: 'bill-oct-carry',
+      receiptNo: '4R-202610-3',
+      roomId: room.id,
+      billingPeriod: 'Oct 2026',
+      billingMonthKey: '2026-10',
+      baseRent: 4500,
+      electricTotal: 500,
+      amountPaid: 0,
+    }),
+  });
+  assert.equal(octGen.ok, true);
+  assert.equal(octGen.createdBill!.remainingBalance, 5000);
+  assert.equal(octGen.updatedRoom!.unpaidBalance, 5000);
+
+  // 2. Tenant pays partial ₱2,000 during Oct 2026 -> ₱3,000 remains unpaid
+  const octPay = executeRecordPaymentTransaction({
+    bill: octGen.createdBill!,
+    room: octGen.updatedRoom!,
+    paymentAmount: 2000,
+    method: 'GCash',
+    referenceNo: 'GC-OCT-PARTIAL',
+  });
+  assert.equal(octPay.ok, true);
+  assert.equal(octPay.updatedBill!.status, 'partial');
+  assert.equal(octPay.updatedBill!.remainingBalance, 3000);
+  assert.equal(octPay.updatedRoom!.unpaidBalance, 3000);
+
+  // 3. Next month (Nov 2026): resolveCarryOverUnpaidBalance automatically picks up ₱3,000
+  const carryOver = resolveCarryOverUnpaidBalance(
+    octPay.updatedRoom!,
+    [octPay.updatedBill!],
+    '2026-11'
+  );
+  assert.equal(carryOver, 3000);
+
+  // Also verify carry-over still resolves accurately from active prior bill even if room.unpaidBalance drifted to 0
+  const driftedRoom = { ...octPay.updatedRoom!, unpaidBalance: 0 };
+  assert.equal(
+    resolveCarryOverUnpaidBalance(driftedRoom, [octPay.updatedBill!], '2026-11'),
+    3000
+  );
+
+  // 4. Generate Nov 2026 bill with carry-over: ₱4,500 rent + ₱600 elec + ₱3,000 carry-over = ₱8,100 due
+  const novGen = executeGenerateBillTransaction({
+    room: octPay.updatedRoom!,
+    existingBills: [octPay.updatedBill!],
+    billDraft: makeBillDraft({
+      id: 'bill-nov-carry',
+      receiptNo: '4R-202611-3',
+      roomId: room.id,
+      billingPeriod: 'Nov 2026',
+      billingMonthKey: '2026-11',
+      baseRent: 4500,
+      electricTotal: 600,
+      previousBalanceCarryOver: carryOver,
+      amountPaid: 0,
+    }),
+  });
+  assert.equal(novGen.ok, true);
+  assert.equal(novGen.createdBill!.previousBalanceCarryOver, 3000);
+  assert.equal(novGen.createdBill!.totalAmountDue, 8100);
+  assert.equal(novGen.createdBill!.remainingBalance, 8100);
+  assert.equal(novGen.updatedRoom!.unpaidBalance, 8100);
+  // Prior Oct 2026 bill is archived so unpaid total is never double-counted
+  const archivedOct = novGen.archivedPreviousBills.find((b) => b.id === 'bill-oct-carry');
+  assert.equal(archivedOct?.isArchived, true);
+});
+
+test('Required Deposit payment tracks partial/full paid status without wiping current unpaid bill by default, supports excess -> Advance and optional bill deduction', () => {
+  const room = makeRoom({
+    id: 'room-req-dep',
+    monthlyRent: 4500,
+    securityDeposit: 4500,
+    securityDepositPaid: 0,
+    unpaidBalance: 5000,
+    advanceRent: 0,
+  });
+  const activeUnpaidBill = makeBillDraft({
+    id: 'bill-nov-dep',
+    roomId: room.id,
+    baseRent: 4500,
+    electricTotal: 500,
+    totalAmountDue: 5000,
+    remainingBalance: 5000,
+    amountPaid: 0,
+    status: 'unpaid',
+  });
+
+  // Initial status: Unpaid ₱4,500 required
+  const initialStatus = getRoomDepositStatus(room);
+  assert.equal(initialStatus.status, 'unpaid');
+  assert.equal(initialStatus.required, 4500);
+  assert.equal(initialStatus.paid, 0);
+  assert.equal(initialStatus.remaining, 4500);
+
+  // 1. Tenant pays partial Required Deposit (₱2,000 via GCash) -> held safely, current month bill untouched
+  const partialDep = executeRequiredDepositPaymentTransaction({
+    room,
+    activeBills: [activeUnpaidBill],
+    amount: 2000,
+    method: 'GCash',
+    referenceNo: 'DEP-001',
+    idempotencyKey: 'dep-pay-1',
+  });
+  assert.equal(partialDep.ok, true);
+  assert.equal(partialDep.appliedToDeposit, 2000);
+  assert.equal(partialDep.overpaymentToAdvance, 0);
+  assert.equal(partialDep.appliedToActiveBills, 0);
+  assert.equal(partialDep.remainingRequiredDeposit, 2500);
+  assert.equal(partialDep.updatedRoom!.securityDepositPaid, 2000);
+  assert.equal(partialDep.updatedRoom!.unpaidBalance, 5000);
+  assert.equal(partialDep.updatedBills[0].remainingBalance, 5000);
+  assert.equal(partialDep.updatedRoom!.securityDepositHistory?.length, 1);
+  assert.equal(getRoomDepositStatus(partialDep.updatedRoom!).status, 'partial');
+
+  // Idempotency guard blocks duplicate submission
+  const dupDep = executeRequiredDepositPaymentTransaction({
+    room: partialDep.updatedRoom!,
+    activeBills: partialDep.updatedBills,
+    amount: 2000,
+    method: 'GCash',
+    idempotencyKey: 'dep-pay-1',
+  });
+  assert.equal(dupDep.ok, false);
+  assert.equal(dupDep.duplicate, true);
+
+  // 2. Tenant pays ₱3,000 (completes remaining ₱2,500 Required Deposit + ₱500 excess to Advance Wallet)
+  const fullDep = executeRequiredDepositPaymentTransaction({
+    room: partialDep.updatedRoom!,
+    activeBills: partialDep.updatedBills,
+    amount: 3000,
+    method: 'Cash',
+    idempotencyKey: 'dep-pay-2',
+  });
+  assert.equal(fullDep.ok, true);
+  assert.equal(fullDep.appliedToDeposit, 2500);
+  assert.equal(fullDep.overpaymentToAdvance, 500);
+  assert.equal(fullDep.remainingRequiredDeposit, 0);
+  assert.equal(fullDep.updatedRoom!.securityDepositPaid, 4500);
+  assert.equal(fullDep.updatedRoom!.advanceRent, 500);
+  assert.equal(fullDep.updatedRoom!.unpaidBalance, 5000);
+  assert.equal(getRoomDepositStatus(fullDep.updatedRoom!).status, 'paid');
+
+  // 3. Optional mode: applyToActiveBill=true deducts paid deposit credit against active unpaid bill
+  const roomApplyMode = makeRoom({
+    id: 'room-req-dep-apply',
+    monthlyRent: 4500,
+    securityDeposit: 4500,
+    securityDepositPaid: 0,
+    unpaidBalance: 5000,
+    advanceRent: 0,
+  });
+  const billApplyMode = { ...activeUnpaidBill, roomId: roomApplyMode.id };
+  const applyRes = executeRequiredDepositPaymentTransaction({
+    room: roomApplyMode,
+    activeBills: [billApplyMode],
+    amount: 2000,
+    method: 'Cash',
+    applyToActiveBill: true,
+    idempotencyKey: 'dep-pay-apply-1',
+  });
+  assert.equal(applyRes.ok, true);
+  assert.equal(applyRes.appliedToActiveBills, 2000);
+  assert.equal(applyRes.updatedBills[0].remainingBalance, 3000);
+  assert.equal(applyRes.updatedRoom!.unpaidBalance, 3000);
+  assert.equal(applyRes.updatedRoom!.securityDepositPaid, 0);
+  assert.equal(
+    applyRes.remainingRequiredDeposit,
+    getRoomDepositStatus(applyRes.updatedRoom!).remaining,
+    'remainingRequiredDeposit must stay consistent with getRoomDepositStatus(updatedRoom).remaining when applied to active bill'
+  );
+  assert.equal(applyRes.remainingRequiredDeposit, 4500);
+});
+
+test('executeGenerateBillTransaction snapshots securityDepositRequired and resolveReceiptLiveDepositProps protects archived/locked/prior-tenant receipts', () => {
+  const room = makeRoom({
+    id: 'room-snap',
+    monthlyRent: 4500,
+    securityDeposit: 5000,
+    securityDepositPaid: 3000,
+    tenant: {
+      id: 'ten-old',
+      fullName: 'Old Tenant',
+      phone: '0917-000-0001',
+      moveInDate: '2026-09-01',
+      dueDayOfMonth: 5,
+    },
+  });
+
+  const gen = executeGenerateBillTransaction({
+    room,
+    existingBills: [],
+    billDraft: makeBillDraft({
+      id: 'bill-snap-1',
+      roomId: room.id,
+      tenantName: 'Old Tenant',
+      baseRent: 4500,
+      electricTotal: 400,
+      securityDepositRequired: undefined,
+      amountPaid: 0,
+    }),
+  });
+  assert.equal(gen.ok, true);
+  assert.equal(gen.createdBill!.securityDepositRequired, 5000);
+
+  // Active unlocked bill for same occupied tenant uses live room deposit state
+  const liveProps = resolveReceiptLiveDepositProps(gen.createdBill!, room);
+  assert.equal(liveProps.roomDepositPaid, 3000);
+  assert.equal(liveProps.roomDepositRequired, 5000);
+
+  // Archived bill must NOT receive live room deposit overrides
+  const archivedProps = resolveReceiptLiveDepositProps(
+    { ...gen.createdBill!, isArchived: true },
+    room
+  );
+  assert.equal(archivedProps.roomDepositPaid, undefined);
+  assert.equal(archivedProps.roomDepositRequired, undefined);
+
+  // Locked (paid) bill must NOT receive live room deposit overrides
+  const lockedProps = resolveReceiptLiveDepositProps(
+    { ...gen.createdBill!, isLocked: true, status: 'paid' },
+    room
+  );
+  assert.equal(lockedProps.roomDepositPaid, undefined);
+  assert.equal(lockedProps.roomDepositRequired, undefined);
+
+  // Vacant room or different tenant must NOT leak live deposit into prior-tenant receipt
+  const vacantProps = resolveReceiptLiveDepositProps(gen.createdBill!, {
+    ...room,
+    status: 'vacant',
+    tenant: undefined,
+    securityDepositPaid: 0,
+  });
+  assert.equal(vacantProps.roomDepositPaid, undefined);
+
+  const newTenantProps = resolveReceiptLiveDepositProps(gen.createdBill!, {
+    ...room,
+    tenant: { ...room.tenant!, id: 'ten-new', fullName: 'New Tenant' },
+    securityDepositPaid: 5000,
+  });
+  assert.equal(newTenantProps.roomDepositPaid, undefined);
+});
+
+test('resolveActiveRoomReceipt ignores archived activeReceiptId and vacant rooms', () => {
+  const archivedBill = makeBillDraft({
+    id: 'bill-archived-1',
+    roomId: 'room-arch-guard',
+    isArchived: true,
+    remainingBalance: 2500,
+  });
+  const activeBill = makeBillDraft({
+    id: 'bill-active-2',
+    roomId: 'room-arch-guard',
+    isArchived: false,
+    remainingBalance: 5000,
+  });
+  const roomWithArchivedPointer = makeRoom({
+    id: 'room-arch-guard',
+    status: 'occupied',
+    activeReceiptId: archivedBill.id,
+  });
+
+  // Falls back to unarchived bill instead of returning archivedBill
+  const resolvedFallback = resolveActiveRoomReceipt(roomWithArchivedPointer, [
+    archivedBill,
+    activeBill,
+  ]);
+  assert.equal(resolvedFallback?.id, activeBill.id);
+
+  // Returns undefined when only archived bills exist
+  const resolvedNone = resolveActiveRoomReceipt(roomWithArchivedPointer, [
+    archivedBill,
+  ]);
+  assert.equal(resolvedNone, undefined);
+
+  // Vacant rooms never expose an active receipt
+  const vacantRoom = makeRoom({
+    id: 'room-arch-guard',
+    status: 'vacant',
+    tenant: undefined,
+    activeReceiptId: activeBill.id,
+  });
+  assert.equal(resolveActiveRoomReceipt(vacantRoom, [activeBill]), undefined);
+});
+
+test('buildCustomSplitAllocation includes previous-month carryOverPaid and applies cleanly in executeRecordPaymentTransaction', () => {
+  const split = buildCustomSplitAllocation({
+    rent: '1000',
+    electricity: '250.50',
+    latePenalty: '100',
+    carryOver: '1500.25',
+  });
+  assert.equal(split.totalAmount, 2850.75);
+  assert.deepEqual(split.customAllocation, {
+    rentPaid: 1000,
+    electricityPaid: 250.5,
+    latePenaltyPaid: 100,
+    carryOverPaid: 1500.25,
+  });
+
+  const room = makeRoom({ id: 'room-custom-carry', unpaidBalance: 6500 });
+  const gen = executeGenerateBillTransaction({
+    room,
+    existingBills: [],
+    billDraft: makeBillDraft({
+      id: 'bill-custom-carry',
+      roomId: room.id,
+      baseRent: 4500,
+      electricTotal: 500,
+      previousBalanceCarryOver: 1500,
+      amountPaid: 0,
+    }),
+  });
+  assert.equal(gen.ok, true);
+
+  const customCarryOnly = buildCustomSplitAllocation({
+    rent: '0',
+    electricity: '0',
+    latePenalty: '0',
+    carryOver: '1500',
+  });
+  const payRes = executeRecordPaymentTransaction({
+    bill: gen.createdBill!,
+    room: gen.updatedRoom!,
+    paymentAmount: customCarryOnly.totalAmount,
+    method: 'Cash',
+    allocationTarget: 'custom',
+    customAllocation: customCarryOnly.customAllocation,
+  });
+  assert.equal(payRes.ok, true);
+  assert.equal(payRes.updatedBill!.carryOverPaid, 1500);
+  assert.equal(payRes.updatedBill!.carryOverRemaining, 0);
+  assert.equal(payRes.updatedBill!.rentRemaining, 4500);
+  assert.equal(payRes.updatedBill!.electricityRemaining, 500);
+  assert.equal(payRes.updatedBill!.remainingBalance, 5000);
+});
+
+
 

@@ -67,13 +67,15 @@ import {
   roundCurrency,
 } from './utils/billingCalculator';
 import {
-  applyRoomSecurityDepositToActiveBills,
   executeAdvanceDepositTransaction,
   executeAdvanceRefundTransaction,
   executeGenerateBillTransaction,
   executeRecordPaymentTransaction,
+  executeRequiredDepositPaymentTransaction,
   formatKwhReading,
   getAdvancePolicyAllowance,
+  getRoomDepositStatus,
+  resolveActiveRoomReceipt,
 } from './utils/financialEngine';
 import {
   normalizeBillingMonthKey,
@@ -94,6 +96,10 @@ import { EnableRemindersModal } from './components/modals/EnableRemindersModal';
 import { PinAuthModal } from './components/modals/PinAuthModal';
 import { ConfirmActionModal } from './components/modals/ConfirmActionModal';
 import { AdvanceBalanceModal } from './components/modals/AdvanceBalanceModal';
+import {
+  PaymentModalMode,
+  RecordPaymentModal,
+} from './components/modals/RecordPaymentModal';
 import { OccupiedArchiveGuardModal } from './components/modals/OccupiedArchiveGuardModal';
 import { NavigationDrawer } from './components/layout/NavigationDrawer';
 import { MobileBottomNav } from './components/layout/MobileBottomNav';
@@ -173,6 +179,23 @@ export function App() {
   const [advanceModalRoomId, setAdvanceModalRoomId] = useState<string | null>(
     null
   );
+  const [paymentModalState, setPaymentModalState] = useState<{
+    roomId: string;
+    billId?: string | null;
+    mode: PaymentModalMode;
+  } | null>(null);
+
+  const handleOpenPaymentModal = (
+    room: Room,
+    bill?: BillRecord | null,
+    mode: PaymentModalMode = 'current_month'
+  ) => {
+    setPaymentModalState({
+      roomId: room.id,
+      billId: bill?.id ?? null,
+      mode,
+    });
+  };
 
   // Unified Confirmation & Security Auth States (Room Deletion, Archive, Tenant Vacated, Advance Payment)
   const [pendingAuthAction, setPendingAuthAction] = useState<{
@@ -984,32 +1007,17 @@ export function App() {
           setTenantHistory((prev) => [entry, ...prev]);
         }
 
-        // If room is occupied and has available paid Required Deposit credit with active unpaid bills,
-        // auto-deduct deposit synchronously before queuing state updates so room & bill balances stay aligned.
-        const depositRes = applyRoomSecurityDepositToActiveBills({
-          roomId: existingId,
-          status: roomData.status,
-          activeReceiptId: roomData.activeReceiptId,
-          availableSecurityDepositPaid: roomData.securityDepositPaid || 0,
-          roomUnpaidBalance: roomData.unpaidBalance || 0,
-          bills,
-          nowIso,
-        });
-
-        const remainingRoomPaidDeposit = depositRes.remainingSecurityDepositPaid;
-        const finalRoomUnpaidBalance = depositRes.finalRoomUnpaidBalance;
-
-        if (depositRes.updatedCount > 0) {
-          setBills(depositRes.bills);
-        }
-
+        // Hold paid Required Deposit safely on the room without silently draining it on routine edits;
+        // landlords can explicitly apply deposit to an active bill via Record Payment -> Required Deposit or Sub-Meter Billing.
         setRooms((prev) =>
           prev.map((r) =>
             r.id === existingId
               ? {
                   ...roomData,
-                  securityDepositPaid: remainingRoomPaidDeposit,
-                  unpaidBalance: finalRoomUnpaidBalance,
+                  securityDepositHistory:
+                    roomData.status === 'occupied'
+                      ? prevRoom?.securityDepositHistory
+                      : [],
                   id: existingId,
                   updatedAt: nowIso,
                 }
@@ -1315,6 +1323,8 @@ export function App() {
                 status: 'vacant',
                 tenant: undefined,
                 unpaidBalance: 0,
+                securityDepositPaid: 0,
+                securityDepositHistory: [],
                 advanceRent: 0,
                 updatedAt: new Date().toISOString(),
               }
@@ -1727,6 +1737,151 @@ export function App() {
     onCommitted?.();
   };
 
+  const handleRecordRequiredDepositPayment = (
+    roomId: string,
+    amount: number,
+    method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
+    referenceNo?: string,
+    options?: { applyToActiveBill?: boolean },
+    idempotencyKey?: string
+  ) => {
+    try {
+      if (!claimTxKey(idempotencyKey)) return;
+      const targetRoom = rooms.find((r) => r.id === roomId);
+      if (!targetRoom) return;
+
+      const res = executeRequiredDepositPaymentTransaction({
+        room: targetRoom,
+        activeBills: bills,
+        amount,
+        method,
+        referenceNo,
+        applyToActiveBill: Boolean(options?.applyToActiveBill),
+        advanceCapMode: settings.advanceCapMode || 'unlimited',
+        idempotencyKey,
+      });
+
+      if (!res.ok || !res.updatedRoom) {
+        if (res.duplicate) return;
+        triggerFeedback(
+          'Deposit Payment Not Recorded',
+          res.errorMessage || 'Unable to process Required Deposit payment.',
+          'error'
+        );
+        return;
+      }
+
+      const nextRoom = res.updatedRoom;
+      const nextRooms = rooms.map((r) => (r.id === roomId ? nextRoom : r));
+      const commitRes = commitBillingTransaction({
+        rooms: nextRooms,
+        bills: res.updatedBills,
+      });
+      if (!commitRes.ok) {
+        triggerFeedback(
+          'Deposit Save Failed',
+          `${commitRes.error} No partial deposit change was committed.`,
+          'error'
+        );
+        return;
+      }
+
+      setRooms(nextRooms);
+      if (res.appliedToActiveBills > 0) {
+        setBills(res.updatedBills);
+      }
+
+      appendAuditLog(
+        'Required Deposit Paid',
+        `₱${amount.toFixed(2)} via ${method} for ${targetRoom.name} Required Deposit (Held: ₱${(nextRoom.securityDepositPaid || 0).toFixed(2)} / ₱${nextRoom.securityDeposit.toFixed(2)}${res.appliedToActiveBills > 0 ? ` • Deducted ₱${res.appliedToActiveBills.toFixed(2)} from active bill` : ''}).`,
+        'billing'
+      );
+      let depositFeedbackMessage: string;
+      if (res.appliedToActiveBills > 0) {
+        depositFeedbackMessage = `Recorded via ${method} and applied ₱${res.appliedToActiveBills.toFixed(2)} to active bill. Remaining bill due: ₱${nextRoom.unpaidBalance.toFixed(2)} • Held Deposit: ₱${(nextRoom.securityDepositPaid || 0).toFixed(2)}.`;
+      } else if (res.overpaymentToAdvance > 0) {
+        depositFeedbackMessage = `Required Deposit settled via ${method}. Excess ₱${res.overpaymentToAdvance.toFixed(2)} credited to Advance Wallet.`;
+      } else if (res.remainingRequiredDeposit <= 0) {
+        depositFeedbackMessage = `${targetRoom.name} Required Deposit is now Paid in Full (₱${(nextRoom.securityDepositPaid || 0).toFixed(2)} held).`;
+      } else {
+        depositFeedbackMessage = `Recorded via ${method}. Remaining Required Deposit due: ₱${res.remainingRequiredDeposit.toFixed(2)}.`;
+      }
+
+      triggerFeedback(
+        `Required Deposit Paid (₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })})`,
+        depositFeedbackMessage,
+        'success',
+        'Open Room Details',
+        () => setSelectedRoomDetailsId(roomId)
+      );
+      triggerOptionalCloudSync();
+    } catch (err) {
+      triggerFeedback(
+        'Deposit Payment Error',
+        String(err instanceof Error ? err.message : 'Unable to record Required Deposit payment.'),
+        'error'
+      );
+    }
+  };
+
+  const requestRecordRequiredDepositPayment = (
+    roomId: string,
+    amount: number,
+    method: 'Cash' | 'GCash' | 'Maya' | 'Bank Transfer',
+    referenceNo?: string,
+    options?: { applyToActiveBill?: boolean },
+    onCommitted?: () => void
+  ) => {
+    const targetRoom = rooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+    const depStatus = getRoomDepositStatus(targetRoom);
+    const policyMode = settings.advanceCapMode || 'unlimited';
+    const excess = Math.max(0, roundCurrency(amount - depStatus.remaining));
+    const txKey = `reqdep-${roomId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    if (excess > 0) {
+      const allowance = getAdvancePolicyAllowance(
+        targetRoom.monthlyRent,
+        targetRoom.advanceRent || 0,
+        policyMode
+      );
+      if (allowance.isCapped && excess > allowance.remainingAllowance + 0.01) {
+        triggerFeedback(
+          'Advance Policy Limit Reached',
+          `1-Month Advance Policy allows ₱${allowance.remainingAllowance.toLocaleString('en-PH', { minimumFractionDigits: 2 })} more. Max deposit payment now: ₱${roundCurrency(depStatus.remaining + allowance.remainingAllowance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`,
+          'error'
+        );
+        return;
+      }
+      setPendingAuthAction({
+        title: 'Authorize Excess Deposit → Advance Credit',
+        description: `${targetRoom.name}: Excess ₱${excess.toLocaleString('en-PH', { minimumFractionDigits: 2 })} above Required Deposit will credit to Advance Wallet. Verify with Biometrics or your 4-Digit PIN.`,
+        onConfirm: () => {
+          handleRecordRequiredDepositPayment(
+            roomId,
+            amount,
+            method,
+            referenceNo,
+            options,
+            txKey
+          );
+          onCommitted?.();
+        },
+      });
+      return;
+    }
+
+    handleRecordRequiredDepositPayment(
+      roomId,
+      amount,
+      method,
+      referenceNo,
+      options,
+      txKey
+    );
+    onCommitted?.();
+  };
+
   const requestWithdrawAdvance = (
     roomId: string,
     amount: number,
@@ -2109,6 +2264,7 @@ export function App() {
       setIsScannerOpen(false);
       setActiveReceiptBill(null);
       setAdvanceModalRoomId(null);
+      setPaymentModalState(null);
       setPendingConfirmAction(null);
 
       setRooms(loadRooms());
@@ -2413,6 +2569,7 @@ export function App() {
             onOpenAdvanceBalanceModal={(room) =>
               setAdvanceModalRoomId(room.id)
             }
+            onOpenPaymentModal={handleOpenPaymentModal}
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onOpenWalkthrough={() => setIsWalkthroughOpen(true)}
             onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
@@ -2446,6 +2603,7 @@ export function App() {
             onOpenAdvanceBalanceModal={(room) =>
               setAdvanceModalRoomId(room.id)
             }
+            onOpenPaymentModal={handleOpenPaymentModal}
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onOpenArchiveCenter={() => setActiveTab('archive')}
           />
@@ -2462,6 +2620,7 @@ export function App() {
             onSelectRoomDetails={(room) => setSelectedRoomDetailsId(room.id)}
             onOpenScanMeter={(room) => handleOpenScanForRoom(room)}
             onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
+            onOpenPaymentModal={handleOpenPaymentModal}
           />
         )}
 
@@ -2490,6 +2649,7 @@ export function App() {
             onSelectBillForReceipt={(bill) => setActiveReceiptBill(bill)}
             onRecordPayment={requestRecordPayment}
             onOpenAdvanceModal={(room) => setAdvanceModalRoomId(room.id)}
+            onOpenPaymentModal={handleOpenPaymentModal}
             onArchiveBill={handleArchiveBill}
             onOpenNewBillScanner={() => handleOpenScanForRoom()}
             onOpenArchiveCenter={() => setActiveTab('archive')}
@@ -2567,11 +2727,7 @@ export function App() {
         room={selectedRoomForDetails}
         activeBill={
           selectedRoomForDetails
-            ? bills.find(
-                (b) =>
-                  b.id === selectedRoomForDetails.activeReceiptId ||
-                  (b.roomId === selectedRoomForDetails.id && !b.isArchived)
-              ) || null
+            ? resolveActiveRoomReceipt(selectedRoomForDetails, bills) || null
             : null
         }
         roomBills={
@@ -2599,6 +2755,7 @@ export function App() {
         onOpenScannerForRoom={(room) => handleOpenScanForRoom(room)}
         onOpenReceipt={(bill) => setActiveReceiptBill(bill)}
         onOpenAdvanceModal={(room) => setAdvanceModalRoomId(room.id)}
+        onOpenPaymentModal={handleOpenPaymentModal}
         onRequestMoveOutTenant={(room) => requestMoveOutConfirmation(room)}
         onRequestArchiveRoom={handleArchiveRoom}
         onRequestDeleteRoom={requestDeleteRoomConfirmation}
@@ -2633,6 +2790,11 @@ export function App() {
               activeReceiptBill
             : null
         }
+        room={
+          activeReceiptBill
+            ? rooms.find((r) => r.id === activeReceiptBill.roomId) || null
+            : null
+        }
         roomAdvanceBalance={
           activeReceiptBill
             ? rooms.find((r) => r.id === activeReceiptBill.roomId)?.advanceRent
@@ -2640,7 +2802,43 @@ export function App() {
         }
         settings={settings}
         onApplyMonthlyRate={handleApplyMonthlyElectricRate}
+        onOpenPaymentModal={handleOpenPaymentModal}
+        suppressEscapeClose={Boolean(paymentModalState || pendingAuthAction)}
         onClose={() => setActiveReceiptBill(null)}
+      />
+
+      {/* Unified Current-Month Bill & Required Deposit Payment Modal */}
+      <RecordPaymentModal
+        isOpen={Boolean(paymentModalState)}
+        room={
+          paymentModalState
+            ? rooms.find((r) => r.id === paymentModalState.roomId) || null
+            : null
+        }
+        activeBill={
+          paymentModalState
+            ? (() => {
+                if (paymentModalState.billId) {
+                  const exact = bills.find(
+                    (b) => b.id === paymentModalState.billId && !b.isArchived
+                  );
+                  if (exact) return exact;
+                }
+                const targetRoom = rooms.find(
+                  (item) => item.id === paymentModalState.roomId
+                );
+                if (!targetRoom) return null;
+                return resolveActiveRoomReceipt(targetRoom, bills) || null;
+              })()
+            : null
+        }
+        initialMode={paymentModalState?.mode || 'current_month'}
+        advanceCapMode={settings.advanceCapMode || 'unlimited'}
+        suppressEscapeClose={Boolean(pendingAuthAction)}
+        onClose={() => setPaymentModalState(null)}
+        onRecordBillPayment={requestRecordPayment}
+        onRecordRequiredDepositPayment={requestRecordRequiredDepositPayment}
+        onOpenGenerateBill={(room) => handleOpenScanForRoom(room)}
       />
 
       {/* Withdrawable Advance Balance Manager Modal */}

@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  CreditCard,
   DoorOpen,
   Edit2,
   History,
@@ -41,7 +42,12 @@ import {
   getBillingMonthSchedule,
   getCurrentBillingMonthKey,
 } from '../../utils/rentSchedule';
-import { formatKwhReading } from '../../utils/financialEngine';
+import {
+  formatKwhReading,
+  getRoomDepositStatus,
+} from '../../utils/financialEngine';
+import { getDepositStatusMeta } from '../../utils/depositStatusUi';
+import { PaymentModalMode } from '../modals/RecordPaymentModal';
 import {
   getMonthlyMeterReading,
   loadReadingLogs,
@@ -83,6 +89,11 @@ interface RoomDetailsModalProps {
   onOpenScannerForRoom: (room: Room) => void;
   onOpenReceipt: (bill: BillRecord) => void;
   onOpenAdvanceModal: (room: Room) => void;
+  onOpenPaymentModal?: (
+    room: Room,
+    bill?: BillRecord | null,
+    mode?: PaymentModalMode
+  ) => void;
   onRequestMoveOutTenant?: (room: Room) => void;
   onRequestArchiveRoom?: (roomId: string) => void;
   onRequestDeleteRoom?: (room: Room) => void;
@@ -100,6 +111,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   onOpenScannerForRoom,
   onOpenReceipt,
   onOpenAdvanceModal,
+  onOpenPaymentModal,
   onRequestMoveOutTenant,
   onRequestArchiveRoom,
   onRequestDeleteRoom,
@@ -109,10 +121,19 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   const isOccupied = room.status === 'occupied';
   const safeDeposit =
     room.securityDeposit > 0 ? room.securityDeposit : room.monthlyRent;
-  const paidDepositCredit = isOccupied
-    ? Math.max(0, room.securityDepositPaid || 0)
-    : 0;
+  const depositStatus = getRoomDepositStatus(room);
+  const depositMeta = getDepositStatusMeta(depositStatus.status);
+  let depositSubtext = 'Unpaid • Tap to Pay Deposit';
+  if (depositStatus.status === 'paid') {
+    depositSubtext = `Paid & Held: ${formatPesoPrivacy(depositStatus.paid, privacyMaskEnabled)}`;
+  } else if (depositStatus.paid > 0) {
+    depositSubtext = `Paid ${formatPesoPrivacy(depositStatus.paid, privacyMaskEnabled)} • Due ${formatPesoPrivacy(depositStatus.remaining, privacyMaskEnabled)}`;
+  }
   const safeAdvance = isOccupied ? Math.max(0, room.advanceRent || 0) : 0;
+  const hasUnpaidCurrentBill = Boolean(
+    isOccupied && activeBill && activeBill.remainingBalance > 0
+  );
+  const hasUnpaidDeposit = isOccupied && depositStatus.remaining > 0;
   const hasPaidOverallBalance =
     isOccupied &&
     (room.unpaidBalance || 0) <= 0 &&
@@ -257,28 +278,71 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             </div>
 
             {/* Security Deposit */}
-            <div
-              className={`bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between min-w-0 ${
-                !isOccupied ? 'col-span-2 sm:col-span-1' : ''
-              }`}
-            >
-              <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug">
-                Required Deposit
-              </span>
-              <div className="mt-1">
-                <p className="text-sm sm:text-base md:text-lg font-black text-emerald-400 font-mono-num flex items-center gap-1 flex-wrap">
-                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                  <span>{formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}</span>
-                </p>
-                {isOccupied && (
-                  <span className="text-[10px] text-emerald-300/90 font-semibold block mt-0.5 leading-snug">
-                    {paidDepositCredit > 0
-                      ? `Paid Credit: ${formatPesoPrivacy(paidDepositCredit, privacyMaskEnabled)}`
-                      : 'Deposit Credit: ₱0.00'}
+            {isOccupied && onOpenPaymentModal ? (
+              <button
+                type="button"
+                onClick={() =>
+                  onOpenPaymentModal(room, activeBill, 'required_deposit')
+                }
+                className={`bg-[#0B0F17] border rounded-2xl p-3 sm:p-4 flex flex-col justify-between min-w-0 text-left transition hover:bg-[#141D2E] cursor-pointer ${
+                  hasUnpaidDeposit
+                    ? 'border-amber-500/40'
+                    : 'border-emerald-500/35'
+                }`}
+                title="Tap to pay or review Required Security Deposit"
+              >
+                <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug flex items-center justify-between gap-1">
+                  <span>Required Deposit</span>
+                  <span
+                    className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${depositMeta.compactBadgeClass}`}
+                  >
+                    {depositMeta.shortLabel}
                   </span>
-                )}
+                </span>
+                <div className="mt-1">
+                  <p className="text-sm sm:text-base md:text-lg font-black text-emerald-400 font-mono-num flex items-center gap-1 flex-wrap">
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                    <span>{formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}</span>
+                  </p>
+                  <span
+                    className={`text-[10px] font-semibold block mt-0.5 leading-snug ${depositMeta.subtextClass}`}
+                  >
+                    {depositSubtext}
+                  </span>
+                </div>
+              </button>
+            ) : (
+              <div
+                className={`bg-[#0B0F17] border border-[#1E293D] rounded-2xl p-3 sm:p-4 flex flex-col justify-between min-w-0 text-left ${
+                  !isOccupied ? 'col-span-2 sm:col-span-1' : ''
+                }`}
+                title="Required Security Deposit"
+              >
+                <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-400 font-bold leading-snug flex items-center justify-between gap-1">
+                  <span>Required Deposit</span>
+                  {isOccupied && (
+                    <span
+                      className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${depositMeta.compactBadgeClass}`}
+                    >
+                      {depositMeta.shortLabel}
+                    </span>
+                  )}
+                </span>
+                <div className="mt-1">
+                  <p className="text-sm sm:text-base md:text-lg font-black text-emerald-400 font-mono-num flex items-center gap-1 flex-wrap">
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                    <span>{formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}</span>
+                  </p>
+                  {isOccupied && (
+                    <span
+                      className={`text-[10px] font-semibold block mt-0.5 leading-snug ${depositMeta.subtextClass}`}
+                    >
+                      {depositSubtext}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Advance Balance (Occupied Only) */}
             {isOccupied && (
@@ -424,22 +488,37 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             </div>
 
             {/* Primary Action Buttons Row: Strong Hierarchy & Responsive Alignment */}
-            <div
-              className={`mt-4 pt-4 border-t border-[#1C263A] grid grid-cols-1 ${
-                hasPaidOverallBalance && activeBill
-                  ? 'sm:grid-cols-3'
-                  : hasPaidOverallBalance || activeBill
-                  ? 'sm:grid-cols-2'
-                  : 'sm:grid-cols-1'
-              } gap-2 sm:gap-2.5`}
-            >
+            <div className="mt-4 pt-4 border-t border-[#1C263A] flex flex-wrap items-center gap-2 sm:gap-2.5">
+              {isOccupied &&
+                onOpenPaymentModal &&
+                (hasUnpaidCurrentBill || hasUnpaidDeposit) && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenPaymentModal(
+                        room,
+                        activeBill,
+                        hasUnpaidCurrentBill ? 'current_month' : 'required_deposit'
+                      )
+                    }
+                    className="flex-1 min-w-[165px] h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs cursor-pointer shadow-lg shadow-emerald-500/20 transition btn-fluid"
+                  >
+                    <CreditCard className="w-4 h-4 shrink-0" />
+                    <span>
+                      {hasUnpaidCurrentBill && activeBill
+                        ? `Pay ${activeBill.billingPeriod} (${formatPeso(activeBill.remainingBalance)})`
+                        : `Pay Req. Deposit (${formatPeso(depositStatus.remaining)})`}
+                    </span>
+                  </button>
+                )}
+
               <button
                 type="button"
                 onClick={() => {
                   onClose();
                   onOpenScannerForRoom(room);
                 }}
-                className="w-full h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition btn-fluid"
+                className="flex-1 min-w-[155px] h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition btn-fluid"
               >
                 <Camera className="w-4 h-4 shrink-0" />
                 <span>Scan Sub-Meter / Bill</span>
@@ -449,7 +528,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenReceipt(activeBill)}
-                  className="w-full h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-[#182133] hover:bg-[#212E46] text-white font-bold text-xs border border-[#2B3B59] cursor-pointer transition btn-fluid"
+                  className="flex-1 min-w-[140px] h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-[#182133] hover:bg-[#212E46] text-white font-bold text-xs border border-[#2B3B59] cursor-pointer transition btn-fluid"
                 >
                   <Receipt className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Receipt (#{activeBill.receiptNo})</span>
@@ -460,7 +539,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenAdvanceModal(room)}
-                  className="w-full h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 font-bold text-xs border border-emerald-500/30 cursor-pointer transition btn-fluid"
+                  className="flex-1 min-w-[140px] h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 font-bold text-xs border border-emerald-500/30 cursor-pointer transition btn-fluid"
                 >
                   <Wallet className="w-4 h-4 shrink-0" />
                   <span>Advance Credit</span>

@@ -70,13 +70,16 @@ export const PinAuthModal: React.FC<PinAuthModalProps> = ({
     });
 
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        onClose();
+      }
     };
-    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('keydown', handleEsc, true);
 
     return () => {
       active = false;
-      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('keydown', handleEsc, true);
     };
   }, [isOpen, onClose]);
 

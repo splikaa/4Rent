@@ -1019,6 +1019,9 @@ export function executeGenerateBillTransaction(
     previousBalanceCarryOver: allocation.previousBalanceCarryOver,
     otherCharges: allocation.otherCharges,
     grossCharges: allocation.grossCharges,
+    securityDepositRequired:
+      billDraft.securityDepositRequired ??
+      (room.securityDeposit > 0 ? room.securityDeposit : room.monthlyRent || 0),
     securityDepositApplied: allocation.securityDepositApplied,
     securityDepositRemainingAfterBill: allocation.remainingSecurityDeposit,
     advanceApplied: allocation.advanceApplied,
@@ -2171,5 +2174,381 @@ export function applyRoomSecurityDepositToActiveBills(
     depositUsedOnActiveBills: fromCentavos(usedCents),
     remainingSecurityDepositPaid: fromCentavos(remainingCreditCents),
     finalRoomUnpaidBalance,
+  };
+}
+
+export interface RoomDepositStatus {
+  required: number;
+  paid: number;
+  remaining: number;
+  status: 'paid' | 'partial' | 'unpaid';
+}
+
+/**
+ * Computes the Required Security Deposit payment status for a room in integer centavos.
+ */
+export function getRoomDepositStatus(room: Room): RoomDepositStatus {
+  const requiredBase =
+    room.securityDeposit > 0 ? room.securityDeposit : room.monthlyRent || 0;
+  const requiredCents = Math.max(0, toCentavos(requiredBase));
+  const paidCents =
+    room.status === 'occupied'
+      ? Math.max(0, toCentavos(room.securityDepositPaid || 0))
+      : 0;
+  const remainingCents = Math.max(0, requiredCents - paidCents);
+
+  let status: RoomDepositStatus['status'] = 'unpaid';
+  if (requiredCents > 0 && remainingCents === 0) {
+    status = 'paid';
+  } else if (paidCents > 0) {
+    status = 'partial';
+  }
+
+  return {
+    required: fromCentavos(requiredCents),
+    paid: fromCentavos(paidCents),
+    remaining: fromCentavos(remainingCents),
+    status,
+  };
+}
+
+/**
+ * Returns live room deposit props for PrintableA4Receipt ONLY when the bill is an
+ * active, unlocked receipt belonging to the room's current occupied tenant.
+ * Archived, locked, vacant-room, and prior-tenant receipts strictly preserve their
+ * immutable bill snapshot values.
+ */
+export function resolveReceiptLiveDepositProps(
+  bill: BillRecord,
+  room?: Room | null
+): { roomDepositPaid?: number; roomDepositRequired?: number } {
+  if (!room || bill.isArchived || bill.isLocked || room.status !== 'occupied') {
+    return {};
+  }
+  const activeTenantName = room.tenant?.fullName?.trim();
+  const billTenantName = bill.tenantName?.trim();
+  if (activeTenantName && billTenantName && activeTenantName !== billTenantName) {
+    return {};
+  }
+  return {
+    roomDepositPaid: room.securityDepositPaid,
+    roomDepositRequired: room.securityDeposit,
+  };
+}
+
+/**
+ * Resolves the active unarchived receipt for an occupied room.
+ * Never returns an archived receipt even if `room.activeReceiptId` still references one.
+ */
+export function resolveActiveRoomReceipt(
+  room: Room,
+  bills: BillRecord[]
+): BillRecord | undefined {
+  if (room.status === 'vacant') return undefined;
+  if (room.activeReceiptId) {
+    const linked = bills.find(
+      (b) => b.id === room.activeReceiptId && !b.isArchived
+    );
+    if (linked) return linked;
+  }
+  return bills.find((b) => b.roomId === room.id && !b.isArchived);
+}
+
+/**
+ * Parses and sums Custom Split payment component inputs in integer centavos,
+ * including Previous Month Carry-Over (`carryOverPaid`).
+ */
+export function buildCustomSplitAllocation(inputs: {
+  rent: string | number;
+  electricity: string | number;
+  latePenalty: string | number;
+  carryOver?: string | number;
+}): {
+  totalAmount: number;
+  customAllocation: Pick<
+    ComponentPaymentAllocation,
+    'rentPaid' | 'electricityPaid' | 'latePenaltyPaid' | 'carryOverPaid'
+  >;
+} {
+  const parseNonNegativeCents = (val: string | number | undefined): number => {
+    const num = typeof val === 'number' ? val : parseFloat(String(val ?? ''));
+    if (!Number.isFinite(num) || num <= 0) return 0;
+    return toCentavos(num);
+  };
+
+  const rentCents = parseNonNegativeCents(inputs.rent);
+  const elecCents = parseNonNegativeCents(inputs.electricity);
+  const penaltyCents = parseNonNegativeCents(inputs.latePenalty);
+  const carryCents = parseNonNegativeCents(inputs.carryOver);
+
+  return {
+    totalAmount: fromCentavos(rentCents + elecCents + penaltyCents + carryCents),
+    customAllocation: {
+      rentPaid: fromCentavos(rentCents),
+      electricityPaid: fromCentavos(elecCents),
+      latePenaltyPaid: fromCentavos(penaltyCents),
+      carryOverPaid: fromCentavos(carryCents),
+    },
+  };
+}
+
+/**
+ * Resolves the unpaid balance that should carry over (add up) when generating a receipt
+ * for `targetBillingMonthKey`. Checks both unarchived prior-month bills and `room.unpaidBalance`
+ * so unpaid balances never drop when moving into a new month.
+ */
+export function resolveCarryOverUnpaidBalance(
+  room: Room,
+  existingBills: BillRecord[],
+  targetBillingMonthKey: string
+): number {
+  const targetKey = normalizeMonthKeyInternal(targetBillingMonthKey);
+  const priorUnpaidCents = (existingBills || [])
+    .filter(
+      (b) =>
+        !b.isArchived &&
+        b.roomId === room.id &&
+        normalizeMonthKeyInternal(b.billingMonthKey || b.billingPeriod) !== targetKey &&
+        toCentavos(b.remainingBalance) > 0
+    )
+    .reduce((sum, b) => sum + Math.max(0, toCentavos(b.remainingBalance)), 0);
+
+  const hasCurrentMonthActiveBill = (existingBills || []).some(
+    (b) =>
+      !b.isArchived &&
+      b.roomId === room.id &&
+      normalizeMonthKeyInternal(b.billingMonthKey || b.billingPeriod) === targetKey
+  );
+
+  const roomUnpaidCents = hasCurrentMonthActiveBill
+    ? 0
+    : Math.max(0, toCentavos(room.unpaidBalance || 0));
+
+  return fromCentavos(Math.max(priorUnpaidCents, roomUnpaidCents));
+}
+
+export interface RequiredDepositPaymentInput {
+  room: Room;
+  activeBills?: BillRecord[];
+  amount: number;
+  method: PaymentTransaction['method'];
+  referenceNo?: string;
+  note?: string;
+  applyToActiveBill?: boolean;
+  advanceCapMode?: AdvanceCapPolicyMode;
+  nowIso?: string;
+  idempotencyKey?: string;
+}
+
+export interface RequiredDepositPaymentResult {
+  ok: boolean;
+  duplicate?: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  updatedRoom?: Room;
+  updatedBills: BillRecord[];
+  appliedToDeposit: number;
+  overpaymentToAdvance: number;
+  appliedToActiveBills: number;
+  remainingRequiredDeposit: number;
+  depositTransaction?: PaymentTransaction;
+  ledgerEntry?: AdvanceBalanceTransaction;
+}
+
+/**
+ * Records a tenant payment toward their assigned Required Security Deposit in integer centavos.
+ * - By default (`applyToActiveBill = false`), holds the paid deposit safely on `room.securityDepositPaid`
+ *   without touching current month rent/electricity bills.
+ * - Any excess paid above the remaining Required Deposit rolls cleanly into the Advance Credit Wallet.
+ * - If `applyToActiveBill = true`, deducts the newly paid deposit credit against active unpaid bills.
+ */
+export function executeRequiredDepositPaymentTransaction(
+  input: RequiredDepositPaymentInput
+): RequiredDepositPaymentResult {
+  const {
+    room,
+    activeBills = [],
+    amount,
+    method,
+    referenceNo,
+    note,
+    applyToActiveBill = false,
+    advanceCapMode = 'unlimited',
+    idempotencyKey,
+  } = input;
+
+  const paymentCents = Math.max(0, toCentavos(amount));
+  if (room.status !== 'occupied') {
+    return {
+      ok: false,
+      errorCode: 'ROOM_VACANT',
+      errorMessage: 'Required Deposit payments can only be recorded for occupied rooms.',
+      updatedBills: activeBills,
+      appliedToDeposit: 0,
+      overpaymentToAdvance: 0,
+      appliedToActiveBills: 0,
+      remainingRequiredDeposit: getRoomDepositStatus(room).remaining,
+    };
+  }
+  if (paymentCents <= 0) {
+    return {
+      ok: false,
+      errorCode: 'INVALID_DEPOSIT_PAYMENT_AMOUNT',
+      errorMessage: 'Required Deposit payment amount must be greater than ₱0.00.',
+      updatedBills: activeBills,
+      appliedToDeposit: 0,
+      overpaymentToAdvance: 0,
+      appliedToActiveBills: 0,
+      remainingRequiredDeposit: getRoomDepositStatus(room).remaining,
+    };
+  }
+
+  if (
+    idempotencyKey &&
+    (room.securityDepositHistory?.some(
+      (tx) => tx.id === idempotencyKey || tx.referenceNo === idempotencyKey
+    ) ||
+      room.advanceHistory?.some((tx) => tx.idempotencyKey === idempotencyKey))
+  ) {
+    return {
+      ok: false,
+      duplicate: true,
+      errorCode: 'DUPLICATE_DEPOSIT_PAYMENT',
+      errorMessage: 'This Required Deposit payment was already recorded.',
+      updatedRoom: room,
+      updatedBills: activeBills,
+      appliedToDeposit: 0,
+      overpaymentToAdvance: 0,
+      appliedToActiveBills: 0,
+      remainingRequiredDeposit: getRoomDepositStatus(room).remaining,
+    };
+  }
+
+  const nowIso = input.nowIso || new Date().toISOString();
+  const statusBefore = getRoomDepositStatus(room);
+  const remainingDepositBeforeCents = toCentavos(statusBefore.remaining);
+  const appliedToDepositCents = Math.min(paymentCents, remainingDepositBeforeCents);
+  const overpaymentCents = Math.max(0, paymentCents - appliedToDepositCents);
+  const overpaymentPeso = fromCentavos(overpaymentCents);
+
+  const currentAdvCents = Math.max(0, toCentavos(room.advanceRent || 0));
+  if (overpaymentCents > 0) {
+    const allowance = getAdvancePolicyAllowance(
+      room.monthlyRent,
+      fromCentavos(currentAdvCents),
+      advanceCapMode
+    );
+    if (allowance.isCapped && overpaymentCents > toCentavos(allowance.remainingAllowance)) {
+      return {
+        ok: false,
+        errorCode: 'ADVANCE_CAP_EXCEEDED',
+        errorMessage: `Excess deposit payment (${overpaymentPeso.toFixed(2)}) exceeds the 1-Month Advance Policy allowance (${allowance.remainingAllowance.toFixed(2)} remaining).`,
+        updatedBills: activeBills,
+        appliedToDeposit: 0,
+        overpaymentToAdvance: 0,
+        appliedToActiveBills: 0,
+        remainingRequiredDeposit: statusBefore.remaining,
+      };
+    }
+  }
+
+  const nextDepositPaidBeforeApplyCents =
+    toCentavos(statusBefore.paid) + appliedToDepositCents;
+  let finalDepositPaidPeso = fromCentavos(nextDepositPaidBeforeApplyCents);
+  let nextBills = activeBills;
+  let appliedToActiveBillsPeso = 0;
+  let nextRoomUnpaidPeso = Math.max(0, roundCurrencyCentavos(room.unpaidBalance || 0));
+
+  if (applyToActiveBill && appliedToDepositCents > 0) {
+    const billApplyRes = applyRoomSecurityDepositToActiveBills({
+      roomId: room.id,
+      status: room.status,
+      activeReceiptId: room.activeReceiptId,
+      availableSecurityDepositPaid: fromCentavos(appliedToDepositCents),
+      roomUnpaidBalance: nextRoomUnpaidPeso,
+      bills: activeBills,
+      nowIso,
+    });
+    nextBills = billApplyRes.bills;
+    appliedToActiveBillsPeso = billApplyRes.depositUsedOnActiveBills;
+    nextRoomUnpaidPeso = billApplyRes.finalRoomUnpaidBalance;
+    finalDepositPaidPeso = fromCentavos(
+      Math.max(0, nextDepositPaidBeforeApplyCents - toCentavos(appliedToActiveBillsPeso))
+    );
+  }
+
+  const nextAdvCents = currentAdvCents + overpaymentCents;
+  let ledgerEntry: AdvanceBalanceTransaction | undefined;
+  if (overpaymentCents > 0) {
+    ledgerEntry = {
+      id: createUniqueId('adv-dep-over'),
+      type: 'overpayment_credit',
+      category: 'advance_credit',
+      amount: overpaymentPeso,
+      createdAt: nowIso,
+      description: 'Excess Required Deposit Credited to Advance',
+      note: `Excess ₱${overpaymentPeso.toFixed(2)} above Required Deposit (${method}${referenceNo ? ` Ref ${referenceNo}` : ''}) credited to Advance Wallet`,
+      referenceNo: referenceNo?.trim() || generateFinancialRefNo('ADV', nowIso),
+      balanceBefore: fromCentavos(currentAdvCents),
+      balanceAfter: fromCentavos(nextAdvCents),
+      status: 'completed',
+      idempotencyKey,
+    };
+  }
+
+  let resolvedDepositNote = note?.trim() || '';
+  if (!resolvedDepositNote) {
+    if (appliedToActiveBillsPeso > 0) {
+      resolvedDepositNote = `Required Deposit paid (${method}); ₱${appliedToActiveBillsPeso.toFixed(2)} applied to active bill`;
+    } else if (overpaymentCents > 0) {
+      resolvedDepositNote = `Required Deposit paid (${method}); excess ₱${overpaymentPeso.toFixed(2)} credited to Advance`;
+    } else {
+      resolvedDepositNote = `Required Security Deposit payment (${method})`;
+    }
+  }
+
+  const depositTransaction: PaymentTransaction = {
+    id: idempotencyKey || createUniqueId('tx-dep'),
+    amount: fromCentavos(paymentCents),
+    overpaymentCredited: overpaymentCents > 0 ? overpaymentPeso : undefined,
+    method,
+    paidAt: nowIso,
+    referenceNo: referenceNo?.trim() || undefined,
+    note: resolvedDepositNote,
+  };
+
+  const updatedRoom: Room = {
+    ...room,
+    securityDeposit: statusBefore.required,
+    securityDepositPaid: finalDepositPaidPeso,
+    securityDepositHistory: [
+      depositTransaction,
+      ...(room.securityDepositHistory || []),
+    ],
+    unpaidBalance: nextRoomUnpaidPeso,
+    advanceRent: fromCentavos(nextAdvCents),
+    advanceHistory: ledgerEntry
+      ? [ledgerEntry, ...(room.advanceHistory || [])]
+      : room.advanceHistory,
+    updatedAt: nowIso,
+  };
+
+  // Compute remaining Required Deposit from the room's actual post-transaction held balance
+  // so `remainingRequiredDeposit` always matches `getRoomDepositStatus(updatedRoom).remaining`.
+  const remainingAfterCents = Math.max(
+    0,
+    toCentavos(statusBefore.required) - toCentavos(finalDepositPaidPeso)
+  );
+
+  return {
+    ok: true,
+    updatedRoom,
+    updatedBills: nextBills,
+    appliedToDeposit: fromCentavos(appliedToDepositCents),
+    overpaymentToAdvance: overpaymentPeso,
+    appliedToActiveBills: appliedToActiveBillsPeso,
+    remainingRequiredDeposit: fromCentavos(remainingAfterCents),
+    depositTransaction,
+    ledgerEntry,
   };
 }

@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Printer,
   ReceiptText,
+  ShieldCheck,
   X,
   Zap,
 } from 'lucide-react';
@@ -27,10 +28,13 @@ import {
   roundCurrency,
 } from '../../utils/billingCalculator';
 import {
+  buildCustomSplitAllocation,
   computeBillComponentBalances,
   formatKwhReading,
   getAdvancePolicyAllowance,
+  getRoomDepositStatus,
 } from '../../utils/financialEngine';
+import { PaymentModalMode } from '../modals/RecordPaymentModal';
 
 interface AllPaymentsViewProps {
   bills: BillRecord[];
@@ -51,6 +55,11 @@ interface AllPaymentsViewProps {
     }
   ) => void;
   onOpenAdvanceModal?: (room: Room) => void;
+  onOpenPaymentModal?: (
+    room: Room,
+    bill?: BillRecord | null,
+    mode?: PaymentModalMode
+  ) => void;
   onArchiveBill: (billId: string) => void;
   onOpenNewBillScanner: () => void;
   onOpenArchiveCenter: () => void;
@@ -65,6 +74,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   onSelectBillForReceipt,
   onRecordPayment,
   onOpenAdvanceModal,
+  onOpenPaymentModal,
   onArchiveBill,
   onOpenNewBillScanner,
   onOpenArchiveCenter,
@@ -77,6 +87,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
   const [customRentPay, setCustomRentPay] = useState('');
   const [customElecPay, setCustomElecPay] = useState('');
   const [customPenaltyPay, setCustomPenaltyPay] = useState('');
+  const [customCarryOverPay, setCustomCarryOverPay] = useState('');
   const [payError, setPayError] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<
     'Cash' | 'GCash' | 'Maya' | 'Bank Transfer'
@@ -124,6 +135,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     setCustomRentPay(String(comp.rentRemaining));
     setCustomElecPay(String(comp.electricityRemaining));
     setCustomPenaltyPay(String(comp.latePenaltyRemaining));
+    setCustomCarryOverPay(String(comp.carryOverRemaining));
     setPayError(null);
     setPayMethod('GCash');
     setPayRef('');
@@ -159,18 +171,17 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
     if (!payingBill) return;
     setPayError(null);
 
+    const customSplit = buildCustomSplitAllocation({
+      rent: customRentPay,
+      electricity: customElecPay,
+      latePenalty: customPenaltyPay,
+      carryOver: customCarryOverPay,
+    });
     let amt = parseFloat(payAmount) || 0;
     let customAllocation: Partial<ComponentPaymentAllocation> | undefined;
     if (payAllocationTarget === 'custom') {
-      const rAmt = Math.max(0, parseFloat(customRentPay) || 0);
-      const eAmt = Math.max(0, parseFloat(customElecPay) || 0);
-      const pAmt = Math.max(0, parseFloat(customPenaltyPay) || 0);
-      amt = roundCurrency(rAmt + eAmt + pAmt);
-      customAllocation = {
-        rentPaid: rAmt,
-        electricityPaid: eAmt,
-        latePenaltyPaid: pAmt,
-      };
+      amt = customSplit.totalAmount;
+      customAllocation = customSplit.customAllocation;
     }
 
     if (amt <= 0) {
@@ -203,11 +214,12 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
 
   const enteredPayNum =
     payAllocationTarget === 'custom'
-      ? roundCurrency(
-          Math.max(0, parseFloat(customRentPay) || 0) +
-            Math.max(0, parseFloat(customElecPay) || 0) +
-            Math.max(0, parseFloat(customPenaltyPay) || 0)
-        )
+      ? buildCustomSplitAllocation({
+          rent: customRentPay,
+          electricity: customElecPay,
+          latePenalty: customPenaltyPay,
+          carryOver: customCarryOverPay,
+        }).totalAmount
       : parseFloat(payAmount) || 0;
   const excessOverpayment =
     payingBill && enteredPayNum > payingBill.remainingBalance
@@ -310,46 +322,94 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {monthlyRoomStatuses.map(({ room, summary }) => (
-                <button
-                  key={room.id}
-                  type="button"
-                  onClick={() =>
-                    summary.matchingBill
-                      ? onSelectBillForReceipt(summary.matchingBill)
-                      : onOpenNewBillScanner()
-                  }
-                  className="rounded-2xl bg-[#0D121B] hover:bg-[#151E2E] border border-[#222E44] p-3 text-left flex items-center justify-between gap-2.5 transition cursor-pointer"
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs font-extrabold text-white leading-snug">
-                      {room.name} • {room.tenant?.fullName || 'Occupied'}
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                      {summary.detailText}
-                    </div>
-                  </div>
-                  <span
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold shrink-0 border ${
-                      summary.status === 'paid'
-                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
-                        : summary.status === 'partial'
-                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
-                        : summary.status === 'unpaid'
-                        ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
-                        : 'bg-slate-800/80 text-slate-300 border-slate-700'
-                    }`}
+              {monthlyRoomStatuses.map(({ room, summary }) => {
+                const depStatus = getRoomDepositStatus(room);
+                return (
+                  <div
+                    key={room.id}
+                    className="rounded-2xl bg-[#0D121B] hover:bg-[#151E2E] border border-[#222E44] p-3 flex flex-col justify-between gap-2 transition"
                   >
-                    {summary.status === 'paid'
-                      ? 'Paid ✓'
-                      : summary.status === 'partial'
-                      ? 'Partial'
-                      : summary.status === 'unpaid'
-                      ? 'Unpaid'
-                      : 'Not Billed'}
-                  </span>
-                </button>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        summary.matchingBill
+                          ? onSelectBillForReceipt(summary.matchingBill)
+                          : onOpenNewBillScanner()
+                      }
+                      className="text-left flex items-center justify-between gap-2.5 cursor-pointer w-full"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-extrabold text-white leading-snug">
+                          {room.name} • {room.tenant?.fullName || 'Occupied'}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                          {summary.detailText}
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold shrink-0 border ${
+                          summary.status === 'paid'
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                            : summary.status === 'partial'
+                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                              : summary.status === 'unpaid'
+                                ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
+                                : 'bg-slate-800/80 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {summary.status === 'paid'
+                          ? 'Paid ✓'
+                          : summary.status === 'partial'
+                            ? 'Partial'
+                            : summary.status === 'unpaid'
+                              ? 'Unpaid'
+                              : 'Not Billed'}
+                      </span>
+                    </button>
+
+                    {onOpenPaymentModal &&
+                      ((summary.matchingBill &&
+                        !summary.matchingBill.isArchived &&
+                        summary.matchingBill.remainingBalance > 0) ||
+                        depStatus.remaining > 0) && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#1D283D]">
+                          {summary.matchingBill &&
+                            !summary.matchingBill.isArchived &&
+                            summary.matchingBill.remainingBalance > 0 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onOpenPaymentModal(room, summary.matchingBill, 'current_month')
+                                }
+                                className="flex-1 py-1.5 px-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1 cursor-pointer transition"
+                              >
+                                <CreditCard className="w-3 h-3 shrink-0" />
+                                <span>Pay {summary.periodLabel}</span>
+                              </button>
+                            )}
+                          {depStatus.remaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenPaymentModal(
+                                  room,
+                                  summary.matchingBill && !summary.matchingBill.isArchived
+                                    ? summary.matchingBill
+                                    : null,
+                                  'required_deposit'
+                                )
+                              }
+                              className="flex-1 py-1.5 px-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1 cursor-pointer transition"
+                            >
+                              <ShieldCheck className="w-3 h-3 shrink-0" />
+                              <span>Pay Deposit</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -566,6 +626,15 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         const targetRoom = rooms.find(
                           (r) => r.id === bill.roomId && !r.isArchived
                         );
+                        const depStatus = targetRoom
+                          ? getRoomDepositStatus(targetRoom)
+                          : null;
+                        const hasUnpaidDeposit = Boolean(
+                          targetRoom &&
+                            targetRoom.status === 'occupied' &&
+                            depStatus &&
+                            depStatus.remaining > 0
+                        );
                         const hasPaidOverallBalance =
                           bill.status === 'paid' &&
                           (bill.remainingBalance || 0) <= 0 &&
@@ -576,14 +645,40 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                             {(bill.remainingBalance > 0 || hasPaidOverallBalance) && (
                               <button
                                 type="button"
-                                onClick={() => openPaymentDialog(bill)}
-                                className="px-4 py-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                                onClick={() => {
+                                  if (onOpenPaymentModal && targetRoom) {
+                                    onOpenPaymentModal(targetRoom, bill, 'current_month');
+                                  } else {
+                                    openPaymentDialog(bill);
+                                  }
+                                }}
+                                className={`px-4 py-2.5 rounded-2xl font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid ${
+                                  bill.remainingBalance > 0
+                                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md shadow-emerald-500/20'
+                                    : 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300'
+                                }`}
                               >
                                 <CreditCard className="w-3.5 h-3.5" />
                                 <span>
                                   {bill.remainingBalance > 0
-                                    ? 'Record Payment / Overpayment'
+                                    ? `Pay ${bill.billingPeriod} Balance`
                                     : 'Pay Advance for Next Month'}
+                                </span>
+                              </button>
+                            )}
+
+                            {onOpenPaymentModal && hasUnpaidDeposit && targetRoom && depStatus && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onOpenPaymentModal(targetRoom, bill, 'required_deposit')
+                                }
+                                className="px-3.5 py-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                                title={`Pay tenant Required Security Deposit (${formatPeso(depStatus.remaining)} remaining)`}
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                <span>
+                                  Pay Req. Deposit ({formatPeso(depStatus.remaining)})
                                 </span>
                               </button>
                             )}
@@ -783,6 +878,24 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                           const raw = e.target.value.replace(/,/g, '');
                           if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
                           setCustomPenaltyPay(raw);
+                        }}
+                        className="w-full h-10 rounded-xl bg-[#0D121B] border border-rose-500/40 px-3 text-sm font-bold text-rose-300 font-mono-num"
+                      />
+                    </div>
+                  )}
+                  {payingBillComponents.carryOverRemaining > 0 && (
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-rose-300 mb-1">
+                        Previous Month Carry-Over Payment (₱)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={customCarryOverPay}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/,/g, '');
+                          if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
+                          setCustomCarryOverPay(raw);
                         }}
                         className="w-full h-10 rounded-xl bg-[#0D121B] border border-rose-500/40 px-3 text-sm font-bold text-rose-300 font-mono-num"
                       />

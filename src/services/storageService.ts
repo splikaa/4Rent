@@ -536,6 +536,8 @@ export function loadRooms(): Room[] {
       const sanitized: Room = {
         ...r,
         securityDeposit: safeDeposit,
+        securityDepositPaid: isVacant ? 0 : Math.max(0, r.securityDepositPaid || 0),
+        securityDepositHistory: isVacant ? [] : r.securityDepositHistory,
         advanceRent: isVacant ? 0 : Math.max(0, r.advanceRent || 0),
         unpaidBalance: isVacant ? 0 : Math.max(0, r.unpaidBalance || 0),
         activeReceiptId: isVacant ? undefined : r.activeReceiptId,
@@ -552,6 +554,8 @@ export function saveRooms(rooms: Room[]): void {
     const isVacant = r.status === 'vacant';
     const nextRoom: Room = {
       ...r,
+      securityDepositPaid: isVacant ? 0 : Math.max(0, r.securityDepositPaid || 0),
+      securityDepositHistory: isVacant ? [] : r.securityDepositHistory,
       advanceRent: isVacant ? 0 : Math.max(0, r.advanceRent || 0),
       unpaidBalance: isVacant ? 0 : Math.max(0, r.unpaidBalance || 0),
       activeReceiptId: isVacant ? undefined : r.activeReceiptId,
@@ -893,6 +897,8 @@ export function commitBillingTransaction(
       const isVacant = r.status === 'vacant';
       const nextRoom: Room = {
         ...r,
+        securityDepositPaid: isVacant ? 0 : Math.max(0, r.securityDepositPaid || 0),
+        securityDepositHistory: isVacant ? [] : r.securityDepositHistory,
         advanceRent: isVacant ? 0 : Math.max(0, r.advanceRent || 0),
         unpaidBalance: isVacant ? 0 : Math.max(0, r.unpaidBalance || 0),
         activeReceiptId: isVacant ? undefined : r.activeReceiptId,

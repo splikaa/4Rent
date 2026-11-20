@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  CreditCard,
   DoorOpen,
   ListFilter,
   Lock,
@@ -32,6 +33,8 @@ import {
 } from '../../utils/rentSchedule';
 import { loadSettings } from '../../services/storageService';
 import { openMessengerAppWithReceipt } from '../../services/notificationService';
+import { getRoomDepositStatus } from '../../utils/financialEngine';
+import { PaymentModalMode } from '../modals/RecordPaymentModal';
 
 interface DueCalendarViewProps {
   rooms: Room[];
@@ -43,6 +46,11 @@ interface DueCalendarViewProps {
   onSelectRoomDetails: (room: Room) => void;
   onOpenScanMeter: (room: Room) => void;
   onSelectBillForReceipt: (bill: BillRecord) => void;
+  onOpenPaymentModal?: (
+    room: Room,
+    bill?: BillRecord | null,
+    mode?: PaymentModalMode
+  ) => void;
 }
 
 export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
@@ -54,6 +62,7 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
   onSelectRoomDetails,
   onOpenScanMeter,
   onSelectBillForReceipt,
+  onOpenPaymentModal,
 }) => {
   const today = useMemo(() => new Date(), []);
   const [currentYear, setCurrentYear] = useState<number>(today.getFullYear());
@@ -837,6 +846,32 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
                           <DoorOpen className="w-3.5 h-3.5 text-amber-400" />
                           <span>Room Details</span>
                         </button>
+
+                        {bill && onOpenPaymentModal && bill.remainingBalance > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenPaymentModal(room, bill, 'current_month')}
+                            className="flex-1 min-w-[115px] py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md shadow-emerald-500/20"
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            <span>Pay {bill.billingPeriod}</span>
+                          </button>
+                        )}
+
+                        {(!bill || bill.remainingBalance <= 0) &&
+                          onOpenPaymentModal &&
+                          getRoomDepositStatus(room).remaining > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenPaymentModal(room, bill || null, 'required_deposit')
+                              }
+                              className="flex-1 min-w-[115px] py-2.5 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>Pay Req. Deposit</span>
+                            </button>
+                          )}
 
                         {bill && (
                           <button

@@ -11,6 +11,7 @@ import {
   computeBillComponentBalances,
   formatKwhReading,
 } from '../../utils/financialEngine';
+import { getReceiptDepositLabel } from '../../utils/depositStatusUi';
 
 interface PrintableA4ReceiptProps {
   bill: BillRecord;
@@ -21,6 +22,8 @@ interface PrintableA4ReceiptProps {
   prevMeterCropImg?: string;
   currMeterCropImg?: string;
   remainingAdvanceCredit: number;
+  roomDepositPaid?: number;
+  roomDepositRequired?: number;
   interactiveMode?: boolean;
   onInspectPhoto?: (
     fullImg: string,
@@ -73,6 +76,8 @@ export const PrintableA4Receipt = React.forwardRef(
       prevMeterCropImg,
       currMeterCropImg,
       remainingAdvanceCredit,
+      roomDepositPaid,
+      roomDepositRequired,
       interactiveMode = false,
       onInspectPhoto,
     }: PrintableA4ReceiptProps,
@@ -159,13 +164,27 @@ export const PrintableA4Receipt = React.forwardRef(
       advanceApplied > 0 ||
       bill.overpaymentToAdvance > 0 ||
       (bill.advanceBalanceBefore || 0) > 0;
+    const resolvedDepositRequired = Math.max(
+      0,
+      Number(roomDepositRequired ?? bill.securityDepositRequired ?? 0)
+    );
+    const resolvedDepositPaid = Math.max(
+      0,
+      Number(
+        roomDepositPaid !== undefined
+          ? roomDepositPaid
+          : bill.securityDepositRemainingAfterBill ?? 0
+      )
+    );
+    const resolvedDepositUnpaid = Math.max(
+      0,
+      Math.round((resolvedDepositRequired - resolvedDepositPaid) * 100) / 100
+    );
     const showRemainingSecurityDeposit =
       securityDepositApplied > 0 ||
+      resolvedDepositRequired > 0 ||
       typeof bill.securityDepositRemainingAfterBill === 'number';
-    const remainingSecurityDeposit = Math.max(
-      0,
-      Number(bill.securityDepositRemainingAfterBill ?? 0)
-    );
+    const remainingSecurityDeposit = resolvedDepositPaid;
     const hasInteractiveLightbox = Boolean(interactiveMode && onInspectPhoto);
 
     return (
@@ -853,9 +872,17 @@ export const PrintableA4Receipt = React.forwardRef(
 
             {showRemainingSecurityDeposit && (
               <div className="flex items-center justify-between font-semibold text-slate-700">
-                <span>Remaining Security Deposit Held</span>
+                <span>
+                  {getReceiptDepositLabel(
+                    resolvedDepositRequired,
+                    resolvedDepositUnpaid,
+                    formatPeso
+                  )}
+                </span>
                 <span className="font-mono-num text-slate-900">
-                  {formatPeso(remainingSecurityDeposit)}
+                  {resolvedDepositRequired > 0
+                    ? `${formatPeso(remainingSecurityDeposit)} / ${formatPeso(resolvedDepositRequired)}`
+                    : formatPeso(remainingSecurityDeposit)}
                 </span>
               </div>
             )}

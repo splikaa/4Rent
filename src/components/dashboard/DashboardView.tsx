@@ -9,6 +9,7 @@ import {
   Camera,
   CheckCircle2,
   ChevronRight,
+  CreditCard,
   DoorOpen,
   Download,
   Home,
@@ -38,7 +39,13 @@ import {
   getRoomMonthlyPaymentStatus,
   isMobileDevice,
 } from '../../utils/billingCalculator';
-import { formatKwhReading } from '../../utils/financialEngine';
+import {
+  formatKwhReading,
+  getRoomDepositStatus,
+  resolveActiveRoomReceipt,
+} from '../../utils/financialEngine';
+import { getDepositStatusMeta } from '../../utils/depositStatusUi';
+import { PaymentModalMode } from '../modals/RecordPaymentModal';
 import { loadReadingLogs } from '../../services/storageService';
 
 interface DashboardViewProps {
@@ -55,6 +62,11 @@ interface DashboardViewProps {
   onOpenScanMeter: (room: Room) => void;
   onSelectBillForReceipt: (bill: BillRecord) => void;
   onOpenAdvanceBalanceModal: (room: Room) => void;
+  onOpenPaymentModal?: (
+    room: Room,
+    bill?: BillRecord | null,
+    mode?: PaymentModalMode
+  ) => void;
   onSelectRoomDetails: (room: Room) => void;
   onOpenDownloadModal?: () => void;
   isInstalledStandalone?: boolean;
@@ -74,6 +86,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenScanMeter,
   onSelectBillForReceipt,
   onOpenAdvanceBalanceModal,
+  onOpenPaymentModal,
   onSelectRoomDetails,
   onOpenDownloadModal,
   isInstalledStandalone = false,
@@ -132,14 +145,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     (i) => i.status === 'booked' || i.status === 'inquiry'
   );
 
-  const getRoomActiveReceipt = (room: Room): BillRecord | undefined => {
-    if (room.status === 'vacant') return undefined;
-    if (room.activeReceiptId) {
-      const match = bills.find((b) => b.id === room.activeReceiptId);
-      if (match) return match;
-    }
-    return activeBills.find((b) => b.roomId === room.id);
-  };
+  const getRoomActiveReceipt = (room: Room): BillRecord | undefined =>
+    resolveActiveRoomReceipt(room, bills);
 
   return (
     <div className="w-full max-w-6xl mx-auto px-5 sm:px-8 lg:px-12 pt-7 pb-32 space-y-8 animate-view-enter">
@@ -488,12 +495,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 room.securityDeposit > 0
                   ? room.securityDeposit
                   : room.monthlyRent;
-              const paidDepositCredit = isOccupied
-                ? Math.max(0, room.securityDepositPaid || 0)
-                : 0;
+              const depositStatus = getRoomDepositStatus(room);
+              const depositMeta = getDepositStatusMeta(depositStatus.status);
+              let depositSubtext = 'Tap to Pay Deposit';
+              if (depositStatus.status === 'paid') {
+                depositSubtext = `Paid: ${formatPesoPrivacy(depositStatus.paid, privacyMaskEnabled)}`;
+              } else if (depositStatus.paid > 0) {
+                depositSubtext = `Paid ${formatPesoPrivacy(depositStatus.paid, privacyMaskEnabled)} • Due ${formatPesoPrivacy(depositStatus.remaining, privacyMaskEnabled)}`;
+              }
               const safeAdvance = isOccupied
                 ? Math.max(0, room.advanceRent || 0)
                 : 0;
+              const hasUnpaidCurrentBill = Boolean(
+                isOccupied && activeReceipt && activeReceipt.remainingBalance > 0
+              );
+              const hasUnpaidDeposit = isOccupied && depositStatus.remaining > 0;
               const hasPaidOverallBalance =
                 isOccupied &&
                 (room.unpaidBalance || 0) <= 0 &&
@@ -578,19 +594,64 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </span>
                       </div>
 
-                      <div className="rounded-2xl bg-[#0D121B] border border-[#202B40] p-3">
-                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
-                          Req. Deposit
-                        </span>
-                        <span className="text-sm font-extrabold text-emerald-400 font-mono-num mt-1 block break-words">
-                          {formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}
-                        </span>
-                        {isOccupied && paidDepositCredit > 0 && (
-                          <span className="text-[10px] text-emerald-300 font-semibold block mt-0.5 leading-snug">
-                            Credit: {formatPesoPrivacy(paidDepositCredit, privacyMaskEnabled)}
+                      {isOccupied && onOpenPaymentModal ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenPaymentModal(room, activeReceipt || null, 'required_deposit');
+                          }}
+                          className={`rounded-2xl bg-[#0D121B] border p-3 text-left transition hover:bg-[#162133] cursor-pointer ${
+                            hasUnpaidDeposit
+                              ? 'border-amber-500/35'
+                              : 'border-emerald-500/30'
+                          }`}
+                          title="Tap to record or view Required Security Deposit payment"
+                        >
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between gap-1">
+                            <span>Req. Deposit</span>
+                            <span
+                              className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded ${depositMeta.compactBadgeClass}`}
+                            >
+                              {depositMeta.shortLabel}
+                            </span>
                           </span>
-                        )}
-                      </div>
+                          <span className="text-sm font-extrabold text-emerald-400 font-mono-num mt-1 block break-words">
+                            {formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}
+                          </span>
+                          <span
+                            className={`text-[10px] font-semibold block mt-0.5 leading-snug ${depositMeta.subtextClass}`}
+                          >
+                            {depositSubtext}
+                          </span>
+                        </button>
+                      ) : (
+                        <div
+                          className="rounded-2xl bg-[#0D121B] border border-[#202B40] p-3 text-left"
+                          title="Required security deposit for this room"
+                        >
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between gap-1">
+                            <span>Req. Deposit</span>
+                            {isOccupied && (
+                              <span
+                                className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded ${depositMeta.compactBadgeClass}`}
+                              >
+                                {depositMeta.shortLabel}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-sm font-extrabold text-emerald-400 font-mono-num mt-1 block break-words">
+                            {formatPesoPrivacy(safeDeposit, privacyMaskEnabled)}
+                          </span>
+                          {isOccupied && (
+                            <span
+                              className={`text-[10px] font-semibold block mt-0.5 leading-snug ${depositMeta.subtextClass}`}
+                            >
+                              {depositSubtext}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       <div
                         className={`rounded-2xl bg-[#0D121B] border border-[#202B40] p-3 flex flex-col justify-between ${
@@ -652,15 +713,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     className="mt-4 pt-3.5 border-t border-[#202B40] flex flex-col gap-2"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {isOccupied ? (
                         <>
+                          {onOpenPaymentModal && (hasUnpaidCurrentBill || hasUnpaidDeposit) && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenPaymentModal(
+                                  room,
+                                  activeReceipt || null,
+                                  hasUnpaidCurrentBill
+                                    ? 'current_month'
+                                    : 'required_deposit'
+                                )
+                              }
+                              className="flex-1 min-w-[130px] py-2.5 px-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-md shadow-emerald-500/20"
+                              title={
+                                hasUnpaidCurrentBill && activeReceipt
+                                  ? `Record payment for ${activeReceipt.billingPeriod} or Required Deposit`
+                                  : 'Record tenant Required Deposit payment'
+                              }
+                            >
+                              <CreditCard className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">
+                                {hasUnpaidCurrentBill && activeReceipt
+                                  ? `Pay ${activeReceipt.billingPeriod}`
+                                  : 'Pay Req. Deposit'}
+                              </span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => onOpenScanMeter(room)}
-                            className="flex-1 py-2.5 px-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-md shadow-amber-500/15"
+                            className="flex-1 min-w-[120px] py-2.5 px-3 rounded-2xl bg-[#F59E0B] hover:bg-[#FBBF24] text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid shadow-md shadow-amber-500/15"
                           >
-                            <Camera className="w-3.5 h-3.5" />
+                            <Camera className="w-3.5 h-3.5 shrink-0" />
                             <span>OCR Sub-Meter</span>
                           </button>
                           {activeReceipt ? (
@@ -876,7 +964,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="mt-7 pt-4 border-t border-[#222E44] flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
                 <span className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Paid Deposit Auto-Deducts • Overpay → Advance</span>
+                  <span>Current Month &amp; Deposit Pay • Overpay → Advance</span>
                 </span>
                 <button
                   type="button"
