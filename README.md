@@ -1,183 +1,142 @@
 # 4Rent Management System
 
 <p align="center">
-  <img src="public/icon.svg" width="110" height="110" alt="4Rent Management System Logo" />
+  <img src="public/icon.svg" width="104" height="104" alt="4Rent Management System" />
 </p>
 
 <p align="center">
-  <strong>Offline-First Desktop (Windows &amp; macOS), Web PWA (iOS &amp; Android) &amp; Mobile App for Room, Tenant, Monthly Rent Schedule, Advance Balance, and Mandatory Electric Sub-Meter OCR Billing.</strong><br/>
-  <strong>Version: <code>v1.1.0</code> • Developed by <a href="https://github.com/splikaa">splikaa</a></strong>
+  <strong>Property, Sub-Meter &amp; Rental Billing Suite for Windows, macOS, Android, and iOS</strong><br/>
+  Version <code>v1.0.1</code> • Built by <a href="https://github.com/splikaa">splikaa</a>
 </p>
 
 ---
 
-## ✨ What's New in `v1.1.0`
+## Client Installation (No Node.js or CLI Required)
 
-- **macOS Desktop Packaging (Electron `.dmg` & `.zip`)**: Native Apple Silicon (`arm64`) and Intel (`x64`) packaging via `electron-builder`, bundled `.icns` app icon, hardened runtime entitlements, camera usage prompt, macOS application/Edit menus (`Cmd+C`/`Cmd+V`/`Cmd+Q`), and native clipboard PNG IPC bridge.
-- **iOS Safari "Add to Home Screen" PWA Support**: Full standalone iOS web app experience with `#0B0E14` dark status bar integration, opaque Apple touch icons (`180x180`, `167x167`, `152x152`), safe-area notch insets, same-origin Service Worker caching, and live rear-camera OCR support on mobile web/iOS.
-- **Copy Receipt as PNG**: Replaced desktop and mobile `Share PDF to Messenger` with one-tap **Copy Receipt as PNG** (high-resolution 2.5x PNG copied directly to the clipboard for instant pasting into Messenger and chat apps) while preserving **Share Receipt**, **Download PDF**, **Download PNG**, and **Print Receipt**.
-- **Independent Monthly Electricity Rate Schedule**: Fixed rate editing so pressing Backspace allows completely empty inputs without snapping to `0` (validating on Save), enforced strict month-by-month rate independence (editing February never changes January, March, or default fallback rates), and preserved historical monthly rates on previously issued bills.
-- **Monthly Rent Payment Schedule, Proration & Configurable Late Penalty**: Replaced legacy window logic with a billing-month-anchored **1st–10th** payment period (Due Date: **10th**, Late Penalty starting **11th**), calendar-accurate daily rent proration (28/29 leap-year/30/31-day months + mid-month move-in and move-out dates), and an admin-configurable Late Payment Penalty (Fixed `₱` or `%`, one-time or per-day, disabled by default with zero hardcoded rates).
-- **Mandatory OCR Sub-Meter Electricity Billing & Separate Payment Tracking**: Closes the rent-without-electricity loophole by requiring a verified monthly sub-meter reading (previous & current kWh) before bill generation, blocking duplicate monthly bills/readings per room and month, rejecting negative consumption unless a meter reset/replacement is documented, and tracking **Rent**, **Electricity**, and **Late Penalty** balances separately so bills remain `PARTIAL` until electricity charges are paid.
-- **Database Integrity (IndexedDB v3 / Schema v2)**: Non-destructive automatic migration preserving all existing records, dedicated `monthly_readings` store with unique `(roomId, billingMonthKey)` constraint, and atomic `commitBillingTransaction` writes with rollback safety.
+End users can install and run **4Rent** directly from the pre-built packages in this repository or from the **Download Apps** dialog inside the web app ([`https://splikaa.github.io/4Rent/`](https://splikaa.github.io/4Rent/)).
 
----
+### 1. Windows Desktop (`Windows 10 / 11`)
+- **Package**: [`4Rent-Desktop-Windows.zip`](./4Rent-Desktop-Windows.zip) or [`packages/desktop/4Rent-Launcher.exe`](./packages/desktop/4Rent-Launcher.exe) (~44 KB)
+- **Setup**:
+  1. Download and extract `4Rent-Desktop-Windows.zip` (or download `4Rent-Launcher.exe` directly).
+  2. Double-click **`4Rent-Launcher.exe`** (runs under standard user privileges; no administrator prompt).
+  3. Click **Launch 4Rent Standalone Desktop App** to open a dedicated borderless desktop window, or click **Pin to Desktop** to create a desktop shortcut with the official icon.
 
-## ⚡ Quick Start: Desktop, macOS, iOS & Android
+### 2. macOS Desktop (`Apple Silicon M1–M4 & Intel`)
+- **Package**: [`4Rent-Desktop-macOS.zip`](./4Rent-Desktop-macOS.zip) or [`packages/desktop/Install-4Rent-macOS.command`](./packages/desktop/Install-4Rent-macOS.command) (~171 KB)
+- **Setup (Option A — Native `.app` Bundle)**:
+  1. Download and unzip **`4Rent-Desktop-macOS.zip`** (Safari extracts it automatically in `Downloads`).
+  2. Double-click **`4Rent.app`** and select **Install to Applications & Launch** in the native macOS dialog, or drag **`4Rent.app`** directly into your **`Applications`** folder.
+- **Setup (Option B — 1-Click Installer)**:
+  1. Double-click **`Install 4Rent to Applications.command`** (or `Install-4Rent-macOS.command`).
+  2. The installer copies `4Rent.app` into `/Applications`, clears macOS Gatekeeper quarantine attributes (`xattr -cr`), places a shortcut on your Desktop, and launches the app.
 
-Landlords do **not** need developer tools to run **4Rent** on Windows, iOS, Android, or modern web browsers:
+### 3. Android Mobile (`Android 7.0+`)
+- **Package**: [`4Rent-v1.0.1-release.apk`](./4Rent-v1.0.1-release.apk) (also in [`packages/mobile/4Rent-v1.0.1-release.apk`](./packages/mobile/4Rent-v1.0.1-release.apk))
+- **Setup**:
+  1. Download `4Rent-v1.0.1-release.apk` on your phone and open it from your notification bar or **Files / Downloads**.
+  2. Allow installation from your browser/file manager if prompted, then tap **Install**.
+  3. Grant camera permission on first scan to use the live sub-meter OCR viewfinder.
 
-### 🖥️ Windows Desktop Launcher (Portable `.EXE`)
-1. Download **`4Rent-Launcher.exe`** (or **`4Rent-Desktop-Windows.zip`**) from the live web app or [`packages/desktop/`](./packages/desktop/).
-2. Double-click **`4Rent-Launcher.exe`** — no installer or administrator rights needed (`asInvoker`).
-3. Enter your **Property Space Code** once to create an official Desktop shortcut and launch 4Rent in an isolated standalone window.
-
-### 🍎 macOS Desktop App (Electron `.DMG` / `.ZIP`)
-1. On a macOS machine (Apple Silicon `arm64` or Intel `x64`), clone this repository and build the installable macOS package:
-   ```bash
-   npm install --legacy-peer-deps
-   npm run dist:mac
-   ```
-2. Open the generated `.dmg` inside `release/`, drag **`4Rent.app`** into **Applications**, and launch.
-3. Alternatively, run directly in desktop mode with `npm run build && npm run electron`.
-
-### 📲 iOS Home Screen App (Safari PWA — iPhone & iPad)
-1. Open the live HTTPS web app ([`https://splikaa.github.io/4Rent/`](https://splikaa.github.io/4Rent/)) in **Safari** on iOS.
-2. Tap the **Share** button (square with up arrow) and choose **Add to Home Screen**.
-3. Tap **Add**, then launch **4Rent** from your Home Screen for full-screen standalone app mode with offline IndexedDB persistence, live camera sub-meter OCR, and one-tap **Copy Receipt as PNG** / **Share Receipt**.
-
-### 📱 Android Mobile App (Offline-First Signed `.APK`)
-1. Download **`4Rent-v1.0.0-release.apk`** from the live web app or [`packages/mobile/`](./packages/mobile/).
-2. Install on an Android device (`Android 7.0+`).
-3. Includes Live Camera & Photo Sub-Meter OCR, `HD Crop` register verification, Biometrics / 4-Digit PIN unlock, Copy Receipt as PNG & Share Receipt, and offline IndexedDB persistence.
+### 4. iPhone & iPad (`iOS Safari`)
+- **Setup**:
+  1. Open [`https://splikaa.github.io/4Rent/`](https://splikaa.github.io/4Rent/) in **Safari**.
+  2. Tap **Share** → **Add to Home Screen** → **Add**.
+  3. Launch **4Rent** from your Home Screen for full-screen standalone mode with offline storage and camera OCR.
 
 ---
 
-## 🎮 Interactive Visual Sprite Guide (7 Step-by-Step Flows)
+## Billing Rules & Core Capabilities
 
-New users can open the built-in **4Rent Visual Sprite Guide** anytime from:
-- **Dashboard Header**: Tap **Guide** (available on both Mobile and Desktop headers, plus **Watch Visual Guide** when no rooms exist yet).
-- **Navigation Drawer**: Tap **Visual Sprite Guide (`7 FLOWS`)** from any screen.
+### Monthly Payment Window & Late Charges (Day 11+)
+- **Payment Window**: Days **1–10** of each billing month (Due Date: **10th**). No late charges apply on Days 1–10.
+- **Daily Divided Value & Late Charges**:
+  - Daily divided rent uses exact 2-decimal centavo floor division:
+    $$\text{Daily Rate} = \frac{\lfloor (\text{Monthly Rent} \times 100) \div \text{Days in Month} \rfloor}{100}$$
+  - Example (`₱5,000` rent in a `30`-day month): `₱5,000 ÷ 30 = ₱166.66/day`.
+  - Starting strictly on **Day 11**, unpaid rent accumulates the exact daily divided value per late day (`Day 11 = ₱166.66`, `Day 12 = ₱333.32`, `Day 13 = ₱499.98`), or uses a custom Fixed (`₱`) / Percentage (`%`) rate configured in **Settings → Monthly Rent Payment Schedule & Late Charges**.
+- **Calendar Proration**: Mid-month move-ins and move-outs prorate across 28, 29 (leap year), 30, and 31-day months using the exact truncated daily rate (`dailyRate × occupiedDays`), while full-month occupancy charges the exact monthly rent.
 
-Every flow pairs the animated **4Rent Guide Buddy** mascot with a **Play / Pause interactive Micro-UI Sprite Stage** across 3 clickable sub-steps and 1-click launch buttons:
+### Mandatory Sub-Meter Verification & Component Ledger
+- **Dual Sub-Meter Proof**: Each bill stores `#1 Previous` and `#2 Current` kWh readings alongside full meter photos and zoomed register crops.
+- **Verification Gate**: Final bill generation requires a verified current sub-meter reading, blocks duplicate active bills per `(roomId, billingMonthKey)`, and rejects negative kWh deltas unless a meter rollover or reset reason is documented.
+- **Independent Component Tracking**: Rent, Electricity, Late Charges, and Carry-Over balances are tracked separately. Paying rent alone keeps the statement marked **`PARTIAL`** until electricity charges are paid in full.
+- **Independent Monthly Electric Rates**: Each `YYYY-MM` billing period stores its own `₱/kWh` rate without altering prior months or settled receipts.
 
-1. **Flow 1 — Room Setup & Tenancy Lifecycle**: Add rooms, preserve continuous `kWh` baselines across tenants, verify ID & RA 10173 consent, and protect critical room actions with explicit confirmation dialogs.
-2. **Flow 2 — Sub-Meter OCR Scan & Auto-Rollover**: Capture `#1 Previous` / `#2 Current` slots via mobile camera or desktop image upload, inspect the zoomed `HD Crop`, and automatically roll `#2` into `#1` next cycle.
-3. **Flow 3 — Monthly Rent Schedule & Due Calendar**: Track billing-month **1st–10th** payment windows (late penalty starting Day **11**), inspect locked future months safely, and prevent duplicate scans once a month is already billed or paid.
-4. **Flow 4 — Official Statement & Copy Receipt as PNG**: Inspect white-paper statements with dual meter photo crops, proration & separate Rent/Electricity tracking, **Copy Receipt as PNG** straight into Messenger, or **Share Receipt** / export **A4 PDF**.
-5. **Flow 5 — Overpayment, Advance Balance & Refund**: Credit excess payments above `Remaining Balance` (only once electricity charges are settled) into next-month **Advance Balance**, guarded by **Biometrics or 4-Digit PIN**, with move-out refunds.
-6. **Flow 6 — Bookings, Archive Center & Immutable Logs**: Convert reservations into move-ins in 1 tap, restore archived rooms/receipts, and retain **immutable sub-meter reading logs** that cannot be deleted.
-7. **Flow 7 — Offline IndexedDB & Space Code Sync**: Work 100% offline in IndexedDB and pair Mobile safely from Desktop via your private **Property Space Code**.
+### Advance Credit & Security Deposit Controls
+- **Overall Balance Gate**: The **Advance Credit** button on room cards, room details, and payment records appears only after the tenant has settled their overall balance (`unpaidBalance <= 0` and active bill `status === 'paid'`).
+- **PIN / Biometric Protection**: Overpayments credited to the Advance Wallet, advance refunds, and permanent room deletions require 4-Digit PIN or biometric confirmation.
 
----
-
-## 🔍 Mandatory Dual Sub-Meter OCR Inspector & Continuous Baseline
-
-1. **Slot #1 (Previous Sub-Meter)**: Stores the unit's continuous `kWh` baseline, full photo proof, and zoomed register crop. Baseline readings **never reset** when a tenant vacates.
-2. **Slot #2 (Current Sub-Meter)**: Uses unified Mobile/Desktop/iOS OCR (`Tesseract.js` + preprocessing + `HD Crop` dial isolation) to extract mechanical drum or digital LCD digits (`e.g. 003020.7`) and requires explicit administrator verification (with PIN-authorized correction and documented reset/rollover justification for negative deltas) before saving.
-3. **Mandatory Billing & Anti-Loophole Enforcement**: Every occupied room must have a verified monthly reading before final bill generation, duplicate monthly readings or bills per `(roomId, billingMonthKey)` are blocked, and Rent vs. Electricity vs. Late Penalty balances are tracked separately so paying rent alone leaves the bill `PARTIAL` until electricity is paid.
-4. **Next-Month Rollover**: Issuing a monthly bill (or tapping **Rollover to Next Month**) promotes `#2 Current` directly into `#1 Previous` so monthly consumption deltas stay exact.
-
----
-
-## 📅 Monthly Rent Schedule, Proration, Late Penalty & Room Safeguards
-
-- **Billing-Month Payment Schedule (1st–10th)**: Every billing month uses a **1st–10th** payment period with Due Date on the **10th**; starting on the **11th**, the tenant becomes subject to the administrator-configured late payment penalty.
-- **Calendar-Accurate Rent Proration**: Supports mid-month move-in and move-out dates by computing `(Monthly Rent ÷ Calendar Days in Billing Month) × Chargeable Occupancy Days` across 28, 29 (leap year), 30, and 31-day months.
-- **Configurable Late Penalty (No Hardcoded Rates)**: Administrators configure fixed (`₱`) or percentage (`%`), one-time or per-day late penalties in **Settings → Monthly Rent Payment Schedule & Late Penalty** (disabled by default until set).
-- **Independent Monthly Electricity Rates**: Each month maintains its own independent `₱/kWh` rate without affecting prior or future months or historical bills, with empty-safe decimal editing validated on Save.
-- **Future Month & Paid Lock**: When viewing future months or rooms already marked **Paid** for the active cycle, **Scan Meter** stays intentionally locked while **Room Details** and **Advance Payment** remain accessible.
-- **Overpayments & Refunds**:
-  - Recording a payment higher than **Remaining Balance** automatically routes the excess `₱` into the room's **Advance Balance** for the next billing cycle (once electricity charges are covered) after **Fingerprint / 4-Digit PIN** verification.
-  - Prepaid deposits auto-deduct upon subsequent billing cycles or can be refunded cleanly via **Advance / Refund** when a tenant vacates.
-- **Room Action Confirmations**:
-  - **Tenant Vacated**: Moves tenant into **Previous Tenants History**, preserves final `kWh`, and checks remaining deposit/advance.
-  - **Archive Room**: Available only after vacating (occupied rooms cannot be archived accidentally).
-  - **Remove Room Permanently**: Requires explicit confirmation plus **Fingerprint / 4-Digit PIN** authentication.
-- **Immutable Archive Logs**: Sub-Meter reading logs inside **Archive & History** are read-only audit records and cannot be deleted.
+### Offline-First Storage & Mobile ↔ Desktop Synchronization
+- **Local Persistence**: All rooms, readings, meter image proofs, receipts, and settings are stored locally in **IndexedDB** (`v3`) and **localStorage**, allowing full offline operation.
+- **Offline-to-Online Auto-Sync**: Changes made while offline on Mobile or Desktop are flagged in a persistent sync queue (`4rent_pending_offline_sync`). When Wi-Fi or Mobile Data reconnects, the app automatically pulls the remote snapshot, merges offline rooms/bills/readings, and pushes the combined state to Firebase Realtime Database.
+- **Cross-Device Configuration Sync**: Updating Configurations (electric rates, monthly rate schedules, late charges rules, default rent, apartment details) on either Mobile or Desktop timestamps `settings.updatedAt` and applies the newer configuration across synced devices while keeping unlock PINs and biometric credentials strictly local to each device.
 
 ---
 
-## 📡 Offline-First IndexedDB & Private Cloud Space Sync
+## Environment Variables (Optional Custom Firebase Instance)
 
-- **Offline Core**: Rooms, tenant records, verified `monthly_readings` (IndexedDB v3 with unique `(roomId, billingMonthKey)` index), dual meter crops, bills, and PIN security settings persist locally in **IndexedDB** + **localStorage** with atomic billing transactions and zero internet required.
-- **Desktop Space Code Host**: Only **Desktop / Web** generates or updates a **Property Space Code** (randomly generated per fresh install).
-- **Mobile Monthly Limit & Privacy Notice**:
-  - Mobile devices apply a Space Code **once per calendar month**, triggering a clean reload and full snapshot hydration.
-  - **Do not share your Property Space Code publicly.** Anyone holding your Space Code and database endpoint can access synced property snapshots.
-- **Never Synced to Cloud**: Local unlock PINs (`pinCode`), WebAuthn credential IDs (`webAuthnCredentialId`), and optional client API tokens (`firebaseApiKey`) are stripped before any snapshot is uploaded.
-
----
-
-## 🔐 API Key Hygiene & Environment Setup
-
-This repository contains **no committed API keys, PAT tokens, or Firebase secrets**. Optional Firebase overrides are loaded exclusively at build/runtime via ignored local environment files (`.env.local`) or entered in **Settings → Cloud Sync**.
-
-1. Copy the template file:
-   ```bash
-   cp .env.example .env.local
-   ```
-2. Fill in your own values in `.env.local` (already excluded by [`.gitignore`](./.gitignore)):
-   ```env
-   VITE_FIREBASE_PROJECT_ID=your-project-id
-   VITE_FIREBASE_DATABASE_URL=https://your-project-id-default-rtdb.firebaseio.com
-   VITE_FIREBASE_API_KEY=your_optional_web_api_key_or_rtdb_token
-   VITE_PROPERTY_CODE=YOUR-SPACE-CODE
-   ```
-3. Never commit `.env`, `.env.local`, `google-services.json` keys, or personal GitHub access tokens to source control.
-
----
-
-## 🛠️ Developer Build, Desktop Packaging, Testing & Deployment
+No API keys or secrets are committed to this repository. To point a local build at your own Firebase Realtime Database:
 
 ```bash
-# 1. Install dependencies
+cp .env.example .env.local
+```
+
+```env
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_DATABASE_URL=https://your-project-id-default-rtdb.firebaseio.com
+VITE_FIREBASE_API_KEY=your_optional_database_secret_or_token
+VITE_PROPERTY_CODE=YOUR-SPACE-CODE
+```
+
+---
+
+## Developer Commands & Repository Structure
+
+```bash
+# Install dependencies
 npm install --legacy-peer-deps
 
-# 2. Run automated unit, financial, OCR, storage, migration & UI test suite
+# Run the 45-test suite (financial math, proration, late charges, OCR, storage, sync, UI)
 npm test
 
-# 3. Run local development server (Web / Responsive preview)
+# Start local development server
 npm run dev
 
-# 4. Type-check and build production web assets (outputs to dist/)
+# Build production web bundle + macOS zero-CLI application bundle (4Rent-Desktop-macOS.zip)
 npm run build
 
-# 5. Launch native Electron Desktop host locally
-npm run electron
-
-# 6. Package macOS .dmg and .zip installers (run on macOS — Apple Silicon & Intel)
-npm run dist:mac
-
-# 7. Package Windows Electron NSIS / portable builds
-npm run dist:win
-
-# 8. Build and cryptographically sign the offline Android APK
+# Build and sign the Android release APK (requires ANDROID_KEYSTORE_PASSWORD)
 npm run build:apk
 ```
 
-### Distributables & Packaging Layout
-
 ```text
-build/
-├── icon.icns                       # Multi-resolution macOS app icon
-├── icon.ico                        # Multi-resolution Windows app icon
-├── icon.png                        # 1024x1024 master desktop icon
-└── entitlements.mac.plist          # macOS hardened runtime & camera entitlements
-electron/
-├── main.cjs                        # Cross-platform Electron host (macOS menus + clipboard IPC)
-└── preload.cjs                     # Context-isolated desktop bridge
-packages/
-├── desktop/
-│   ├── 4Rent-Launcher.exe          # Portable Windows Desktop launcher (~44 KB)
-│   ├── 4rent-icon.ico              # Multi-resolution Windows icon
-│   └── src/LauncherProgram.cs      # C# WinForms launcher source
-└── mobile/
-    └── 4Rent-v1.0.0-release.apk    # Signed offline Android Mobile App APK
+├── build/                          # Master icons (.icns, .ico, .png) & macOS entitlements
+├── electron/                       # Optional Electron desktop host (main.cjs, preload.cjs)
+├── mobile_app/                     # Android WebView wrapper source & APK template
+├── packages/
+│   ├── desktop/
+│   │   ├── 4Rent-Desktop-Windows.zip
+│   │   ├── 4Rent-Desktop-macOS.zip
+│   │   ├── 4Rent-Launcher.exe
+│   │   ├── Install-4Rent-macOS.command
+│   │   └── src/LauncherProgram.cs
+│   └── mobile/
+│       └── 4Rent-v1.0.1-release.apk
+├── scripts/
+│   ├── build_macos_app.mjs         # Generates 4Rent.app bundle & 4Rent-Desktop-macOS.zip
+│   ├── build_signed_apk.mjs        # Injects compiled web bundle & signs Android release APK
+│   └── run_tests.mjs               # Node test runner
+├── src/
+│   ├── components/                 # Dashboard, Rooms, OCR Scanner, Receipts, Calendar, Settings
+│   ├── services/                   # IndexedDB, localStorage, Firebase RTDB sync & space switch
+│   ├── types/                      # TypeScript domain models
+│   └── utils/                      # Centavo financial engine, rent schedule, OCR & PDF export
+└── tests/                          # Automated unit & integration test suites
 ```
 
 ---
 
-## 📄 License
+## License
 
-Licensed under the **MIT License** — see [`LICENSE`](./LICENSE) for full terms and conditions.
+Released under the [MIT License](./LICENSE).

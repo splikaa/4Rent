@@ -1,34 +1,25 @@
 ========================================================================
-   4Rent Management System v1.0.0 — Official Windows Desktop Launcher
+   4Rent Management System v1.0.1 — Official Desktop Launchers
+   Windows (.EXE / .ZIP) & macOS (.APP / .ZIP / .COMMAND)
 ========================================================================
 
-ABOUT:
-`4Rent-Launcher.exe` is the native standalone Windows desktop launcher for the 
-4Rent Apartment & Sub-Meter Management System. It runs directly on any Windows 
-10 or Windows 11 PC with zero installation or administrative rights required.
+1. WINDOWS DESKTOP (`Windows 10 & Windows 11`)
+   - Extract `4Rent-Desktop-Windows.zip` or place `4Rent-Launcher.exe` in any folder.
+   - Double-click `4Rent-Launcher.exe` (no installation or administrator rights required).
+   - Click "Launch 4Rent Standalone Desktop App" to open 4Rent in a dedicated borderless
+     desktop window, or click "Pin to Desktop" to create a permanent Desktop shortcut.
 
-HOW TO USE:
-1. Double-click `4Rent-Launcher.exe`.
-2. The 4Rent Desktop Launcher window will open with the official system logo.
-3. Click "▶ Launch 4Rent Standalone Desktop App":
-   - Launches 4Rent in an isolated, distraction-free desktop window (using 
-     built-in Microsoft Edge or Google Chrome app runtime).
-   - Runs in maximized full-screen with zero browser address bars or tabs.
-4. Click "📌 Pin / Create Windows Desktop Shortcut":
-   - Automatically places a shortcut named "4Rent Management System" on your 
-     Windows Desktop with the official 4Rent system icon.
+2. macOS DESKTOP (`Apple Silicon M1–M4 & Intel Mac — Zero CLI Required`)
+   - Unzip `4Rent-Desktop-macOS.zip`.
+   - Option A (Standard macOS App): Double-click `4Rent.app` and choose
+     "Install to Applications & Launch", or drag `4Rent.app` into `/Applications`.
+   - Option B (1-Click Setup): Double-click `Install 4Rent to Applications.command`
+     to automatically install `4Rent.app` to `/Applications`, clear Gatekeeper quarantine
+     flags, create a Desktop shortcut, and launch the app.
 
-MULTI-USER DATA PARTITIONING:
-- In the "Property Space Code" box, you can specify your property's unique code 
-  (defaults to `4RENT-MAIN`, or enter your custom code like `4R-PROPERTY1`).
-- All rooms, sub-meter readings, tenant profiles, and receipts are isolated to 
-  that Property Code.
-- To sync between your Windows PC and your Mobile App, use the same 
-  Property Code on both devices!
-
-COMMAND-LINE SHORTCUTS:
-- `4Rent-Launcher.exe --launch`
-  Launches directly into the standalone application without showing the setup dialog.
-- `4Rent-Launcher.exe --silent 4RENT-MAIN`
-  Launches directly into the specified Property Space Code.
+3. MULTI-DEVICE CLOUD SYNCHRONIZATION (DESKTOP <-> MOBILE)
+   - Open Settings -> Cloud Database Sync on Desktop and Mobile.
+   - Enter the same Property Space Code on both devices and tap "Sync Now".
+   - Offline rooms, meter readings, receipts, and Configurations sync automatically
+     whenever Wi-Fi or Mobile Data is active.
 ========================================================================

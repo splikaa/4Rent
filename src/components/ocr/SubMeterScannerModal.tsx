@@ -1524,7 +1524,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
         billingMonthKey,
         createdAt: nowIso,
         dueDate: new Date(`${computedDueDateIso}T12:00:00`).toISOString(),
-        paymentWindowLabel: `Payment Period: ${billingSchedule.paymentPeriodLabel} (Late Penalty starts ${billingSchedule.lateStartLabel})`,
+        paymentWindowLabel: `Payment Period: ${billingSchedule.paymentPeriodLabel} (Late Charges start ${billingSchedule.lateStartLabel})`,
         prevReading: prevNum,
         currReading: currNum,
         consumptionKwh: billBreakdown.consumptionKwh,
@@ -3045,7 +3045,7 @@ export const SubMeterScannerModal: React.FC<SubMeterScannerModalProps> = ({
                     </div>
                     <div className="flex justify-between">
                       <span className={latePenaltyNum > 0 ? 'text-red-300' : 'text-slate-400'}>
-                        Late Payment Penalty
+                        Late Charges
                         {rentSummary.latePenaltyLabel
                           ? ` (${rentSummary.latePenaltyLabel})`
                           : billingSchedule.isPastDue

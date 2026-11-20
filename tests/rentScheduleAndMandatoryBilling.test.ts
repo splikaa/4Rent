@@ -33,6 +33,7 @@ import { PrintableA4Receipt } from '../src/components/receipt/PrintableA4Receipt
 import { ReceiptModal } from '../src/components/receipt/ReceiptModal';
 import { SettingsView } from '../src/components/settings/SettingsView';
 import { SubMeterScannerModal } from '../src/components/ocr/SubMeterScannerModal';
+import { ManageRoomsView } from '../src/components/rooms/ManageRoomsView';
 import { AllPaymentsView } from '../src/components/payments/AllPaymentsView';
 import { AppSettings, BillRecord, Room } from '../src/types/rental';
 
@@ -244,6 +245,28 @@ test('Task 4: Monthly rent proration accounts for 28, 29 (leap year), 30, and 31
   assert.equal(midMonthMoveOut.occupiedDays, 15);
   assert.equal(midMonthMoveOut.chargeableRent, 2250);
 
+  // Exact divided daily value (truncated to 2 decimals): 5000 / 30 = 166.66/day -> 1 day = 166.66, 2 days = 333.32, full 30 days = 5000
+  const oneDay5000 = calculateMonthlyRentProration({
+    monthlyRent: 5000,
+    billingPeriod: '2026-04',
+    occupancyStartDate: '2026-04-01',
+    occupancyEndDate: '2026-04-01',
+  });
+  assert.equal(oneDay5000.daysInMonth, 30);
+  assert.equal(oneDay5000.occupiedDays, 1);
+  assert.equal(oneDay5000.dailyRate, 166.66);
+  assert.equal(oneDay5000.chargeableRent, 166.66);
+
+  const twoDays5000 = calculateMonthlyRentProration({
+    monthlyRent: 5000,
+    billingPeriod: '2026-04',
+    occupancyStartDate: '2026-04-01',
+    occupancyEndDate: '2026-04-02',
+  });
+  assert.equal(twoDays5000.occupiedDays, 2);
+  assert.equal(twoDays5000.dailyRate, 166.66);
+  assert.equal(twoDays5000.chargeableRent, 333.32);
+
   // Both mid-month move-in (Apr 10) and move-out (Apr 19) -> 10 occupied days of 30
   const shortStay = calculateMonthlyRentProration({
     monthlyRent: 4500,
@@ -255,17 +278,61 @@ test('Task 4: Monthly rent proration accounts for 28, 29 (leap year), 30, and 31
   assert.equal(shortStay.chargeableRent, 1500);
 });
 
-test('Task 4: Late payment penalty is strictly configurable (never hardcoded) and applies only starting Day 11', () => {
-  // Unconfigured default -> ₱0 even on Day 15
-  const unconfigured = calculateLatePaymentPenalty({
+test('Task 4: Late Charges apply strictly starting Day 11 (Day 10 = 0, Day 11 = 166.66, Day 12 = 333.32 for 5000/30) and support custom modes', () => {
+  // Default daily divided rent late charges on ₱5,000 in 30-day month (April 2026):
+  // Day 10 -> ₱0.00 (still within 1st-10th payment window)
+  const day10Default = calculateLatePaymentPenalty({
+    chargeableRent: 5000,
+    billingPeriod: '2026-04',
+    latePenaltyConfig: DEFAULT_SETTINGS.latePenalty,
+    referenceDate: '2026-04-10',
+  });
+  assert.equal(day10Default.isLate, false);
+  assert.equal(day10Default.daysPastDue, 0);
+  assert.equal(day10Default.penaltyAmount, 0);
+
+  // Day 11 (1 day late) -> exact divided daily value 5000 / 30 = ₱166.66
+  const day11Default = calculateLatePaymentPenalty({
+    chargeableRent: 5000,
+    billingPeriod: '2026-04',
+    latePenaltyConfig: DEFAULT_SETTINGS.latePenalty,
+    referenceDate: '2026-04-11',
+  });
+  assert.equal(day11Default.isLate, true);
+  assert.equal(day11Default.isConfigured, true);
+  assert.equal(day11Default.daysPastDue, 1);
+  assert.equal(day11Default.penaltyAmount, 166.66);
+
+  // Day 12 (2 days late, unpaid on Day 11) -> 166.66 + 166.66 = ₱333.32
+  const day12Default = calculateLatePaymentPenalty({
+    chargeableRent: 5000,
+    billingPeriod: '2026-04',
+    latePenaltyConfig: DEFAULT_SETTINGS.latePenalty,
+    referenceDate: '2026-04-12',
+  });
+  assert.equal(day12Default.daysPastDue, 2);
+  assert.equal(day12Default.penaltyAmount, 333.32);
+
+  // Day 13 (3 days late) -> 166.66 * 3 = ₱499.98
+  const day13Default = calculateLatePaymentPenalty({
+    chargeableRent: 5000,
+    billingPeriod: '2026-04',
+    latePenaltyConfig: DEFAULT_SETTINGS.latePenalty,
+    referenceDate: '2026-04-13',
+  });
+  assert.equal(day13Default.daysPastDue, 3);
+  assert.equal(day13Default.penaltyAmount, 499.98);
+
+  // Explicit disabled config -> ₱0 even on Day 15
+  const disabled = calculateLatePaymentPenalty({
     chargeableRent: 4500,
     billingPeriod: '2026-03',
-    latePenaltyConfig: DEFAULT_SETTINGS.latePenalty,
+    latePenaltyConfig: { enabled: false, mode: 'fixed', value: null, applyPerDay: false },
     referenceDate: '2026-03-15',
   });
-  assert.equal(unconfigured.isLate, true);
-  assert.equal(unconfigured.isConfigured, false);
-  assert.equal(unconfigured.penaltyAmount, 0);
+  assert.equal(disabled.isLate, true);
+  assert.equal(disabled.isConfigured, false);
+  assert.equal(disabled.penaltyAmount, 0);
 
   // Fixed ₱250 flat: Day 10 = ₱0, Day 11 = ₱250
   const day10 = calculateLatePaymentPenalty({
@@ -519,8 +586,25 @@ test('Task 6: Atomic commitBillingTransaction rolls back on failure and migrateD
 
 test('Task 1 & Task 2: macOS Electron packaging, iOS Home Screen PWA assets, and Receipt breakdown verification', () => {
   const pkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
+  assert.equal(pkg.version, '1.0.1');
   assert.ok(pkg.scripts['dist:mac'], 'dist:mac script must exist');
   assert.ok(pkg.scripts['dist:win'], 'dist:win script must exist');
+  assert.ok(
+    fs.existsSync(path.resolve('public/4Rent-v1.0.1-release.apk')),
+    'public/4Rent-v1.0.1-release.apk must exist to prevent broken download links'
+  );
+  assert.ok(
+    fs.existsSync(path.resolve('packages/mobile/4Rent-v1.0.1-release.apk')),
+    'packages/mobile/4Rent-v1.0.1-release.apk must exist'
+  );
+  assert.ok(
+    fs.existsSync(path.resolve('public/4Rent-Desktop-macOS.zip')),
+    'public/4Rent-Desktop-macOS.zip must exist for zero-CLI macOS client installation'
+  );
+  assert.ok(
+    fs.existsSync(path.resolve('public/Install-4Rent-macOS.command')),
+    'public/Install-4Rent-macOS.command must exist for 1-click macOS installation'
+  );
   assert.equal(pkg.build.mac.icon, 'build/icon.icns');
   assert.equal(pkg.build.mac.entitlements, 'build/entitlements.mac.plist');
   assert.ok(
@@ -589,7 +673,7 @@ test('Task 1 & Task 2: macOS Electron packaging, iOS Home Screen PWA assets, and
     })
   );
   assert.ok(html.includes('Prorated Rent'));
-  assert.ok(html.includes('Late Payment Penalty'));
+  assert.ok(html.includes('Late Charges'));
   assert.ok(html.includes('Total Rent Due'));
   assert.ok(html.includes('Component Payment Tracking'));
   assert.ok(html.includes('Electricity balance'));
@@ -624,7 +708,7 @@ test('Task 7: Core UI Views (Settings, Scanner, ReceiptModal, AllPayments) rende
       currMeterCropDataUrl: 'data:image/png;base64,DDD',
     });
 
-    // 1. SettingsView renders independent monthly rate inputs (text/decimal, not snapping to 0) & late penalty config
+    // 1. SettingsView renders independent monthly rate inputs (text/decimal, not snapping to 0) & late charges config
     const settingsHtml = renderToStaticMarkup(
       React.createElement(SettingsView, {
         settings: DEFAULT_SETTINGS,
@@ -637,7 +721,16 @@ test('Task 7: Core UI Views (Settings, Scanner, ReceiptModal, AllPayments) rende
     assert.ok(settingsHtml.includes('Monthly Electric Rate Schedule'));
     assert.ok(settingsHtml.includes('inputMode="decimal"') || settingsHtml.includes('inputmode="decimal"'));
     assert.ok(settingsHtml.includes('Monthly Rent Payment Schedule'));
-    assert.ok(settingsHtml.includes('Late Penalty'));
+    assert.ok(settingsHtml.includes('Late Charges'));
+    assert.ok(
+      settingsHtml.includes('4Rent-Desktop-macOS.zip'),
+      'SettingsView must provide direct macOS Desktop App download without requiring CLI commands'
+    );
+    assert.equal(
+      settingsHtml.includes('npm run dist:mac'),
+      false,
+      'Client UI must never require npm CLI commands to install macOS Desktop App'
+    );
 
     // 2. ReceiptModal renders Copy Receipt as PNG (replacing Share PDF to Messenger) while preserving Share Receipt
     const receiptModalHtml = renderToStaticMarkup(
@@ -673,15 +766,18 @@ test('Task 7: Core UI Views (Settings, Scanner, ReceiptModal, AllPayments) rende
     assert.ok(scannerHtml.includes('Verify &amp; Confirm Reading'));
     assert.ok(scannerHtml.includes('Rent Proration'));
     assert.ok(scannerHtml.includes('Payment Schedule (1st-10th)'));
+    assert.ok(scannerHtml.includes('Late Charges'));
 
-    // 4. AllPaymentsView renders separate Rent Paid vs Electricity Unpaid warning for partial bill
+    // 4. AllPaymentsView renders separate Rent Paid vs Electricity Unpaid warning for partial bill,
+    // and hides the Advance Credit button until overall balance is paid
     const paymentsHtml = renderToStaticMarkup(
       React.createElement(AllPaymentsView, {
         bills: [partialBill],
-        rooms: [room],
+        rooms: [{ ...room, unpaidBalance: 750 }],
         onBack: () => {},
         onSelectBillForReceipt: () => {},
         onRecordPayment: () => {},
+        onOpenAdvanceModal: () => {},
         onArchiveBill: () => {},
         onOpenNewBillScanner: () => {},
         onOpenArchiveCenter: () => {},
@@ -690,6 +786,66 @@ test('Task 7: Core UI Views (Settings, Scanner, ReceiptModal, AllPayments) rende
     assert.ok(paymentsHtml.includes('Electricity Balance Still Unpaid'));
     assert.ok(paymentsHtml.includes('Rent Paid'));
     assert.ok(paymentsHtml.includes('Bill Not Completed'));
+    assert.equal(
+      paymentsHtml.includes('Advance / Refund'),
+      false,
+      'Advance Credit button must remain hidden while tenant still has an unpaid balance'
+    );
+
+    // Once tenant pays overall balance, the Advance Credit button appears
+    const paidBill = makeBillDraft({
+      status: 'paid',
+      amountPaid: 5250,
+      remainingBalance: 0,
+      rentPaid: 4500,
+      rentRemaining: 0,
+      electricityPaid: 750,
+      electricityRemaining: 0,
+    });
+    const paidPaymentsHtml = renderToStaticMarkup(
+      React.createElement(AllPaymentsView, {
+        bills: [paidBill],
+        rooms: [{ ...room, unpaidBalance: 0, activeReceiptId: paidBill.id }],
+        onBack: () => {},
+        onSelectBillForReceipt: () => {},
+        onRecordPayment: () => {},
+        onOpenAdvanceModal: () => {},
+        onArchiveBill: () => {},
+        onOpenNewBillScanner: () => {},
+        onOpenArchiveCenter: () => {},
+      })
+    );
+    assert.ok(
+      paidPaymentsHtml.includes('Advance / Refund') ||
+        paidPaymentsHtml.includes('Pay Advance for Next Month'),
+      'Advance Credit button must appear once overall balance is paid'
+    );
+
+    // 5. ManageRoomsView anchors the single floating Room Action Button outside .animate-view-enter so CSS transforms never trap position:fixed
+    const roomsHtml = renderToStaticMarkup(
+      React.createElement(ManageRoomsView, {
+        rooms: [room],
+        bills: [partialBill],
+        globalElectricRate: 12.5,
+        onBack: () => {},
+        onOpenAddRoom: () => {},
+        onOpenEditRoom: () => {},
+        onRequestDeleteRoomWithPin: () => {},
+        onArchiveRoom: () => {},
+        onMoveOutTenant: () => {},
+        onOpenScanMeter: () => {},
+        onOpenRoomReceipt: () => {},
+        onOpenAdvanceBalanceModal: () => {},
+        onSelectRoomDetails: () => {},
+        onOpenArchiveCenter: () => {},
+      })
+    );
+    const fabMatches = roomsHtml.match(/aria-label="Add new room"/g) || [];
+    assert.equal(fabMatches.length, 1, 'ManageRoomsView must render exactly one floating Room Action Button');
+    assert.ok(
+      roomsHtml.endsWith('</button>'),
+      'Floating Room Action Button must be rendered as a top-level sibling outside the .animate-view-enter div'
+    );
   } finally {
     if (prevWindow === undefined) {
       delete (globalThis as { window?: unknown }).window;

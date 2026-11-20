@@ -4,6 +4,7 @@ import {
   allocateChargesAndCredits,
   applyRoomSecurityDepositToActiveBills,
   buildRoomSaveAdvanceHistory,
+  computeBillComponentBalances,
   executeAdvanceDepositTransaction,
   executeAdvanceRefundTransaction,
   executeGenerateBillTransaction,
@@ -831,3 +832,61 @@ test('applyRoomSecurityDepositToActiveBills deducts paid deposit across active b
   assert.equal(updatedOther.status, 'partial');
   assert.equal(updatedOther.securityDepositApplied, 500);
 });
+
+test('Component balances sync when Advance or Security Deposit credits auto-apply to active bills with explicit component fields', () => {
+  const room = makeRoom({ id: 'room-comp-sync', advanceRent: 0, securityDepositPaid: 0 });
+  const genRes = executeGenerateBillTransaction({
+    room,
+    existingBills: [],
+    billDraft: makeBillDraft({
+      id: 'b-comp-sync',
+      roomId: 'room-comp-sync',
+      baseRent: 4500,
+      electricTotal: 1500,
+      amountPaid: 0,
+    }),
+  });
+  assert.equal(genRes.ok, true);
+  const issuedBill = genRes.createdBill!;
+  assert.equal(issuedBill.rentRemaining, 4500);
+  assert.equal(issuedBill.electricityRemaining, 1500);
+
+  // 1. Auto-apply ₱5,000 advance deposit (covers all ₱4,500 rent + ₱500 of electricity; ₱1,000 electricity remains)
+  const partialAdvRes = executeAdvanceDepositTransaction({
+    room: genRes.updatedRoom!,
+    activeBills: [issuedBill],
+    amount: 5000,
+    note: 'Partial advance auto-apply',
+  });
+  assert.equal(partialAdvRes.ok, true);
+  const afterPartialAdv = partialAdvRes.updatedBills[0];
+  assert.equal(afterPartialAdv.remainingBalance, 1000);
+  assert.equal(afterPartialAdv.rentRemaining, 0);
+  assert.equal(afterPartialAdv.electricityRemaining, 1000);
+  const compPartial = computeBillComponentBalances(afterPartialAdv);
+  assert.equal(compPartial.rentRemaining, 0);
+  assert.equal(compPartial.electricityRemaining, 1000);
+  assert.equal(compPartial.outstandingBalance, 1000);
+  assert.equal(compPartial.hasUnpaidElectricity, true);
+
+  // 2. Apply ₱1,000 security deposit to settle the remaining ₱1,000 electricity charge
+  const secRes = applyRoomSecurityDepositToActiveBills({
+    roomId: 'room-comp-sync',
+    status: 'occupied',
+    activeReceiptId: afterPartialAdv.id,
+    availableSecurityDepositPaid: 1000,
+    roomUnpaidBalance: 1000,
+    bills: [afterPartialAdv],
+  });
+  const settledBill = secRes.bills[0];
+  assert.equal(settledBill.status, 'paid');
+  assert.equal(settledBill.remainingBalance, 0);
+  assert.equal(settledBill.rentRemaining, 0);
+  assert.equal(settledBill.electricityRemaining, 0);
+  const compSettled = computeBillComponentBalances(settledBill);
+  assert.equal(compSettled.outstandingBalance, 0);
+  assert.equal(compSettled.hasUnpaidElectricity, false);
+  assert.equal(compSettled.isRentPaid, true);
+  assert.equal(compSettled.isElectricityPaid, true);
+});
+

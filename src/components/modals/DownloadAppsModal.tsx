@@ -37,6 +37,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   const effectivePropertyCode = resolveConfiguredPropertyCode(propertyCode);
   const [copiedExeLink, setCopiedExeLink] = useState(false);
   const [copiedZipLink, setCopiedZipLink] = useState(false);
+  const [copiedMacLink, setCopiedMacLink] = useState(false);
   const [copiedApkLink, setCopiedApkLink] = useState(false);
   const [copiedPairLink, setCopiedPairLink] = useState(false);
   const [activeTab, setActiveTab] = useState<'downloads' | 'instructions'>(
@@ -50,7 +51,9 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
   const baseUrl = window.location.origin + window.location.pathname.replace(/\/+$/, '');
   const zipUrl = `${baseUrl}/4Rent-Desktop-Windows.zip`;
   const exeUrl = `${baseUrl}/4Rent-Launcher.exe`;
-  const apkUrl = `${baseUrl}/4Rent-v1.0.0-release.apk`;
+  const macZipUrl = `${baseUrl}/4Rent-Desktop-macOS.zip`;
+  const macCmdUrl = `${baseUrl}/Install-4Rent-macOS.command`;
+  const apkUrl = `${baseUrl}/4Rent-v1.0.1-release.apk`;
   const pairUrl = `${baseUrl}/?prop=${encodeURIComponent(effectivePropertyCode)}`;
 
   const copyToClipboard = async (
@@ -269,34 +272,97 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                 </div>
               )}
 
-              {/* macOS Desktop App Card (Desktop Browsers) */}
+              {/* macOS Desktop App Card (Desktop Browsers — Zero Node.js / Zero CLI Required) */}
               {!isMobile && (
                 <div className="rounded-2xl bg-gradient-to-br from-[#141C2B] to-[#101724] border border-[#26354D] p-5 shadow-lg relative overflow-hidden group hover:border-sky-500/50 transition duration-300">
-                  <div className="flex items-start gap-3.5">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-500/20 to-sky-600/10 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0 shadow-inner">
-                      <Laptop className="w-6 h-6" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-extrabold text-white text-base">
-                          4Rent macOS Desktop App
-                        </h3>
-                        <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300 font-mono text-[10px] font-bold">
-                          .DMG / .ZIP (Apple Silicon &amp; Intel)
-                        </span>
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/5 rounded-full blur-2xl pointer-events-none" />
+
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-500/20 to-sky-600/10 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0 shadow-inner">
+                        <Laptop className="w-6 h-6" />
                       </div>
-                      <p className="text-xs text-slate-300 mt-1">
-                        Native Electron macOS application with signed entitlements, native menu shortcuts (Cmd+C/V/Q), PNG clipboard copy, and offline IndexedDB storage.
-                      </p>
-                      <div className="mt-3 rounded-xl bg-[#0D121B] border border-[#202B3F] p-3 text-[11px] text-slate-300 space-y-1">
-                        <div className="font-bold text-sky-300">Build on macOS:</div>
-                        <code className="block font-mono text-amber-300 bg-[#080B10] px-2.5 py-1.5 rounded-lg">
-                          npm run dist:mac
-                        </code>
-                        <p className="text-[10.5px] text-slate-400">
-                          Generates installable <code className="text-slate-200">4Rent-1.1.0-arm64.dmg</code>, <code className="text-slate-200">4Rent-1.1.0-x64.dmg</code>, and <code className="text-slate-200">.zip</code> bundles inside <code className="text-slate-200">release/</code>. Drag 4Rent into Applications to install.
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-extrabold text-white text-base">
+                            4Rent macOS Desktop App
+                          </h3>
+                          <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-sky-300 font-mono text-[10px] font-bold">
+                            .APP / .ZIP (Apple Silicon &amp; Intel)
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+                            Zero CLI Required
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 mt-1">
+                          Ready-to-run macOS Application Bundle (<code className="text-sky-300">4Rent.app</code>) with 1-click Applications installer, official Apple Retina icon, and dedicated desktop window.
                         </p>
+
+                        <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>Apple Silicon (M1–M4) &amp; Intel Universal</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>No Node.js or terminal commands needed</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>1-click install to /Applications &amp; Dock</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span>Dedicated borderless macOS window</span>
+                          </li>
+                        </ul>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* macOS Direct Download Options */}
+                  <div className="mt-4 pt-4 border-t border-[#1E293B] flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
+                      Package: <span className="text-sky-300">4Rent-Desktop-macOS.zip</span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(macZipUrl, setCopiedMacLink)}
+                        className="px-3 py-2 rounded-xl bg-[#1A2438] hover:bg-[#22304A] border border-[#2E3F5C] text-slate-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        {copiedMacLink ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400">Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy Link</span>
+                          </>
+                        )}
+                      </button>
+
+                      <a
+                        href={macCmdUrl}
+                        download="Install-4Rent-macOS.command"
+                        className="px-3.5 py-2 rounded-xl bg-[#1A2438] hover:bg-[#22304A] border border-sky-500/35 text-sky-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                        title="1-Click macOS Applications Installer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                        <span>1-Click Installer</span>
+                      </a>
+
+                      <a
+                        href={macZipUrl}
+                        download="4Rent-Desktop-macOS.zip"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-sky-500/25 transition cursor-pointer active:scale-95"
+                      >
+                        <FolderArchive className="w-4 h-4" />
+                        <span>Download macOS (.ZIP)</span>
+                      </a>
                     </div>
                   </div>
                 </div>
@@ -378,7 +444,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
 
                 <div className="mt-4 pt-4 border-t border-[#1E293B] flex flex-wrap items-center justify-between gap-3">
                   <div className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
-                    File: <span className="text-slate-200">4Rent-v1.0.0-release.apk</span>
+                    File: <span className="text-slate-200">4Rent-v1.0.1-release.apk</span>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -402,7 +468,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
 
                     <a
                       href={apkUrl}
-                      download="4Rent-v1.0.0-release.apk"
+                      download="4Rent-v1.0.1-release.apk"
                       className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/25 transition cursor-pointer active:scale-95"
                     >
                       <Download className="w-4 h-4" />
@@ -480,17 +546,17 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
               <div className="rounded-2xl bg-[#131B29] border border-[#243147] p-4">
                 <div className="font-bold text-sky-400 text-sm flex items-center gap-2 mb-2">
                   <Laptop className="w-4 h-4" />
-                  <span>How to Build &amp; Install on macOS</span>
+                  <span>How to Install on macOS (Zero CLI • Drag &amp; Drop or 1-Click)</span>
                 </div>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs leading-relaxed">
                   <li>
-                    On macOS (Apple Silicon or Intel), run <code className="text-amber-300">npm run dist:mac</code> from the project root.
+                    Click <strong className="text-sky-300">Download macOS (.ZIP)</strong> above to download <code className="text-sky-300">4Rent-Desktop-macOS.zip</code> (Safari unzips it automatically in Downloads).
                   </li>
                   <li>
-                    Open the generated <code className="text-sky-300">release/4Rent-1.1.0-arm64.dmg</code> (or <code className="text-sky-300">x64.dmg</code>) installer and drag <strong className="text-white">4Rent</strong> into <strong className="text-white">Applications</strong>.
+                    Double-click <code className="text-amber-300">4Rent.app</code> and choose <strong className="text-white">&quot;Install to Applications &amp; Launch&quot;</strong> in the macOS prompt — or simply drag <strong className="text-white">4Rent.app</strong> into your <strong className="text-white">Applications</strong> folder!
                   </li>
                   <li>
-                    Launch 4Rent from Applications or Spotlight; if unsigned Gatekeeper prompts on first launch, right-click the app and select <strong className="text-white">Open</strong>.
+                    You can also double-click <code className="text-sky-300">Install 4Rent to Applications.command</code> for a 1-click automatic setup that clears macOS Gatekeeper flags, pins a Desktop shortcut, and opens 4Rent immediately.
                   </li>
                 </ol>
               </div>
@@ -520,7 +586,7 @@ export const DownloadAppsModal: React.FC<DownloadAppsModalProps> = ({
                 </div>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-xs leading-relaxed">
                   <li>
-                    Download <code className="text-emerald-300">4Rent-v1.0.0-release.apk</code> directly on your mobile device.
+                    Download <code className="text-emerald-300">4Rent-v1.0.1-release.apk</code> directly on your mobile device.
                   </li>
                   <li>
                     When download finishes, tap the notification or open your device <strong className="text-white">Files / Downloads</strong> app and tap the APK file.

@@ -532,7 +532,7 @@ export const PrintableA4Receipt = React.forwardRef(
           className="border border-slate-300 rounded-lg overflow-hidden bg-white mb-3.5"
         >
           <div className="bg-slate-900 text-white px-3.5 py-2 flex items-center justify-between text-[10.5px] font-black uppercase tracking-wider">
-            <span>Billing Summary &amp; Deductions Explanation</span>
+            <span>Billing Summary &amp; Deductions</span>
             <span>Amount (PHP)</span>
           </div>
 
@@ -572,7 +572,7 @@ export const PrintableA4Receipt = React.forwardRef(
                 <tr className="bg-amber-50/50">
                   <td className="px-3.5 py-1.5 text-amber-950">
                     <div className="font-semibold text-amber-900">
-                      Late Payment Penalty (Starting Day 11)
+                      Late Charges (Starting Day 11)
                     </div>
                     <div className="text-[9.5px] text-amber-800">
                       {bill.latePenaltyLabel ||
@@ -589,7 +589,7 @@ export const PrintableA4Receipt = React.forwardRef(
                 <tr className="bg-slate-50/80">
                   <td className="px-3.5 py-1 text-slate-800">
                     <div className="font-bold text-slate-900 text-[10.5px]">
-                      Total Rent Due (Rent{latePenalty > 0 ? ' + Late Penalty' : ''})
+                      Total Rent Due (Rent{latePenalty > 0 ? ' + Late Charges' : ''})
                     </div>
                   </td>
                   <td className="px-3.5 py-1 text-right font-mono-num font-bold text-slate-950">
@@ -790,7 +790,7 @@ export const PrintableA4Receipt = React.forwardRef(
             {/* Separate Component Payment Tracking Summary */}
             <div className="rounded bg-white border border-slate-200 px-2.5 py-2 space-y-1 text-[10px]">
               <div className="font-extrabold uppercase tracking-wider text-slate-600 text-[9px]">
-                Component Payment Tracking (Rent vs. Electricity{latePenalty > 0 ? ' vs. Late Penalty' : ''})
+                Component Payment Tracking (Rent vs. Electricity{latePenalty > 0 ? ' vs. Late Charges' : ''})
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <div>
@@ -813,7 +813,7 @@ export const PrintableA4Receipt = React.forwardRef(
                 </div>
                 {latePenalty > 0 && (
                   <div>
-                    <span className="text-slate-500 block">Late Penalty:</span>
+                    <span className="text-slate-500 block">Late Charges:</span>
                     <strong className="font-mono-num text-amber-800">
                       Paid {formatPeso(componentBalances.latePenaltyPaid)} | Bal {formatPeso(componentBalances.latePenaltyRemaining)}
                     </strong>

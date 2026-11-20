@@ -10,6 +10,7 @@ import {
   PaymentTransaction,
   Room,
 } from '../types/rental';
+import { normalizeBillingMonthKey } from './rentSchedule';
 
 export const CENTAVOS_PER_PESO = 100;
 
@@ -224,7 +225,7 @@ export function allocateChargesAndCredits(
   }> = [
     { key: 'carryOverCents', category: 'carryover', label: 'Previous Unpaid Balance', cents: carryOverCents },
     { key: 'rentCents', category: 'rent', label: 'Monthly Rent', cents: baseRentCents },
-    { key: 'latePenaltyCents', category: 'other', label: 'Late Payment Penalty', cents: latePenaltyCents },
+    { key: 'latePenaltyCents', category: 'other', label: 'Late Charges', cents: latePenaltyCents },
     { key: 'electricityCents', category: 'electricity', label: 'Electricity Charges', cents: electricCents },
     { key: 'otherCents', category: 'other', label: 'Other Charges', cents: otherCents },
   ];
@@ -303,23 +304,7 @@ export interface BillComponentBalances {
 }
 
 function normalizeMonthKeyInternal(periodOrDate?: string): string {
-  const trimmed = (periodOrDate || '').trim();
-  const ymExact = trimmed.match(/^(\d{4})-(\d{2})$/);
-  if (ymExact) return `${ymExact[1]}-${ymExact[2]}`;
-  if (trimmed) {
-    const ymPrefix = trimmed.match(/^(\d{4})-(\d{2})/);
-    if (ymPrefix) return `${ymPrefix[1]}-${ymPrefix[2]}`;
-    const parsedFromLabel = new Date(`1 ${trimmed}`);
-    if (!Number.isNaN(parsedFromLabel.getTime())) {
-      return `${parsedFromLabel.getFullYear()}-${String(parsedFromLabel.getMonth() + 1).padStart(2, '0')}`;
-    }
-    const parsedAny = new Date(trimmed);
-    if (!Number.isNaN(parsedAny.getTime())) {
-      return `${parsedAny.getFullYear()}-${String(parsedAny.getMonth() + 1).padStart(2, '0')}`;
-    }
-  }
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return normalizeBillingMonthKey(periodOrDate);
 }
 
 /**
@@ -1579,7 +1564,7 @@ export function executeAdvanceDepositTransaction(
               ? 'partial'
               : 'unpaid';
 
-        billUpdatesById.set(targetBill.id, {
+        const draftUpdated: BillRecord = {
           ...targetBill,
           advanceApplied: nextAdvApplied,
           depositApplied: nextDepApplied,
@@ -1590,6 +1575,23 @@ export function executeAdvanceDepositTransaction(
           paidAt: nextStatus === 'paid' ? targetBill.paidAt || nowIso : targetBill.paidAt,
           isLocked: nextStatus === 'paid' ? true : targetBill.isLocked,
           updatedAt: nowIso,
+        };
+        const recomputedComp = computeBillComponentBalances({
+          ...draftUpdated,
+          rentPaid: undefined,
+          electricityPaid: undefined,
+        });
+
+        billUpdatesById.set(targetBill.id, {
+          ...draftUpdated,
+          rentPaid: recomputedComp.rentPaid,
+          rentRemaining: nextRemaining <= 0 ? 0 : recomputedComp.rentRemaining,
+          electricityPaid: recomputedComp.electricityPaid,
+          electricityRemaining: nextRemaining <= 0 ? 0 : recomputedComp.electricityRemaining,
+          latePenaltyPaid: recomputedComp.latePenaltyPaid,
+          latePenaltyRemaining: nextRemaining <= 0 ? 0 : recomputedComp.latePenaltyRemaining,
+          carryOverPaid: recomputedComp.carryOverPaid,
+          carryOverRemaining: nextRemaining <= 0 ? 0 : recomputedComp.carryOverRemaining,
         });
       }
 
@@ -2121,7 +2123,7 @@ export function applyRoomSecurityDepositToActiveBills(
             ? 'partial'
             : 'unpaid';
 
-      billUpdatesById.set(targetBill.id, {
+      const draftUpdated: BillRecord = {
         ...targetBill,
         securityDepositApplied: fromCentavos(nextSecDepAppliedCents),
         securityDepositRemainingAfterBill: fromCentavos(remainingCreditCents),
@@ -2131,6 +2133,23 @@ export function applyRoomSecurityDepositToActiveBills(
         status: nextStatus,
         paidAt: nextStatus === 'paid' ? targetBill.paidAt || nowIso : targetBill.paidAt,
         updatedAt: nowIso,
+      };
+      const recomputedComp = computeBillComponentBalances({
+        ...draftUpdated,
+        rentPaid: undefined,
+        electricityPaid: undefined,
+      });
+
+      billUpdatesById.set(targetBill.id, {
+        ...draftUpdated,
+        rentPaid: recomputedComp.rentPaid,
+        rentRemaining: nextRemainingCents === 0 ? 0 : recomputedComp.rentRemaining,
+        electricityPaid: recomputedComp.electricityPaid,
+        electricityRemaining: nextRemainingCents === 0 ? 0 : recomputedComp.electricityRemaining,
+        latePenaltyPaid: recomputedComp.latePenaltyPaid,
+        latePenaltyRemaining: nextRemainingCents === 0 ? 0 : recomputedComp.latePenaltyRemaining,
+        carryOverPaid: recomputedComp.carryOverPaid,
+        carryOverRemaining: nextRemainingCents === 0 ? 0 : recomputedComp.carryOverRemaining,
       });
     }
   }

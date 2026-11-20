@@ -533,7 +533,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                     <div className="rounded-2xl bg-[#0D121B] p-3 border border-[#202B40]">
                       <span className="text-slate-400 block text-[11px]">
                         {(bill.latePenalty || 0) > 0
-                          ? 'Late Penalty / Collected'
+                          ? 'Late Charges / Collected'
                           : 'Total Collected'}
                       </span>
                       <span className="font-mono-num font-bold text-emerald-400 mt-0.5 block">
@@ -541,7 +541,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                       </span>
                       {(bill.latePenalty || 0) > 0 && (
                         <span className="text-[10px] font-bold text-rose-300 block mt-0.5">
-                          Penalty: {formatPeso(bill.latePenalty || 0)}
+                          Late Charges: {formatPeso(bill.latePenalty || 0)}
                           {comp.latePenaltyRemaining > 0
                             ? ` (${formatPeso(comp.latePenaltyRemaining)} due)`
                             : ' (Paid)'}
@@ -562,34 +562,44 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                         <span>Official Receipt (2 Sub-Meter Proofs)</span>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => openPaymentDialog(bill)}
-                        className="px-4 py-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
-                      >
-                        <CreditCard className="w-3.5 h-3.5" />
-                        <span>
-                          {bill.remainingBalance > 0
-                            ? 'Record Payment / Overpayment'
-                            : 'Pay Advance for Next Month'}
-                        </span>
-                      </button>
+                      {(() => {
+                        const targetRoom = rooms.find(
+                          (r) => r.id === bill.roomId && !r.isArchived
+                        );
+                        const hasPaidOverallBalance =
+                          bill.status === 'paid' &&
+                          (bill.remainingBalance || 0) <= 0 &&
+                          Boolean(targetRoom && (targetRoom.unpaidBalance || 0) <= 0);
 
-                      {onOpenAdvanceModal &&
-                        rooms.find((r) => r.id === bill.roomId && !r.isArchived) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const targetRoom = rooms.find(
-                                (r) => r.id === bill.roomId && !r.isArchived
-                              );
-                              if (targetRoom) onOpenAdvanceModal(targetRoom);
-                            }}
-                            className="px-3.5 py-2.5 rounded-2xl bg-[#1A2334] hover:bg-[#243046] border border-[#2C3A52] text-amber-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
-                          >
-                            <span>Advance / Refund</span>
-                          </button>
-                        )}
+                        return (
+                          <>
+                            {(bill.remainingBalance > 0 || hasPaidOverallBalance) && (
+                              <button
+                                type="button"
+                                onClick={() => openPaymentDialog(bill)}
+                                className="px-4 py-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                                <span>
+                                  {bill.remainingBalance > 0
+                                    ? 'Record Payment / Overpayment'
+                                    : 'Pay Advance for Next Month'}
+                                </span>
+                              </button>
+                            )}
+
+                            {onOpenAdvanceModal && hasPaidOverallBalance && targetRoom && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenAdvanceModal(targetRoom)}
+                                className="px-3.5 py-2.5 rounded-2xl bg-[#1A2334] hover:bg-[#243046] border border-[#2C3A52] text-amber-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer btn-fluid"
+                              >
+                                <span>Advance / Refund</span>
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -659,7 +669,7 @@ export const AllPaymentsView: React.FC<AllPaymentsViewProps> = ({
                     </div>
                     {payingBillComponents.latePenaltyRemaining > 0 && (
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Unpaid Late Penalty:</span>
+                        <span className="text-slate-400">Unpaid Late Charges:</span>
                         <span className="font-bold text-rose-400 font-mono-num">
                           {formatPeso(payingBillComponents.latePenaltyRemaining)}
                         </span>

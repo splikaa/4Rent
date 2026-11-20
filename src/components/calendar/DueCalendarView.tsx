@@ -395,7 +395,7 @@ export const DueCalendarView: React.FC<DueCalendarViewProps> = ({
               </div>
               <div className="text-[11px] text-amber-200/80 mt-1">
                 {selectedMonthSchedule.isPastDue
-                  ? `Late Penalty Active (Day 11+)`
+                  ? `Late Charges Active (Day 11+)`
                   : `Due ${selectedMonthSchedule.dueDateLabel} • Late starts 11th`}
               </div>
             </div>

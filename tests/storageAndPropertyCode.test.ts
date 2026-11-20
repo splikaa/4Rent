@@ -12,6 +12,7 @@ import {
   applyCloudSnapshotCleanly,
   clearPendingCloudApply,
   exportDatabaseSnapshot,
+  flushMasterIndexedDbNow,
   loadBills,
   loadInquiries,
   loadReadingLogs,
@@ -798,3 +799,178 @@ test('applyPropertyCodeAndSync merges bidirectional updates when staying on the 
     mockLs.restore();
   }
 });
+
+test('flushMasterIndexedDbNow awaits pending offloaded meter image writes to IndexedDB', async () => {
+  const mockLs = installMockLocalStorage();
+  const mockIdb = installMockIndexedDb();
+  try {
+    const hugePhoto = `data:image/jpeg;base64,${'Z'.repeat(16000)}`;
+    saveRooms([
+      {
+        ...makeRoom('room-flush-img', 'Flush Image Room'),
+        lastMeterPhotoDataUrl: hugePhoto,
+      },
+    ]);
+    await flushMasterIndexedDbNow();
+    const reloaded = loadRooms();
+    const offloadedKey = reloaded[0].lastMeterPhotoDataUrl || '';
+    assert.ok(offloadedKey.startsWith('idb:meter:'));
+    assert.equal(await getMeterMasterImage(offloadedKey), hugePhoto);
+    assert.ok(mockIdb.snapshots.has('master_snapshot'));
+  } finally {
+    mockIdb.restore();
+    mockLs.restore();
+  }
+});
+
+test('mergeDatabaseSnapshots synchronizes newer remote Configurations across Mobile & Desktop while preserving local security PIN and offline rooms', () => {
+  const localOfflineMobileSnap: AppDatabaseSnapshot = {
+    version: '1.0.1',
+    exportedAt: '2026-11-20T10:00:00.000Z',
+    rooms: [makeRoom('room-mobile-offline-1', 'Mobile Offline Room 1', 'Mobile Tenant')],
+    bills: [],
+    inquiries: [],
+    tenantHistory: [],
+    settings: {
+      ...DEFAULT_SETTINGS,
+      apartmentName: 'Old Local Name',
+      defaultElectricRate: 15.0,
+      defaultMonthlyRent: 4500,
+      monthlyElectricRates: { '2026-10': 14.0 },
+      updatedAt: '2026-11-20T09:00:00.000Z',
+      security: {
+        ...DEFAULT_SETTINGS.security,
+        pinCode: '7777',
+      },
+    },
+  };
+
+  const remoteDesktopSnap: AppDatabaseSnapshot = {
+    version: '1.0.1',
+    exportedAt: '2026-11-20T11:30:00.000Z',
+    rooms: [makeRoom('room-desktop-1', 'Desktop Room 1', 'Desktop Tenant')],
+    bills: [],
+    inquiries: [],
+    tenantHistory: [],
+    settings: {
+      ...DEFAULT_SETTINGS,
+      apartmentName: 'Synced Tower Residences',
+      defaultElectricRate: 18.75,
+      defaultMonthlyRent: 5000,
+      monthlyElectricRates: { '2026-10': 16.5, '2026-11': 18.75 },
+      latePenalty: {
+        enabled: true,
+        mode: 'daily_rent',
+        value: null,
+        applyPerDay: true,
+      },
+      updatedAt: '2026-11-20T11:30:00.000Z',
+      security: {
+        ...DEFAULT_SETTINGS.security,
+        pinCode: '1111',
+      },
+    },
+  };
+
+  const merged = mergeDatabaseSnapshots(localOfflineMobileSnap, remoteDesktopSnap);
+
+  // Both Mobile offline room and Desktop room must be present after sync
+  assert.equal(merged.rooms.length, 2);
+  assert.ok(merged.rooms.some((r) => r.id === 'room-mobile-offline-1'));
+  assert.ok(merged.rooms.some((r) => r.id === 'room-desktop-1'));
+
+  // Newer remote Configurations must apply to the syncing device
+  assert.equal(merged.settings.apartmentName, 'Synced Tower Residences');
+  assert.equal(merged.settings.defaultElectricRate, 18.75);
+  assert.equal(merged.settings.defaultMonthlyRent, 5000);
+  assert.equal(merged.settings.monthlyElectricRates?.['2026-10'], 16.5);
+  assert.equal(merged.settings.monthlyElectricRates?.['2026-11'], 18.75);
+  assert.equal(merged.settings.latePenalty?.mode, 'daily_rent');
+
+  // Local device PIN must remain intact
+  assert.equal(merged.settings.security.pinCode, '7777');
+});
+
+test('applyPropertyCodeAndSync on Mobile merges offline-created Mobile rooms with Desktop cloud space and pushes merged snapshot to Firebase', async () => {
+  const mockLs = installMockLocalStorage();
+  const mockIdb = installMockIndexedDb();
+  try {
+    const seededMobile = seedLocalWorkspace('4R-MOB111', 'Mobile Offline Workspace');
+    saveRooms([
+      makeRoom('room-mobile-offline-A', 'Mobile Offline Room A', 'Offline Tenant A'),
+      makeRoom('room-mobile-offline-B', 'Mobile Offline Room B', 'Offline Tenant B'),
+    ]);
+
+    const remoteDesktopSnap: AppDatabaseSnapshot = {
+      version: '1.0.1',
+      exportedAt: '2026-11-20T12:00:00.000Z',
+      rooms: [makeRoom('room-desktop-101', 'Desktop Room 101', 'Desktop Tenant')],
+      bills: [],
+      inquiries: [],
+      tenantHistory: [],
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apartmentName: 'Desktop Master Property',
+        defaultElectricRate: 17.25,
+        updatedAt: '2026-11-20T12:00:00.000Z',
+        cloudSync: {
+          enabled: true,
+          provider: 'firebase',
+          firebaseDatabaseUrl: 'https://example-default-rtdb.firebaseio.com',
+          propertyCode: '4R-DSK999',
+        },
+      },
+    };
+
+    let pushedSnap = null as AppDatabaseSnapshot | null;
+    const res = await applyPropertyCodeAndSync({
+      previousCode: seededMobile.settings.cloudSync.propertyCode,
+      targetCloudSync: {
+        ...seededMobile.settings.cloudSync,
+        propertyCode: '4R-DSK999',
+      },
+      isOnline: true,
+      networkLabel: 'Wi-Fi (Active)',
+      isMobile: true,
+      deps: {
+        pull: async () => ({
+          ok: true,
+          message: 'Pulled Desktop space',
+          snapshot: remoteDesktopSnap,
+          updatedAt: '2026-11-20T12:00:00.000Z',
+        }),
+        push: async (_cfg, snap) => {
+          pushedSnap = snap;
+          return {
+            ok: true,
+            message: 'Pushed merged Mobile + Desktop snapshot',
+            syncedAt: '2026-11-20T12:01:00.000Z',
+          };
+        },
+        exportSnapshot: exportDatabaseSnapshot,
+        importSnapshot: (snap) => {
+          saveRooms(snap.rooms);
+          saveSettings(snap.settings);
+        },
+        mergeSnapshots: mergeDatabaseSnapshots,
+        applyClean: applyCloudSnapshotCleanly,
+        resetWorkspace: resetWorkspaceForPropertyCode,
+        clearPending: clearPendingCloudApply,
+      },
+    });
+
+    assert.equal(res.ok, true);
+    assert.ok(pushedSnap, 'Mobile must push merged offline rooms to Firebase');
+    assert.equal(pushedSnap!.rooms.length, 3);
+    assert.ok(pushedSnap!.rooms.some((r) => r.id === 'room-mobile-offline-A'));
+    assert.ok(pushedSnap!.rooms.some((r) => r.id === 'room-mobile-offline-B'));
+    assert.ok(pushedSnap!.rooms.some((r) => r.id === 'room-desktop-101'));
+    assert.equal(pushedSnap!.settings.defaultElectricRate, 17.25);
+    assert.equal(pushedSnap!.settings.apartmentName, 'Desktop Master Property');
+  } finally {
+    mockIdb.restore();
+    mockLs.restore();
+  }
+});
+
+

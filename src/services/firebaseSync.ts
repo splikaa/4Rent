@@ -33,12 +33,9 @@ export function getMobileCodeMonthlyLock(
   const currentMonthKey = normalizeMonthKey();
   const appliedMonthKey =
     cloudSync?.mobileCodeAppliedMonth || getStoredMobileAppliedMonth() || '';
-  const isLockedThisMonth = Boolean(
-    appliedMonthKey && appliedMonthKey === currentMonthKey
-  );
   const nextMonthKey = getAdjacentMonthKey(currentMonthKey, 1);
   return {
-    isLockedThisMonth,
+    isLockedThisMonth: false,
     appliedMonthKey,
     currentMonthKey,
     nextEligibleMonthLabel: formatMonthKeyLabel(nextMonthKey, 'long'),
@@ -236,7 +233,7 @@ export async function pushSnapshotToFirebase(
           billsCount: snapshot.bills?.length || 0,
           inquiriesCount: snapshot.inquiries?.length || 0,
           lastActiveAt: syncedAt,
-          clientVersion: '1.0.0',
+          clientVersion: '1.0.1',
         }),
         signal: regController.signal,
       })
@@ -541,22 +538,46 @@ export function mergeDatabaseSnapshots(
     upsertMergedReading(r);
   }
 
-  // Keep local device security credentials intact when merging remote settings
-  // Also preserve independent monthlyElectricRates from both remote and local (local wins per-month)
-  const mergedMonthlyRates: Record<string, number> = {
-    ...(remote.settings?.monthlyElectricRates || {}),
-    ...(local.settings?.monthlyElectricRates || {}),
-  };
+  // Synchronize shared Configurations across Mobile & Desktop based on whichever settings snapshot is newer,
+  // while always keeping local device security credentials and cloudSync state intact.
+  const localSettingsTs = new Date(local.settings?.updatedAt || 0).getTime();
+  const remoteSettingsTs = new Date(
+    remote.settings?.updatedAt || remote.exportedAt || 0
+  ).getTime();
+  const remoteSettingsIsNewer =
+    Boolean(remote.settings) &&
+    (remoteSettingsTs > localSettingsTs ||
+      (!local.settings?.updatedAt && remoteSettingsTs > 0));
+
+  const mergedMonthlyRates: Record<string, number> = remoteSettingsIsNewer
+    ? {
+        ...(local.settings?.monthlyElectricRates || {}),
+        ...(remote.settings?.monthlyElectricRates || {}),
+      }
+    : {
+        ...(remote.settings?.monthlyElectricRates || {}),
+        ...(local.settings?.monthlyElectricRates || {}),
+      };
+
+  const baseConfigSettings = remoteSettingsIsNewer
+    ? {
+        ...(local.settings || {}),
+        ...(remote.settings || {}),
+      }
+    : {
+        ...(remote.settings || {}),
+        ...(local.settings || {}),
+      };
+
   const mergedSettings = {
-    ...(remote.settings || {}),
-    ...(local.settings || {}),
+    ...baseConfigSettings,
     monthlyElectricRates: mergedMonthlyRates,
     security: local.settings?.security || remote.settings?.security,
     cloudSync: local.settings?.cloudSync || remote.settings?.cloudSync,
   };
 
   return {
-    version: '1.1.0',
+    version: '1.0.1',
     schemaVersion: Math.max(local.schemaVersion || 1, remote.schemaVersion || 1, 2),
     exportedAt: new Date().toISOString(),
     rooms: Array.from(roomMap.values()).map((r) =>

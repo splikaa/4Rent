@@ -77,8 +77,9 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-transparent pb-32 animate-view-enter">
-      {/* Top Bar */}
+    <>
+      <div className="min-h-screen flex flex-col bg-transparent pb-32 animate-view-enter">
+        {/* Top Bar */}
       <header className="sticky top-0 z-20 bg-[#111722]/90 backdrop-blur-xl border-b border-[#232E42] px-5 sm:px-8 h-18 flex items-center justify-between">
         <button
           type="button"
@@ -142,6 +143,14 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
               const paidDepositCredit = isOccupied
                 ? Math.max(0, room.securityDepositPaid || 0)
                 : 0;
+              const hasPaidOverallBalance =
+                isOccupied &&
+                (room.unpaidBalance || 0) <= 0 &&
+                Boolean(
+                  activeReceipt &&
+                    activeReceipt.status === 'paid' &&
+                    (activeReceipt.remainingBalance || 0) <= 0
+                );
               const roomBillsCount = bills.filter(
                 (b) => b.roomId === room.id
               ).length;
@@ -259,7 +268,7 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                           </span>
                         )}
                       </div>
-                      {isOccupied && (
+                      {hasPaidOverallBalance && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -267,10 +276,10 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                             onOpenAdvanceBalanceModal(room);
                           }}
                           className="rounded-2xl bg-[#0D121B] hover:bg-[#172234] border border-emerald-500/35 p-3 sm:p-3.5 text-left transition cursor-pointer min-w-0"
-                          title="Click to Withdraw or Manage Tenant Advance Balance"
+                          title="Click to Withdraw or Manage Tenant Advance Credit"
                         >
                           <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold flex items-center justify-between gap-1">
-                            <span className="truncate">Advance Bal.</span>
+                            <span className="truncate">Advance Credit</span>
                             <Wallet className="w-3 h-3 shrink-0" />
                           </span>
                           <span className="text-sm sm:text-base font-extrabold text-emerald-400 font-mono-num mt-1 block truncate">
@@ -408,15 +417,15 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
                         </button>
                       )}
 
-                      {isOccupied && (
+                      {hasPaidOverallBalance && (
                         <button
                           type="button"
                           onClick={() => onOpenAdvanceBalanceModal(room)}
                           className="w-full px-3.5 py-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer btn-fluid"
-                          title="Withdraw or Manage Advance Balance"
+                          title="Withdraw or Manage Advance Credit"
                         >
                           <Wallet className="w-3.5 h-3.5 shrink-0" />
-                          <span>Advance Balance</span>
+                          <span>Advance Credit</span>
                         </button>
                       )}
                     </div>
@@ -478,13 +487,14 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
           </div>
         )}
       </div>
+      </div>
 
-      {/* Bottom-Right Circular Amber FAB */}
+      {/* Bottom-Right Circular Amber FAB (Anchored directly to viewport outside transformed view container) */}
       <button
         type="button"
         onClick={onOpenAddRoom}
         aria-label="Add new room"
-        className="fixed bottom-22 lg:bottom-8 right-6 z-30 w-15 h-15 sm:w-16 sm:h-16 rounded-full bg-[#F59E0B] hover:bg-[#FBBF24] active:scale-95 text-slate-950 shadow-[0_8px_28px_rgba(245,158,11,0.45)] flex items-center justify-center transition cursor-pointer btn-fluid"
+        className="fixed bottom-22 lg:bottom-8 right-6 z-40 w-15 h-15 sm:w-16 sm:h-16 rounded-full bg-[#F59E0B] hover:bg-[#FBBF24] active:scale-95 text-slate-950 shadow-[0_8px_28px_rgba(245,158,11,0.45)] flex items-center justify-center transition cursor-pointer btn-fluid"
       >
         <div className="relative">
           <Home className="w-7 h-7 text-slate-950 fill-slate-950" />
@@ -493,6 +503,6 @@ export const ManageRoomsView: React.FC<ManageRoomsViewProps> = ({
           </div>
         </div>
       </button>
-    </div>
+    </>
   );
 };

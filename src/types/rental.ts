@@ -294,8 +294,8 @@ export interface CloudSyncConfig {
 
 export interface LatePenaltyConfig {
   enabled: boolean;
-  mode: 'fixed' | 'percentage'; // Fixed Peso amount OR Percentage of chargeable rent
-  value: number | null; // Null by default (admin must configure; never hardcoded to an arbitrary rate)
+  mode: 'daily_rent' | 'fixed' | 'percentage'; // Daily divided rent (Rent / daysInMonth), Fixed Peso amount, OR Percentage of chargeable rent
+  value: number | null; // Null for daily_rent or when unconfigured
   applyPerDay?: boolean; // false = flat once starting Day 11, true = per late day starting Day 11
 }
 
@@ -309,7 +309,7 @@ export interface AppSettings {
   monthlyElectricRates?: Record<string, number>; // Independent monthly rates keyed by YYYY-MM (e.g. '2026-01': 12.50)
   defaultMonthlyRent: number;
   defaultSecurityDeposit: number;
-  latePenalty?: LatePenaltyConfig; // Configurable late payment penalty starting Day 11 of billing month
+  latePenalty?: LatePenaltyConfig; // Configurable late charges starting Day 11 of billing month
   advanceCapMode?: AdvanceCapPolicyMode; // 'unlimited' = Prepaid Wallet (default), '1_month' = Legacy 1-month cap
   remindersPromptShown: boolean;
   remindersEnabled: boolean;
@@ -317,6 +317,7 @@ export interface AppSettings {
   receiptPrintFormat: 'standard' | 'thermal80';
   privacyMaskEnabled?: boolean; // Masks tenant PII and revenue when viewing in public
   maskReceiptContacts?: boolean; // Masks tenant phone digits on exported receipts for privacy
+  updatedAt?: string; // ISO timestamp for cross-device configuration synchronization
   security: SecurityConfig;
   cloudSync: CloudSyncConfig;
 }

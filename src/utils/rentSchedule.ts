@@ -362,15 +362,16 @@ export function calculateMonthlyRentProration(
 
   const isProrated = occupiedDays !== daysInMonth;
   const monthlyCents = toCentavos(monthlyRent);
-  const exactDailyRate = daysInMonth > 0 ? monthlyRent / daysInMonth : 0;
-  const displayDailyRate = roundCurrencyCentavos(exactDailyRate);
+  const dailyRateCents =
+    daysInMonth > 0 ? Math.floor(monthlyCents / daysInMonth) : 0;
+  const displayDailyRate = fromCentavos(dailyRateCents);
 
   const chargeableCents =
     occupiedDays === daysInMonth
       ? monthlyCents
       : occupiedDays <= 0
         ? 0
-        : Math.round((monthlyCents * occupiedDays) / daysInMonth);
+        : dailyRateCents * occupiedDays;
   const chargeableRent = fromCentavos(chargeableCents);
 
   const occupancyRangeLabel =
@@ -396,10 +397,13 @@ export function calculateMonthlyRentProration(
 }
 
 /**
- * Evaluates late payment penalty strictly from the administrator's configured settings.
- * - Days 1-10 of the billing month: penalty is always ₱0.00.
- * - Starting Day 11 of the billing month: applies configured Fixed (₱) or Percentage (%) penalty.
- * - If not enabled or no value configured (null): penalty is ₱0.00 (never invents an arbitrary rate).
+ * Evaluates Late Charges starting strictly on Day 11 of the billing month:
+ * - Days 1-10 of the billing month: late charges are always ₱0.00.
+ * - Starting Day 11 of the billing month:
+ *   - 'daily_rent' (default): exact divided daily rent value (Math.floor(chargeableCents / daysInMonth))
+ *     accumulating per late day (e.g. ₱5,000 / 30 = ₱166.66 on Day 11, ₱333.32 on Day 12, etc.).
+ *   - 'fixed' or 'percentage': applies configured Fixed (₱) or Percentage (%) late charges.
+ * - If disabled or custom mode has no value configured: late charges are ₱0.00.
  */
 export function calculateLatePaymentPenalty(
   input: LatePenaltyEvaluationInput
@@ -407,13 +411,21 @@ export function calculateLatePaymentPenalty(
   const effectiveEvalDate = input.paidAt || input.referenceDate || new Date();
   const schedule = getBillingMonthSchedule(input.billingPeriod, effectiveEvalDate);
   const config = input.latePenaltyConfig;
-  const isConfigured = Boolean(
+  const chargeableCents = Math.max(0, toCentavos(input.chargeableRent));
+  const isDailyRentMode =
+    Boolean(config && config.enabled) &&
+    (config?.mode === 'daily_rent' ||
+      (config?.mode !== 'fixed' && config?.mode !== 'percentage'));
+  const hasCustomValue = Boolean(
     config &&
       config.enabled &&
       typeof config.value === 'number' &&
       Number.isFinite(config.value) &&
       config.value > 0
   );
+  const isConfigured = isDailyRentMode
+    ? chargeableCents > 0 && schedule.daysInMonth > 0
+    : hasCustomValue;
 
   if (!schedule.isPastDue) {
     return {
@@ -427,33 +439,44 @@ export function calculateLatePaymentPenalty(
     };
   }
 
-  if (!isConfigured || !config || config.value === null) {
+  if (!isConfigured || !config) {
     return {
       isLate: true,
       daysPastDue: schedule.daysPastDue,
       isConfigured: false,
       penaltyAmount: 0,
-      label: `Past Due (${schedule.daysPastDue}d past ${schedule.dueDateLabel} | No Penalty Configured in Settings)`,
+      label: `Past Due (${schedule.daysPastDue}d past ${schedule.dueDateLabel} | No Late Charges Configured in Settings)`,
       dueDate: schedule.paymentDueDate,
       lateStartDate: schedule.latePenaltyStartDate,
     };
   }
 
-  const chargeableCents = Math.max(0, toCentavos(input.chargeableRent));
-  const multiplier = config.applyPerDay ? schedule.daysPastDue : 1;
   let penaltyCents = 0;
   let descriptor = '';
 
-  if (config.mode === 'percentage') {
+  if (isDailyRentMode) {
+    const dailyChargeCents =
+      schedule.daysInMonth > 0
+        ? Math.floor(chargeableCents / schedule.daysInMonth)
+        : 0;
+    const perDay = config.applyPerDay !== false;
+    const multiplier = perDay ? schedule.daysPastDue : 1;
+    penaltyCents = dailyChargeCents * multiplier;
+    descriptor = perDay
+      ? `₱${fromCentavos(dailyChargeCents).toFixed(2)}/day x ${schedule.daysPastDue}d late (from ${schedule.lateStartLabel})`
+      : `₱${fromCentavos(dailyChargeCents).toFixed(2)} late charges (starting ${schedule.lateStartLabel})`;
+  } else if (config.mode === 'percentage' && config.value !== null) {
+    const multiplier = config.applyPerDay ? schedule.daysPastDue : 1;
     penaltyCents = Math.round(((chargeableCents * config.value) / 100) * multiplier);
     descriptor = config.applyPerDay
       ? `${config.value}%/day x ${schedule.daysPastDue}d late (from ${schedule.lateStartLabel})`
-      : `${config.value}% late penalty (starting ${schedule.lateStartLabel})`;
-  } else {
+      : `${config.value}% late charges (starting ${schedule.lateStartLabel})`;
+  } else if (config.value !== null) {
+    const multiplier = config.applyPerDay ? schedule.daysPastDue : 1;
     penaltyCents = Math.round(toCentavos(config.value) * multiplier);
     descriptor = config.applyPerDay
       ? `₱${roundCurrencyCentavos(config.value).toFixed(2)}/day x ${schedule.daysPastDue}d late (from ${schedule.lateStartLabel})`
-      : `Fixed ₱${roundCurrencyCentavos(config.value).toFixed(2)} late penalty (starting ${schedule.lateStartLabel})`;
+      : `Fixed ₱${roundCurrencyCentavos(config.value).toFixed(2)} late charges (starting ${schedule.lateStartLabel})`;
   }
 
   return {

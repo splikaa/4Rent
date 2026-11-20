@@ -75,10 +75,10 @@ function createDefaultSettings(): AppSettings {
     defaultMonthlyRent: 4500.0,
     defaultSecurityDeposit: 4500.0,
     latePenalty: {
-      enabled: false,
-      mode: 'fixed',
+      enabled: true,
+      mode: 'daily_rent',
       value: null,
-      applyPerDay: false,
+      applyPerDay: true,
     },
     advanceCapMode: 'unlimited',
     remindersPromptShown: false,
@@ -108,6 +108,7 @@ function createDefaultSettings(): AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = createDefaultSettings();
 
 const INLINE_DATA_URL_THRESHOLD = 4000;
+const _pendingImageOffloads = new Set<Promise<string>>();
 
 function fastContentHash(input: string): string {
   let hash = 0x811c9dc5;
@@ -131,7 +132,10 @@ function offloadImageValue(
   }
   const safeScope = scopeId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const key = `idb:meter:${safeScope}_${fastContentHash(val)}`;
-  void saveMeterMasterImage(key, val);
+  const p = saveMeterMasterImage(key, val).finally(() => {
+    _pendingImageOffloads.delete(p);
+  });
+  _pendingImageOffloads.add(p);
   return key;
 }
 
@@ -428,21 +432,33 @@ export function loadSettings(): AppSettings {
         : rawCode;
 
     const rawPenalty = parsed.latePenalty;
+    const isUntouchedLegacyPenalty =
+      rawPenalty &&
+      typeof rawPenalty === 'object' &&
+      rawPenalty.enabled === false &&
+      rawPenalty.mode === 'fixed' &&
+      (rawPenalty.value === null || rawPenalty.value === undefined) &&
+      !rawPenalty.applyPerDay;
     const normalizedLatePenalty =
-      rawPenalty && typeof rawPenalty === 'object'
+      rawPenalty && typeof rawPenalty === 'object' && !isUntouchedLegacyPenalty
         ? {
             enabled: Boolean(rawPenalty.enabled),
             mode:
               rawPenalty.mode === 'percentage'
                 ? ('percentage' as const)
-                : ('fixed' as const),
+                : rawPenalty.mode === 'fixed'
+                ? ('fixed' as const)
+                : ('daily_rent' as const),
             value:
               typeof rawPenalty.value === 'number' &&
               Number.isFinite(rawPenalty.value) &&
               rawPenalty.value >= 0
                 ? rawPenalty.value
                 : null,
-            applyPerDay: Boolean(rawPenalty.applyPerDay),
+            applyPerDay:
+              rawPenalty.applyPerDay === undefined
+                ? true
+                : Boolean(rawPenalty.applyPerDay),
           }
         : defaults.latePenalty;
 
@@ -1105,7 +1121,7 @@ export function migrateDatabaseIfNeeded(): {
 
 export function exportDatabaseSnapshot(): AppDatabaseSnapshot {
   return {
-    version: '1.1.0',
+    version: '1.0.1',
     schemaVersion: CURRENT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     rooms: loadRooms(),
@@ -1279,6 +1295,9 @@ export async function flushMasterIndexedDbNow(): Promise<void> {
   if (_idbPersistTimer) {
     clearTimeout(_idbPersistTimer);
     _idbPersistTimer = null;
+  }
+  if (_pendingImageOffloads.size > 0) {
+    await Promise.allSettled(Array.from(_pendingImageOffloads));
   }
   const snap = exportDatabaseSnapshot();
   await saveSnapshotToIndexedDb(snap);

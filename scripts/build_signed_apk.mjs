@@ -7,7 +7,10 @@ const rootDir = resolve('.');
 const baseTemplatePath = join(rootDir, 'mobile_app', 'base-template.apk');
 const fallbackBaseApkPath = join(rootDir, 'mobile_app', 'build', 'app', 'outputs', 'flutter-apk', 'app-release.apk');
 const baseApkPath = existsSync(baseTemplatePath) ? baseTemplatePath : fallbackBaseApkPath;
-const keystorePath = join(rootDir, 'mobile_app', '4rent-release-key.jks');
+const keystorePath = process.env.ANDROID_KEYSTORE_PATH
+  ? resolve(process.env.ANDROID_KEYSTORE_PATH)
+  : join(rootDir, 'mobile_app', '4rent-release-key.jks');
+const keystorePassword = process.env.ANDROID_KEYSTORE_PASSWORD;
 const distDir = join(rootDir, 'dist');
 const publicDir = join(rootDir, 'public');
 
@@ -15,7 +18,10 @@ if (!existsSync(baseApkPath)) {
   throw new Error(`[4Rent APK Signer] Base APK not found at: ${baseApkPath}`);
 }
 if (!existsSync(keystorePath)) {
-  throw new Error(`[4Rent APK Signer] Keystore not found at: ${keystorePath}`);
+  throw new Error(`[4Rent APK Signer] Keystore not found at: ${keystorePath}. Set ANDROID_KEYSTORE_PATH.`);
+}
+if (!keystorePassword) {
+  throw new Error('[4Rent APK Signer] ANDROID_KEYSTORE_PASSWORD environment variable is required to sign the release APK.');
 }
 
 console.log('[4Rent APK Signer] Loading base Android binary artifacts from:', baseApkPath);
@@ -224,7 +230,15 @@ console.log('[4Rent APK Signer] Packing compiled assets from dist/ into assets/w
 function addDirRecursive(dirPath, zipPrefix) {
   const entries = readdirSync(dirPath);
   for (const entry of entries) {
-    if (entry.endsWith('.apk')) continue;
+    if (
+      entry.endsWith('.apk') ||
+      entry.endsWith('.exe') ||
+      entry.endsWith('.zip') ||
+      entry.endsWith('.command') ||
+      entry === 'packages'
+    ) {
+      continue;
+    }
     const fullPath = join(dirPath, entry);
     const stat = statSync(fullPath);
     if (stat.isDirectory()) {
@@ -383,7 +397,7 @@ console.log(`[4Rent APK Signer] Unsigned aligned archive size: ${unsignedApkByte
 // 3. Load official release signing key from JKS
 console.log('[4Rent APK Signer] Loading release key from JKS:', keystorePath);
 const keystoreBytes = new Uint8Array(readFileSync(keystorePath));
-const { privateKey, certificate } = await convertToPEM(keystoreBytes, '4rent2026', 'jks');
+const { privateKey, certificate } = await convertToPEM(keystoreBytes, keystorePassword, 'jks');
 
 if (!privateKey || !certificate) {
   throw new Error('Failed to extract private key or certificate from JKS.');
@@ -405,12 +419,12 @@ console.log(`[4Rent APK Signer] Successfully signed! Total APK size: ${signedApk
 
 // 5. Output to package destination and distribution endpoints
 const outputTargets = [
-  join(rootDir, 'packages', 'mobile', '4Rent-v1.0.0-release.apk'),
-  join(rootDir, '4Rent-v1.0.0-release.apk'),
-  join(rootDir, 'public', '4Rent-v1.0.0-release.apk'),
-  join(rootDir, 'dist', '4Rent-v1.0.0-release.apk'),
-  join(rootDir, 'public', 'packages', 'mobile', '4Rent-v1.0.0-release.apk'),
-  join(rootDir, 'dist', 'packages', 'mobile', '4Rent-v1.0.0-release.apk'),
+  join(rootDir, 'packages', 'mobile', '4Rent-v1.0.1-release.apk'),
+  join(rootDir, '4Rent-v1.0.1-release.apk'),
+  join(rootDir, 'public', '4Rent-v1.0.1-release.apk'),
+  join(rootDir, 'dist', '4Rent-v1.0.1-release.apk'),
+  join(rootDir, 'public', 'packages', 'mobile', '4Rent-v1.0.1-release.apk'),
+  join(rootDir, 'dist', 'packages', 'mobile', '4Rent-v1.0.1-release.apk'),
 ];
 
 for (const target of outputTargets) {

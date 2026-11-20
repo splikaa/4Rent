@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTrademark("4Rent")]
 [assembly: AssemblyCulture("")]
 [assembly: ComVisible(false)]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 
 namespace FourRent.Launcher
 {
@@ -88,7 +88,7 @@ namespace FourRent.Launcher
 
             // Subtitle
             Label lblSub = new Label();
-            lblSub.Text = "Standalone Desktop Host • Chromium Client v1.1.0";
+            lblSub.Text = "Standalone Desktop Host • Chromium Client v1.0.1";
             lblSub.UseMnemonic = false;
             lblSub.Font = new Font("Segoe UI", 9f, FontStyle.Regular);
             lblSub.ForeColor = Color.FromArgb(148, 163, 184);
@@ -579,9 +579,9 @@ namespace FourRent.Launcher
             try
             {
                 string exeDir = AppDomain.CurrentDomain.BaseDirectory;
-                string candidate1 = Path.Combine(exeDir, "..\\mobile\\4Rent-v1.0.0-release.apk");
-                string candidate2 = Path.Combine(exeDir, "packages\\mobile\\4Rent-v1.0.0-release.apk");
-                string candidate3 = Path.Combine(exeDir, "4Rent-v1.0.0-release.apk");
+                string candidate1 = Path.Combine(exeDir, "..\\mobile\\4Rent-v1.0.1-release.apk");
+                string candidate2 = Path.Combine(exeDir, "packages\\mobile\\4Rent-v1.0.1-release.apk");
+                string candidate3 = Path.Combine(exeDir, "4Rent-v1.0.1-release.apk");
 
                 string target = File.Exists(candidate1) ? candidate1 : (File.Exists(candidate2) ? candidate2 : candidate3);
                 if (File.Exists(target))
@@ -592,7 +592,7 @@ namespace FourRent.Launcher
                 }
                 else
                 {
-                    Process.Start("https://splikaa.github.io/4Rent/4Rent-v1.0.0-release.apk");
+                    Process.Start("https://splikaa.github.io/4Rent/4Rent-v1.0.1-release.apk");
                     lblStatus.Text = "Status: Opened online Mobile App (.APK) direct download link.";
                     lblStatus.ForeColor = Color.FromArgb(52, 211, 153);
                 }

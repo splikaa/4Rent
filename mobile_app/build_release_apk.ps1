@@ -135,11 +135,11 @@ $mobilePkgDir = "$rootDir\packages\mobile"
 if (-not (Test-Path $mobilePkgDir)) {
   New-Item -ItemType Directory -Force -Path $mobilePkgDir | Out-Null
 }
-Copy-Item "$finalApk" "$mobilePkgDir\4Rent-v1.0.0-release.apk" -Force
+Copy-Item "$finalApk" "$mobilePkgDir\4Rent-v1.0.1-release.apk" -Force
 if (Test-Path "$rootDir\dist") {
-  Copy-Item "$finalApk" "$rootDir\dist\4Rent-v1.0.0-release.apk" -Force
+  Copy-Item "$finalApk" "$rootDir\dist\4Rent-v1.0.1-release.apk" -Force
 }
 
 $sizeMB = [math]::Round((Get-Item $finalApk).Length / 1MB, 2)
 Write-Host "Built build\app\outputs\flutter-apk\app-release.apk ($sizeMB MB)." -ForegroundColor Green
-Write-Host "Distributed to: $mobilePkgDir\4Rent-v1.0.0-release.apk" -ForegroundColor Green
+Write-Host "Distributed to: $mobilePkgDir\4Rent-v1.0.1-release.apk" -ForegroundColor Green

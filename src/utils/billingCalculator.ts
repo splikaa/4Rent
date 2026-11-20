@@ -16,7 +16,7 @@ import {
   roundKwh,
   toCentavos,
 } from './financialEngine';
-import { getBillingMonthSchedule } from './rentSchedule';
+import { getBillingMonthSchedule, normalizeBillingMonthKey } from './rentSchedule';
 
 export interface OcrVerificationResult {
   rawReading: number;
@@ -373,47 +373,7 @@ export function roundCurrency(value: number): number {
  * into a canonical local "YYYY-MM" key.
  */
 export function normalizeMonthKey(periodOrDate?: string | Date): string {
-  if (periodOrDate instanceof Date) {
-    const safe = Number.isNaN(periodOrDate.getTime()) ? new Date() : periodOrDate;
-    return `${safe.getFullYear()}-${String(safe.getMonth() + 1).padStart(2, '0')}`;
-  }
-
-  const trimmed = (periodOrDate || '').trim();
-  const ymExactMatch = trimmed.match(/^(\d{4})-(\d{2})$/);
-  if (ymExactMatch) {
-    return `${ymExactMatch[1]}-${ymExactMatch[2]}`;
-  }
-
-  if (trimmed) {
-    // Parse full ISO timestamps first in local time so UTC midnight offsets don't shift months
-    if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
-      const parsedIso = new Date(trimmed);
-      if (!Number.isNaN(parsedIso.getTime())) {
-        return `${parsedIso.getFullYear()}-${String(parsedIso.getMonth() + 1).padStart(2, '0')}`;
-      }
-    }
-
-    const ymPrefixMatch = trimmed.match(/^(\d{4})-(\d{2})/);
-    if (ymPrefixMatch) {
-      return `${ymPrefixMatch[1]}-${ymPrefixMatch[2]}`;
-    }
-
-    const parsedFromLabel = new Date(`1 ${trimmed}`);
-    if (!Number.isNaN(parsedFromLabel.getTime())) {
-      const y = parsedFromLabel.getFullYear();
-      const m = String(parsedFromLabel.getMonth() + 1).padStart(2, '0');
-      return `${y}-${m}`;
-    }
-    const parsedIso = new Date(trimmed);
-    if (!Number.isNaN(parsedIso.getTime())) {
-      const y = parsedIso.getFullYear();
-      const m = String(parsedIso.getMonth() + 1).padStart(2, '0');
-      return `${y}-${m}`;
-    }
-  }
-
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return normalizeBillingMonthKey(periodOrDate);
 }
 
 export function getAdjacentMonthKey(monthKey: string, offsetMonths: number): string {
@@ -1154,7 +1114,7 @@ export function formatMessengerBillSummary(
     `🏠 *${apartmentName || 'Rental Management'} • Statement & Receipt*`,
     `Receipt #: ${bill.receiptNo} (${seal})`,
     `Unit: *${bill.roomName}* • Tenant: ${bill.tenantName}`,
-    `Billing Month: *${bill.billingPeriod}* • Due Date: *${schedule.dueDateLabel}* (Payment Period: 1st-10th; Late Penalty starts ${schedule.lateStartLabel})`,
+    `Billing Month: *${bill.billingPeriod}* • Due Date: *${schedule.dueDateLabel}* (Payment Period: 1st-10th; Late Charges start ${schedule.lateStartLabel})`,
     `────────────────────`,
     `⚡ *MONTHLY ELECTRIC RATE BREAKDOWN (${billMonthKey.split('-')[0]} YTD)*`,
     ...rateLines,
@@ -1171,7 +1131,7 @@ export function formatMessengerBillSummary(
       ? `• Monthly Rent: ${formatPeso(bill.monthlyRentFull)} → Prorated (${bill.occupiedDays}/${bill.daysInBillingMonth} days): ${formatPeso(bill.baseRent)}`
       : `• Monthly Rent (${bill.billingPeriod}): ${formatPeso(bill.baseRent)}`,
     ...(bill.latePenalty && bill.latePenalty > 0
-      ? [`• Late Payment Penalty: ${formatPeso(bill.latePenalty)}${bill.latePenaltyLabel ? ` (${bill.latePenaltyLabel})` : ''}`]
+      ? [`• Late Charges: ${formatPeso(bill.latePenalty)}${bill.latePenaltyLabel ? ` (${bill.latePenaltyLabel})` : ''}`]
       : []),
     `• Electricity (${bill.consumptionKwh.toFixed(1)} kWh): ${formatPeso(bill.electricTotal)}`,
   ];
@@ -1211,7 +1171,7 @@ export function formatMessengerBillSummary(
   lines.push(`• Remaining Balance: *${formatPeso(bill.remainingBalance)}*`);
   if (compBalances.rentRemaining > 0 || compBalances.electricityRemaining > 0 || compBalances.latePenaltyRemaining > 0) {
     lines.push(
-      `• Breakdown Unpaid: Rent ${formatPeso(compBalances.rentRemaining)} | Electricity ${formatPeso(compBalances.electricityRemaining)}${compBalances.latePenaltyRemaining > 0 ? ` | Late Penalty ${formatPeso(compBalances.latePenaltyRemaining)}` : ''}`
+      `• Breakdown Unpaid: Rent ${formatPeso(compBalances.rentRemaining)} | Electricity ${formatPeso(compBalances.electricityRemaining)}${compBalances.latePenaltyRemaining > 0 ? ` | Late Charges ${formatPeso(compBalances.latePenaltyRemaining)}` : ''}`
     );
   }
   if ((bill.advanceBalanceAfter ?? 0) > 0) {
@@ -1228,7 +1188,7 @@ export function formatMessengerBillSummary(
   }
 
   lines.push(`• Status: ${statusLabel}`);
-  lines.push(`Payment Period: 1st-10th (Late Penalty starts 11th) | 4Rent Management System`);
+  lines.push(`Payment Period: 1st-10th (Late Charges start 11th) | 4Rent Management System`);
   return lines.join('\n');
 }
 
@@ -1284,7 +1244,7 @@ export function getCalendarMeterScanEligibility(
       canScan: true,
       reason: 'late_period',
       buttonLabel: 'Scan Meter & Bill (Late)',
-      helperText: `Past ${schedule.dueDateLabel} (${schedule.daysPastDue}d late). Applicable late penalty starts ${schedule.lateStartLabel}.`,
+      helperText: `Past ${schedule.dueDateLabel} (${schedule.daysPastDue}d late). Applicable late charges start ${schedule.lateStartLabel}.`,
     };
   }
 

@@ -36,6 +36,7 @@ import {
   exportDatabaseSnapshot,
   importDatabaseSnapshot,
   loadAuditLogs,
+  saveSettings,
 } from '../../services/storageService';
 import {
   generatePropertyCode,
@@ -254,6 +255,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setStatusBanner(null);
 
     try {
+      // Only stamp a fresh updatedAt and persist form before syncing if the user edited configuration fields in Settings
+      const stripVolatileSettings = (s: AppSettings) => ({
+        apartmentName: s.apartmentName,
+        landlordName: s.landlordName,
+        landlordPhone: s.landlordPhone,
+        landlordMessenger: s.landlordMessenger,
+        paymentInstructions: s.paymentInstructions,
+        defaultElectricRate: s.defaultElectricRate,
+        monthlyElectricRates: s.monthlyElectricRates || {},
+        defaultMonthlyRent: s.defaultMonthlyRent,
+        defaultSecurityDeposit: s.defaultSecurityDeposit,
+        latePenalty: s.latePenalty,
+        advanceCapMode: s.advanceCapMode,
+        receiptPrintFormat: s.receiptPrintFormat,
+        maskReceiptContacts: s.maskReceiptContacts,
+      });
+      const hasUnsavedConfigEdits =
+        JSON.stringify(stripVolatileSettings(form)) !==
+        JSON.stringify(stripVolatileSettings(settings));
+      if (hasUnsavedConfigEdits) {
+        saveSettings({
+          ...form,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      // Manual Sync button click should always attempt the cloud request even if the browser/WebView
+      // online indicator lags right after turning on Wi-Fi or Mobile Data.
       const result = await applyPropertyCodeAndSync({
         previousCode: committedPropertyCode,
         targetCloudSync: {
@@ -262,8 +291,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           provider: 'firebase',
           propertyCode: targetCode,
         },
-        isOnline: net.isOnline,
-        networkLabel: net.label,
+        isOnline: true,
+        networkLabel: net.isOnline ? net.label : 'Wi-Fi / Mobile Data',
         isMobile,
         mobileLock,
       });
@@ -377,39 +406,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
     }
 
-    // Validate configurable late payment penalty (never invent/hardcode an arbitrary penalty rate)
+    // Validate configurable late charges (supports automatic daily_rent or custom fixed/percentage)
     const currentPenalty = form.latePenalty || {
-      enabled: false,
-      mode: 'fixed' as const,
+      enabled: true,
+      mode: 'daily_rent' as const,
       value: null,
-      applyPerDay: false,
+      applyPerDay: true,
     };
     const trimmedPenalty = latePenaltyValueDraft.trim();
     let parsedPenaltyValue: number | null = null;
-    if (trimmedPenalty !== '') {
+    if (currentPenalty.mode !== 'daily_rent' && trimmedPenalty !== '') {
       const num = Number(trimmedPenalty);
       if (!Number.isFinite(num) || num < 0) {
-        nextErrors.latePenaltyValue = 'Enter a valid non-negative penalty value.';
+        nextErrors.latePenaltyValue = 'Enter a valid non-negative late charges value.';
       } else if (currentPenalty.mode === 'percentage' && num > 100) {
-        nextErrors.latePenaltyValue = 'Percentage penalty cannot exceed 100%.';
+        nextErrors.latePenaltyValue = 'Percentage late charges cannot exceed 100%.';
       } else {
         parsedPenaltyValue = roundCurrency(num);
       }
     }
 
-    if (currentPenalty.enabled) {
+    if (currentPenalty.enabled && currentPenalty.mode !== 'daily_rent') {
       if (parsedPenaltyValue === null || parsedPenaltyValue <= 0) {
         nextErrors.latePenaltyValue =
           currentPenalty.mode === 'percentage'
-            ? 'Enter a penalty percentage greater than 0 (e.g., 5) or disable late penalty.'
-            : 'Enter a fixed penalty amount greater than ₱0 (e.g., 200) or disable late penalty.';
+            ? 'Enter a late charges percentage greater than 0 (e.g., 5) or switch to Daily Divided Rent.'
+            : 'Enter a fixed late charges amount greater than ₱0 (e.g., 200) or switch to Daily Divided Rent.';
       }
     }
 
     if (Object.keys(nextErrors).length > 0) {
       setValidationErrors(nextErrors);
       setStatusBanner(
-        'Please fix the highlighted rate or penalty fields before saving.'
+        'Please fix the highlighted rate or late charges fields before saving.'
       );
       return;
     }
@@ -422,8 +451,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       monthlyElectricRates: nextMonthlyRates,
       latePenalty: {
         ...currentPenalty,
-        value: parsedPenaltyValue,
+        value: currentPenalty.mode === 'daily_rent' ? null : parsedPenaltyValue,
       },
+      updatedAt: new Date().toISOString(),
       cloudSync: {
         ...form.cloudSync,
         propertyCode: resolveConfiguredPropertyCode(form.cloudSync?.propertyCode),
@@ -454,16 +484,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
    */
   const handleApplyMobilePropertyCode = async () => {
     if (!isMobile) return;
-    if (mobileLock.isLockedThisMonth) {
-      setStatusBanner(
-        `Monthly limit reached: code already applied this month. Next change opens ${mobileLock.nextEligibleMonthLabel}.`
-      );
-      return;
-    }
-
     const nextCode = normalizePropertyCode(mobileCodeDraft);
     if (nextCode.length < 4) {
       setStatusBanner('Enter a valid Property Space Code (at least 4 characters).');
+      return;
+    }
+    if (mobileLock.isLockedThisMonth && nextCode !== committedPropertyCode) {
+      setStatusBanner(
+        `Monthly limit reached: code already applied this month. Next change opens ${mobileLock.nextEligibleMonthLabel}.`
+      );
       return;
     }
 
@@ -571,7 +600,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             Settings & Sync
           </h1>
           <p className="text-[11px] text-slate-400">
-            {networkInfo.label} • v1.0.0
+            {networkInfo.label} • v1.0.1
           </p>
         </div>
         <div className="w-10" />
@@ -905,16 +934,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Monthly Payment Schedule & Configurable Late Payment Penalty */}
+          {/* Monthly Payment Schedule & Configurable Late Charges */}
           <div className="pt-4 border-t border-[#232F44] space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
                   <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Monthly Rent Payment Schedule &amp; Late Penalty</span>
+                  <span>Monthly Rent Payment Schedule &amp; Late Charges</span>
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                  Payment Period: <span className="text-slate-200 font-semibold">1st - 10th of each billing month</span>. Late penalties start on the <span className="text-amber-300 font-semibold">11th day</span>. Active cycle: {currentBillingSchedule.billingPeriodLabel} (Due {currentBillingSchedule.dueDateLabel}).
+                  Payment Period: <span className="text-slate-200 font-semibold">1st - 10th of each billing month</span>. Late charges start on the <span className="text-amber-300 font-semibold">11th day</span>. Active cycle: {currentBillingSchedule.billingPeriodLabel} (Due {currentBillingSchedule.dueDateLabel}).
                 </p>
               </div>
               <label className="inline-flex items-center gap-2 cursor-pointer select-none px-3 py-1.5 rounded-xl bg-[#0D121B] border border-[#263248]">
@@ -926,9 +955,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     setForm((prev) => ({
                       ...prev,
                       latePenalty: {
-                        mode: prev.latePenalty?.mode || 'fixed',
+                        mode: prev.latePenalty?.mode || 'daily_rent',
                         value: prev.latePenalty?.value ?? null,
-                        applyPerDay: Boolean(prev.latePenalty?.applyPerDay),
+                        applyPerDay: prev.latePenalty?.applyPerDay ?? true,
                         enabled,
                       },
                     }));
@@ -943,8 +972,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 />
                 <span className="text-xs font-bold text-white">
                   {form.latePenalty?.enabled
-                    ? 'Late Penalty Enabled'
-                    : 'Late Penalty Off'}
+                    ? 'Late Charges Enabled'
+                    : 'Late Charges Off'}
                 </span>
               </label>
             </div>
@@ -953,25 +982,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                    Penalty Type
+                    Late Charges Type
                   </label>
                   <select
-                    value={form.latePenalty?.mode || 'fixed'}
+                    value={form.latePenalty?.mode || 'daily_rent'}
                     onChange={(e) => {
                       const mode =
-                        e.target.value === 'percentage' ? 'percentage' : 'fixed';
+                        e.target.value === 'percentage'
+                          ? 'percentage'
+                          : e.target.value === 'fixed'
+                          ? 'fixed'
+                          : 'daily_rent';
                       setForm((prev) => ({
                         ...prev,
                         latePenalty: {
                           enabled: Boolean(prev.latePenalty?.enabled),
-                          value: prev.latePenalty?.value ?? null,
-                          applyPerDay: Boolean(prev.latePenalty?.applyPerDay),
+                          value: mode === 'daily_rent' ? null : (prev.latePenalty?.value ?? null),
+                          applyPerDay:
+                            mode === 'daily_rent'
+                              ? true
+                              : Boolean(prev.latePenalty?.applyPerDay),
                           mode,
                         },
                       }));
                     }}
                     className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs font-semibold text-white focus:border-amber-500 focus:outline-none"
                   >
+                    <option value="daily_rent">Daily Divided Rent (Rent ÷ Days)</option>
                     <option value="fixed">Fixed Amount (₱)</option>
                     <option value="percentage">Percentage of Rent (%)</option>
                   </select>
@@ -979,36 +1016,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                    {(form.latePenalty?.mode || 'fixed') === 'percentage'
-                      ? 'Penalty Percentage (%)'
-                      : 'Penalty Amount (₱)'}
+                    {(form.latePenalty?.mode || 'daily_rent') === 'daily_rent'
+                      ? 'Daily Divided Formula'
+                      : (form.latePenalty?.mode || 'fixed') === 'percentage'
+                      ? 'Late Charges Percentage (%)'
+                      : 'Late Charges Amount (₱)'}
                   </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder={
-                      (form.latePenalty?.mode || 'fixed') === 'percentage'
-                        ? 'Set % (e.g., 5)'
-                        : 'Set ₱ (e.g., 200)'
-                    }
-                    value={latePenaltyValueDraft}
-                    onChange={(e) => {
-                      const next = sanitizeDecimalInput(e.target.value);
-                      if (next === null) return;
-                      setLatePenaltyValueDraft(next);
-                      setValidationErrors((prev) => {
-                        if (!prev.latePenaltyValue) return prev;
-                        const copy = { ...prev };
-                        delete copy.latePenaltyValue;
-                        return copy;
-                      });
-                    }}
-                    className={`w-full h-9 rounded-xl bg-[#131B29] border px-3 text-xs font-bold text-amber-400 font-mono-num focus:outline-none ${
-                      validationErrors.latePenaltyValue
-                        ? 'border-red-500/80 focus:border-red-400'
-                        : 'border-[#263248] focus:border-amber-500'
-                    }`}
-                  />
+                  {(form.latePenalty?.mode || 'daily_rent') === 'daily_rent' ? (
+                    <div className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 flex items-center text-xs font-bold text-amber-400 font-mono-num">
+                      Rent ÷ Days in Month / day
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder={
+                        (form.latePenalty?.mode || 'fixed') === 'percentage'
+                          ? 'Set % (e.g., 5)'
+                          : 'Set ₱ (e.g., 200)'
+                      }
+                      value={latePenaltyValueDraft}
+                      onChange={(e) => {
+                        const next = sanitizeDecimalInput(e.target.value);
+                        if (next === null) return;
+                        setLatePenaltyValueDraft(next);
+                        setValidationErrors((prev) => {
+                          if (!prev.latePenaltyValue) return prev;
+                          const copy = { ...prev };
+                          delete copy.latePenaltyValue;
+                          return copy;
+                        });
+                      }}
+                      className={`w-full h-9 rounded-xl bg-[#131B29] border px-3 text-xs font-bold text-amber-400 font-mono-num focus:outline-none ${
+                        validationErrors.latePenaltyValue
+                          ? 'border-red-500/80 focus:border-red-400'
+                          : 'border-[#263248] focus:border-amber-500'
+                      }`}
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -1016,14 +1061,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     Charging Frequency (From Day 11)
                   </label>
                   <select
-                    value={form.latePenalty?.applyPerDay ? 'per_day' : 'flat'}
+                    value={form.latePenalty?.applyPerDay !== false ? 'per_day' : 'flat'}
                     onChange={(e) => {
                       const applyPerDay = e.target.value === 'per_day';
                       setForm((prev) => ({
                         ...prev,
                         latePenalty: {
                           enabled: Boolean(prev.latePenalty?.enabled),
-                          mode: prev.latePenalty?.mode || 'fixed',
+                          mode: prev.latePenalty?.mode || 'daily_rent',
                           value: prev.latePenalty?.value ?? null,
                           applyPerDay,
                         },
@@ -1031,8 +1076,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     }}
                     className="w-full h-9 rounded-xl bg-[#131B29] border border-[#263248] px-3 text-xs font-semibold text-white focus:border-amber-500 focus:outline-none"
                   >
-                    <option value="flat">One-Time Penalty (Day 11+)</option>
                     <option value="per_day">Per Late Day (starting Day 11)</option>
+                    <option value="flat">One-Time Charge (Day 11+)</option>
                   </select>
                 </div>
               </div>
@@ -1043,13 +1088,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </p>
               ) : (
                 <p className="text-[11px] text-slate-400 leading-snug">
-                  {form.latePenalty?.enabled && latePenaltyValueDraft.trim()
-                    ? `Starting on the 11th of the billing month, late rent incurs ${
-                        (form.latePenalty?.mode || 'fixed') === 'percentage'
-                          ? `${latePenaltyValueDraft}% of chargeable rent`
-                          : `₱${latePenaltyValueDraft}`
-                      }${form.latePenalty?.applyPerDay ? ' per late day' : ' (one-time)'}.`
-                    : 'No late penalty rate is hardcoded. Configure your own fixed amount or percentage above and enable it when ready.'}
+                  {form.latePenalty?.enabled
+                    ? (form.latePenalty?.mode || 'daily_rent') === 'daily_rent'
+                      ? 'Starting on Day 11 of the billing month, each late day adds the exact divided daily rent value (e.g. ₱5,000 ÷ 30 days = ₱166.66 on Day 11, ₱333.32 on Day 12).'
+                      : latePenaltyValueDraft.trim()
+                      ? `Starting on the 11th of the billing month, late rent incurs ${
+                          (form.latePenalty?.mode || 'fixed') === 'percentage'
+                            ? `${latePenaltyValueDraft}% of chargeable rent`
+                            : `₱${latePenaltyValueDraft}`
+                        }${form.latePenalty?.applyPerDay ? ' per late day' : ' (one-time)'}.`
+                      : 'Configure your late charges value above.'
+                    : 'Late charges are currently turned off.'}
                 </p>
               )}
             </div>
@@ -1420,7 +1469,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       ? mobileCodeDraft
                       : form.cloudSync.propertyCode ?? ''
                   }
-                  disabled={isMobile && (mobileLock.isLockedThisMonth || isApplyingMobileCode)}
+                  disabled={isMobile && isApplyingMobileCode}
                   onChange={(e) => {
                     const nextVal = normalizePropertyCode(e.target.value);
                     if (isMobile) {
@@ -1465,7 +1514,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <button
                     type="button"
                     onClick={handleApplyMobilePropertyCode}
-                    disabled={mobileLock.isLockedThisMonth || isApplyingMobileCode}
+                    disabled={isApplyingMobileCode}
                     className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:cursor-not-allowed"
                   >
                     <RefreshCw
@@ -1835,7 +1884,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           ) : (
             /* Visitor Web Downloads (Filtered by platform) */
-            <div className={`grid grid-cols-1 ${isMobile ? 'md:grid-cols-1 max-w-xl' : 'md:grid-cols-2'} gap-4`}>
+            <div className={`grid grid-cols-1 ${isMobile ? 'md:grid-cols-1 max-w-xl' : 'md:grid-cols-3'} gap-4`}>
               {/* Windows EXE Box (Hidden on Mobile phones) */}
               {!isMobile && (
                 <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4.5 flex flex-col justify-between gap-4">
@@ -1895,6 +1944,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               )}
 
+              {/* macOS Desktop App Box (Hidden on Mobile phones — Zero Node.js / Zero CLI) */}
+              {!isMobile && (
+                <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4.5 flex flex-col justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Laptop className="w-4 h-4 text-sky-400" />
+                        <span className="font-extrabold text-sm text-white">
+                          macOS Desktop App
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-sky-500/15 border border-sky-500/30 text-sky-300">
+                        .APP / .ZIP
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Native macOS bundle (<code className="text-sky-300">4Rent.app</code>) with 1-click Applications installer &amp; Retina icon. Zero Node.js or CLI required.
+                    </p>
+                    <div className="text-[11px] font-mono text-slate-400 truncate">
+                      File: <span className="text-sky-300">4Rent-Desktop-macOS.zip</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2 border-t border-[#1C2536]">
+                    <a
+                      href={`${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}/Install-4Rent-macOS.command`}
+                      download="Install-4Rent-macOS.command"
+                      className="px-3 py-2 rounded-xl bg-[#162031] hover:bg-[#1E2B42] border border-sky-500/35 text-sky-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <span>1-Click Setup</span>
+                    </a>
+
+                    <a
+                      href={`${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}/4Rent-Desktop-macOS.zip`}
+                      download="4Rent-Desktop-macOS.zip"
+                      className="flex-1 py-2 px-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-sky-500/20 transition cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download macOS</span>
+                    </a>
+                  </div>
+                </div>
+              )}
+
               {/* Mobile App APK Box */}
               <div className="rounded-2xl bg-[#0D121B] border border-[#243047] p-4.5 flex flex-col justify-between gap-4">
                 <div className="space-y-2">
@@ -1913,7 +2006,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     Live Sub-Meter camera scanner with 1-tap Messenger receipt sharing.
                   </p>
                   <div className="text-[11px] font-mono text-slate-400 truncate">
-                    File: <span className="text-emerald-400">4Rent-v1.0.0-release.apk</span>
+                    File: <span className="text-emerald-400">4Rent-v1.0.1-release.apk</span>
                   </div>
                 </div>
 
@@ -1922,7 +2015,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     type="button"
                     onClick={async () => {
                       const baseUrl = window.location.origin + window.location.pathname.replace(/\/+$/, '');
-                      await navigator.clipboard.writeText(`${baseUrl}/4Rent-v1.0.0-release.apk`);
+                      await navigator.clipboard.writeText(`${baseUrl}/4Rent-v1.0.1-release.apk`);
                       setCopiedApkDirect(true);
                       setTimeout(() => setCopiedApkDirect(false), 2400);
                     }}
@@ -1942,8 +2035,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </button>
 
                   <a
-                    href={`${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}/4Rent-v1.0.0-release.apk`}
-                    download="4Rent-v1.0.0-release.apk"
+                    href={`${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}/4Rent-v1.0.1-release.apk`}
+                    download="4Rent-v1.0.1-release.apk"
                     className="flex-1 py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 transition cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />

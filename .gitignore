@@ -6,10 +6,12 @@ release/
 *.local
 *.tsbuildinfo
 
-# Environment Variables
+# Environment Variables & Signing Keys
 .env
 .env.*
 !.env.example
+*.jks
+*.keystore
 
 # Editor & OS Files
 .vscode/

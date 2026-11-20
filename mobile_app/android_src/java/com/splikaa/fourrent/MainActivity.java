@@ -839,8 +839,8 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 if (webView != null) {
-                    String safeMsg = message != null ? message.replace("'", "\\'") : "";
-                    String js = "if (window.__onAndroidBiometricResult) { window.__onAndroidBiometricResult(" + ok + ", '" + safeMsg + "'); }";
+                    String quotedMsg = org.json.JSONObject.quote(message != null ? message : "");
+                    String js = "if (window.__onAndroidBiometricResult) { window.__onAndroidBiometricResult(" + ok + ", " + quotedMsg + "); }";
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                         webView.evaluateJavascript(js, null);
                     } else {

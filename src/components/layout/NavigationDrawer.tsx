@@ -259,7 +259,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
       <div className="py-5 px-5 text-center text-xs font-medium text-slate-400 border-t border-[#1E2636] space-y-1 bg-[#0E131D]/60">
         <div className="inline-flex items-center gap-1.5 font-extrabold text-amber-400">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span>4Rent v1.0.0</span>
+          <span>4Rent v1.0.1</span>
         </div>
         <div className="text-[11px] text-slate-400">
           4Rent Management System • by splikaa

@@ -123,6 +123,12 @@ export async function applyPropertyCodeAndSync(
   }
 
   const pullRes = await d.pull(baseTargetCloudSync);
+  const localSnapBeforeSwitch = d.exportSnapshot();
+  const hasLocalUnsyncedData =
+    (localSnapBeforeSwitch.rooms && localSnapBeforeSwitch.rooms.length > 0) ||
+    (localSnapBeforeSwitch.bills && localSnapBeforeSwitch.bills.length > 0);
+  const shouldMergeLocalOnSwitch =
+    Boolean(params.isMobile) && hasLocalUnsyncedData;
 
   if (codeChanged) {
     const mobileMonthPatch =
@@ -139,6 +145,31 @@ export async function applyPropertyCodeAndSync(
         ...mobileMonthPatch,
         lastSyncedAt: pullRes.updatedAt || new Date().toISOString(),
       };
+      if (shouldMergeLocalOnSwitch) {
+        const mergedSnap = d.mergeSnapshots(localSnapBeforeSwitch, pullRes.snapshot);
+        mergedSnap.settings = {
+          ...mergedSnap.settings,
+          cloudSync: nextCloudSync,
+        };
+        d.importSnapshot(mergedSnap, { preserveLocalSecurity: true });
+        const pushMergedRes = await d.push(nextCloudSync, mergedSnap);
+        const syncedCloud: AppSettings['cloudSync'] = pushMergedRes.ok
+          ? { ...nextCloudSync, lastSyncedAt: pushMergedRes.syncedAt }
+          : nextCloudSync;
+        d.updateCloudSync?.(syncedCloud);
+        d.clearPending();
+        if (params.isMobile && params.mobileLock?.currentMonthKey) {
+          d.saveMobileMonth?.(params.mobileLock.currentMonthKey);
+        }
+        return {
+          ok: true,
+          mode: 'switched-existing',
+          message: `Connected to "${nextCode}". Merged and pushed offline Mobile rooms and configurations to cloud.`,
+          appliedCloudSync: syncedCloud,
+          requiresReload: true,
+          dataChanged: true,
+        };
+      }
       await d.applyClean(pullRes.snapshot, nextCloudSync);
       if (params.isMobile && params.mobileLock?.currentMonthKey) {
         d.saveMobileMonth?.(params.mobileLock.currentMonthKey);
@@ -159,7 +190,11 @@ export async function applyPropertyCodeAndSync(
         ...mobileMonthPatch,
         lastSyncedAt: undefined,
       };
-      await d.resetWorkspace(initialCloudSync);
+      if (!shouldMergeLocalOnSwitch) {
+        await d.resetWorkspace(initialCloudSync);
+      } else {
+        d.updateCloudSync?.(initialCloudSync);
+      }
       const freshSnap: AppDatabaseSnapshot = d.exportSnapshot();
       const pushRes = await d.push(initialCloudSync, freshSnap);
       const finalCloudSync: AppSettings['cloudSync'] = pushRes.ok
@@ -219,8 +254,8 @@ export async function applyPropertyCodeAndSync(
       mode: 'merged-same-code',
       message: `Synced "${nextCode}" via ${params.networkLabel} at ${new Date().toLocaleTimeString()}.`,
       appliedCloudSync: syncedCloudSync,
-      requiresReload: didImportMerged,
-      dataChanged: didImportMerged,
+      requiresReload: true,
+      dataChanged: true,
     };
   }
 

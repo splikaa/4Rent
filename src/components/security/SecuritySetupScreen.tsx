@@ -246,7 +246,7 @@ export const SecuritySetupScreen: React.FC<SecuritySetupScreenProps> = ({
         </div>
         <span className="text-[10px] text-slate-500 flex items-center gap-1">
           <ShieldCheck className="w-3 h-3 text-emerald-400" />
-          4Rent Management System v1.0.0 • RA 10173 Data Privacy Protected
+          4Rent Management System v1.0.1 • RA 10173 Data Privacy Protected
         </span>
       </div>
     </div>

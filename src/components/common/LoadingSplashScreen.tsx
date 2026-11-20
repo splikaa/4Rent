@@ -54,7 +54,7 @@ export const LoadingSplashScreen: React.FC<LoadingSplashScreenProps> = ({
       <div className="w-full max-w-sm flex items-center justify-center pt-2">
         <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-[#131B2B] border border-[#24324B] text-[11px] font-bold text-amber-400 tracking-wide">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span>4Rent Management System • v1.0.0</span>
+          <span>4Rent Management System • v1.0.1</span>
         </span>
       </div>
 

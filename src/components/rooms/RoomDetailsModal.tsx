@@ -113,6 +113,14 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
     ? Math.max(0, room.securityDepositPaid || 0)
     : 0;
   const safeAdvance = isOccupied ? Math.max(0, room.advanceRent || 0) : 0;
+  const hasPaidOverallBalance =
+    isOccupied &&
+    (room.unpaidBalance || 0) <= 0 &&
+    Boolean(
+      activeBill &&
+        activeBill.status === 'paid' &&
+        (activeBill.remainingBalance || 0) <= 0
+    );
   const monthPayStatus = isOccupied
     ? getRoomMonthlyPaymentStatus(room, roomBills)
     : null;
@@ -383,8 +391,8 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 <p className="text-[11px] text-slate-300 leading-snug">
                   {isOccupied
                     ? billingSchedule.isPastDue
-                      ? `1st–10th Period Ended • Late Penalty Window (${billingSchedule.daysPastDue}d past 10th)`
-                      : 'Payment Period: 1st–10th • Late penalty starts on Day 11'
+                      ? `1st–10th Period Ended • Late Charges Window (${billingSchedule.daysPastDue}d past 10th)`
+                      : 'Payment Period: 1st–10th • Late charges start on Day 11'
                     : 'Monthly schedule: 1st–10th payment period (late starts Day 11)'}
                 </p>
                 {isOccupied && rentSummary && (
@@ -396,7 +404,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     )}
                     {rentSummary.latePenalty > 0 && (
                       <div className="text-rose-300 font-semibold font-mono-num">
-                        Late Penalty: {formatPeso(rentSummary.latePenalty)}
+                        Late Charges: {formatPeso(rentSummary.latePenalty)}
                       </div>
                     )}
                     <div
@@ -418,9 +426,9 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             {/* Primary Action Buttons Row: Strong Hierarchy & Responsive Alignment */}
             <div
               className={`mt-4 pt-4 border-t border-[#1C263A] grid grid-cols-1 ${
-                isOccupied && activeBill
+                hasPaidOverallBalance && activeBill
                   ? 'sm:grid-cols-3'
-                  : isOccupied || activeBill
+                  : hasPaidOverallBalance || activeBill
                   ? 'sm:grid-cols-2'
                   : 'sm:grid-cols-1'
               } gap-2 sm:gap-2.5`}
@@ -448,14 +456,14 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 </button>
               )}
 
-              {isOccupied && (
+              {hasPaidOverallBalance && (
                 <button
                   type="button"
                   onClick={() => onOpenAdvanceModal(room)}
                   className="w-full h-11 flex items-center justify-center gap-2 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 font-bold text-xs border border-emerald-500/30 cursor-pointer transition btn-fluid"
                 >
                   <Wallet className="w-4 h-4 shrink-0" />
-                  <span>Add / Withdraw Advance</span>
+                  <span>Advance Credit</span>
                 </button>
               )}
             </div>

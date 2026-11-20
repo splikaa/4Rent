@@ -367,7 +367,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   {isMobile ? 'Get 4Rent Mobile App' : 'Get 4Rent Desktop & Mobile Apps'}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold">
-                  {isMobile ? '.APK' : 'v1.1.0'}
+                  {isMobile ? '.APK' : 'v1.0.1'}
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-300 mt-1">
@@ -494,6 +494,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               const safeAdvance = isOccupied
                 ? Math.max(0, room.advanceRent || 0)
                 : 0;
+              const hasPaidOverallBalance =
+                isOccupied &&
+                (room.unpaidBalance || 0) <= 0 &&
+                Boolean(
+                  activeReceipt &&
+                    activeReceipt.status === 'paid' &&
+                    (activeReceipt.remainingBalance || 0) <= 0
+                );
 
               return (
                 <div
@@ -586,7 +594,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                       <div
                         className={`rounded-2xl bg-[#0D121B] border border-[#202B40] p-3 flex flex-col justify-between ${
-                          isOccupied ? '' : 'col-span-2'
+                          hasPaidOverallBalance ? '' : 'col-span-2'
                         }`}
                       >
                         <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block leading-snug">
@@ -605,7 +613,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </div>
                       </div>
 
-                      {isOccupied && (
+                      {hasPaidOverallBalance && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -613,10 +621,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             onOpenAdvanceBalanceModal(room);
                           }}
                           className="rounded-2xl bg-[#0D121B] hover:bg-[#162235] border border-emerald-500/35 p-3 text-left transition cursor-pointer"
-                          title="Manage or withdraw tenant advance balance"
+                          title="Manage or withdraw tenant advance credit"
                         >
                           <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold flex items-center justify-between">
-                            <span>Advance Bal.</span>
+                            <span>Advance Credit</span>
                             <Wallet className="w-3 h-3" />
                           </span>
                           <span className="text-sm font-extrabold text-emerald-400 font-mono-num mt-1 block">

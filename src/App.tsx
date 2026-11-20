@@ -544,6 +544,7 @@ export function App() {
           setInquiries(loadInquiries());
           setTenantHistory(loadTenantHistory());
           setMonthlyReadings(loadMonthlyReadings());
+          setSettings(loadSettings());
         }
       );
       return () => {
@@ -558,16 +559,19 @@ export function App() {
     settings.cloudSync.propertyCode,
   ]);
 
-  // Automatic Desktop <-> Mobile Cloud Sync when window gains focus
+  // Automatic Desktop <-> Mobile Bidirectional Cloud Sync when window gains focus, device reconnects from Offline to Online, or pending offline changes exist
   useEffect(() => {
-    const syncFromCloudOnFocus = async () => {
-      if (isCloudConfigured(settings.cloudSync)) {
+    let wasOnline = getNetworkStatus().isOnline;
+    let isSyncInFlight = false;
+
+    const syncBidirectionalWithCloud = async () => {
+      if (isSyncInFlight || !isCloudConfigured(settings.cloudSync)) return;
+      isSyncInFlight = true;
+      try {
+        const localBefore = exportDatabaseSnapshot();
         const res = await pullSnapshotFromCloud(settings.cloudSync);
         if (res.ok && res.snapshot) {
-          const merged = mergeDatabaseSnapshots(
-            exportDatabaseSnapshot(),
-            res.snapshot
-          );
+          const merged = mergeDatabaseSnapshots(localBefore, res.snapshot);
           importDatabaseSnapshot(merged, { preserveLocalSecurity: true });
           clearPendingCloudApply();
           setRooms(loadRooms());
@@ -575,19 +579,87 @@ export function App() {
           setInquiries(loadInquiries());
           setTenantHistory(loadTenantHistory());
           setMonthlyReadings(loadMonthlyReadings());
+          setSettings(loadSettings());
+          // Push merged snapshot back to Firebase only when offline changes are pending or merged state differs from remote
+          const hasPendingOffline = (() => {
+            try {
+              return localStorage.getItem('4rent_pending_offline_sync') === 'true';
+            } catch {
+              return false;
+            }
+          })();
+          const remoteRoomKeys = new Set(
+            (res.snapshot.rooms || []).map((r) => `${r.id}:${r.updatedAt || ''}`)
+          );
+          const remoteBillKeys = new Set(
+            (res.snapshot.bills || []).map((b) => `${b.id}:${b.updatedAt || ''}`)
+          );
+          const hasLocalDiffFromRemote =
+            hasPendingOffline ||
+            merged.rooms.length !== (res.snapshot.rooms || []).length ||
+            merged.bills.length !== (res.snapshot.bills || []).length ||
+            merged.rooms.some((r) => !remoteRoomKeys.has(`${r.id}:${r.updatedAt || ''}`)) ||
+            merged.bills.some((b) => !remoteBillKeys.has(`${b.id}:${b.updatedAt || ''}`)) ||
+            (merged.settings?.updatedAt || '') !==
+              (res.snapshot.settings?.updatedAt || '');
+          if (hasLocalDiffFromRemote) {
+            const pushRes = await pushSnapshotToCloud(settings.cloudSync, merged);
+            if (pushRes.ok) {
+              try {
+                localStorage.removeItem('4rent_pending_offline_sync');
+              } catch {}
+            }
+          }
+        } else if (res.notFound) {
+          const pushRes = await pushSnapshotToCloud(settings.cloudSync, localBefore);
+          if (pushRes.ok) {
+            try {
+              localStorage.removeItem('4rent_pending_offline_sync');
+            } catch {}
+          }
         }
+      } finally {
+        isSyncInFlight = false;
       }
     };
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        syncFromCloudOnFocus();
+        void syncBidirectionalWithCloud();
       }
     };
+    const handleOnline = () => {
+      wasOnline = true;
+      void syncBidirectionalWithCloud();
+    };
+    if (isHydrated) {
+      void syncBidirectionalWithCloud();
+    }
+    // Poll network transitions & pending offline queue every 4s so Android WebView quick-settings Wi-Fi/Data toggles sync automatically
+    const pollTimer = setInterval(() => {
+      const netNow = getNetworkStatus();
+      const hasPendingOffline = (() => {
+        try {
+          return localStorage.getItem('4rent_pending_offline_sync') === 'true';
+        } catch {
+          return false;
+        }
+      })();
+      if (netNow.isOnline && (!wasOnline || hasPendingOffline)) {
+        void syncBidirectionalWithCloud();
+      }
+      wasOnline = netNow.isOnline;
+    }, 4000);
+
     window.addEventListener('visibilitychange', handleVisibility);
-    return () =>
+    window.addEventListener('online', handleOnline);
+    return () => {
+      clearInterval(pollTimer);
       window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnline);
+    };
   }, [
+    isHydrated,
     settings.cloudSync.enabled,
     settings.cloudSync.provider,
     settings.cloudSync.firebaseProjectId,
@@ -626,9 +698,30 @@ export function App() {
   }, [monthlyReadings, isHydrated]);
 
   const triggerOptionalCloudSync = () => {
+    try {
+      localStorage.setItem('4rent_pending_offline_sync', 'true');
+    } catch {}
     if (isCloudConfigured(settings.cloudSync)) {
-      setTimeout(() => {
-        pushSnapshotToCloud(settings.cloudSync, exportDatabaseSnapshot());
+      setTimeout(async () => {
+        const localSnap = exportDatabaseSnapshot();
+        const pullRes = await pullSnapshotFromCloud(settings.cloudSync);
+        let snapToPush = localSnap;
+        if (pullRes.ok && pullRes.snapshot) {
+          snapToPush = mergeDatabaseSnapshots(localSnap, pullRes.snapshot);
+          importDatabaseSnapshot(snapToPush, { preserveLocalSecurity: true });
+          setRooms(loadRooms());
+          setBills(loadBills());
+          setInquiries(loadInquiries());
+          setTenantHistory(loadTenantHistory());
+          setMonthlyReadings(loadMonthlyReadings());
+          setSettings(loadSettings());
+        }
+        const pushRes = await pushSnapshotToCloud(settings.cloudSync, snapToPush);
+        if (pushRes.ok) {
+          try {
+            localStorage.removeItem('4rent_pending_offline_sync');
+          } catch {}
+        }
       }, 200);
     }
   };
@@ -1963,27 +2056,31 @@ export function App() {
 
   const handleUpdateSettings = (nextSettings: AppSettings) => {
     try {
+      const stampedSettings: AppSettings = {
+        ...nextSettings,
+        updatedAt: new Date().toISOString(),
+      };
       const ratesChanged =
-        nextSettings.defaultElectricRate !== settings.defaultElectricRate ||
-        JSON.stringify(nextSettings.monthlyElectricRates || {}) !==
+        stampedSettings.defaultElectricRate !== settings.defaultElectricRate ||
+        JSON.stringify(stampedSettings.monthlyElectricRates || {}) !==
           JSON.stringify(settings.monthlyElectricRates || {});
 
       let updatedCount = 0;
       if (ratesChanged) {
-        updatedCount = applySettingsAndRecalculateBills(nextSettings);
+        updatedCount = applySettingsAndRecalculateBills(stampedSettings);
       } else {
-        setSettings(nextSettings);
+        setSettings(stampedSettings);
       }
 
       const activeMonthRate = getElectricRateForPeriod(
-        nextSettings,
+        stampedSettings,
         new Date().toISOString()
       );
       triggerFeedback(
         'System Settings Saved',
         updatedCount > 0
           ? `Electric Rate ₱${activeMonthRate.toFixed(2)}/kWh applied to ${updatedCount} active receipt(s). Previous applied receipts remain unchanged.`
-          : `Current Month Rate: ₱${activeMonthRate.toFixed(2)}/kWh • Default Rent: ₱${nextSettings.defaultMonthlyRent.toLocaleString('en-PH')}.`,
+          : `Current Month Rate: ₱${activeMonthRate.toFixed(2)}/kWh • Default Rent: ₱${stampedSettings.defaultMonthlyRent.toLocaleString('en-PH')}.`,
         'success',
         'Back to Dashboard',
         () => setActiveTab('dashboard')
@@ -2009,6 +2106,7 @@ export function App() {
     const nextSettings: AppSettings = {
       ...settings,
       monthlyElectricRates: nextMonthlyRates,
+      updatedAt: new Date().toISOString(),
     };
     const updatedCount = applySettingsAndRecalculateBills(nextSettings);
     appendAuditLog(
